@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "skills": {
+    "ai-prompt-engineering-safety-review": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "computedHash": "81bf64d383cb7a6c06d252f6b1097c40a161b1968b05204fffeacc395fda1ae9"
+    },
+    "ai-sdk": {
+      "source": "vercel/ai",
+      "sourceType": "github",
+      "computedHash": "58ce68f628890c3925aea2b5435a649251ac182057541045c68fc19a27aaa0ec"
+    },
+    "ask-questions-if-underspecified": {
+      "source": "trailofbits/skills",
+      "sourceType": "github",
+      "computedHash": "7178ae6d25b054d311eee5abf947bc988e79d5ea0ae1d349f32d7a490493f525"
+    },
+    "bun": {
+      "source": "itechmeat/llm-code",
+      "sourceType": "github",
+      "computedHash": "c0a450a33f5095141ed1e2b6973881cbf1359207529661a7768cc57a7ab812d8"
+    },
+    "fastapi": {
+      "source": "itechmeat/llm-code",
+      "sourceType": "github",
+      "computedHash": "9fac7209416559509b6ba7e5b88c7ad91404e1b4251fa0977e304845b5a6aab2"
+    },
+    "gemini-api-dev": {
+      "source": "google-gemini/gemini-skills",
+      "sourceType": "github",
+      "computedHash": "a1bc395530ba9116a4509e27321eaf7cc81c5f93aa80a4778ad6f915180b4f2c"
+    },
+    "gemini-interactions-api": {
+      "source": "google-gemini/gemini-skills",
+      "sourceType": "github",
+      "computedHash": "f0d51f45c0075be383a0891d239865223cab6cad63d88fde8f859e70c161ed34"
+    },
+    "gemini-live-api-dev": {
+      "source": "google-gemini/gemini-skills",
+      "sourceType": "github",
+      "computedHash": "cf4ef3b9c9a331f0507357d78fb570b4bdee3010dfd2fb40b3ee3b25269fd3c1"
+    },
+    "next-best-practices": {
+      "source": "vercel-labs/next-skills",
+      "sourceType": "github",
+      "computedHash": "515ba75178bd44875812d9a560bdf14651f86709f89cf1d4f209638e879807f3"
+    },
+    "next-cache-components": {
+      "source": "vercel-labs/next-skills",
+      "sourceType": "github",
+      "computedHash": "a94b83ddcd2ff1c30722577f693b1bfe32f2e1a83abdd6c08c2d6cc6753b53c8"
+    },
+    "postgresql": {
+      "source": "itechmeat/llm-code",
+      "sourceType": "github",
+      "computedHash": "b86b6ee1964bfa1cd6a85b15d1c95f7600881dc642e1ab085627d1da6baa0a78"
+    },
+    "pretty-mermaid": {
+      "source": "imxv/preety-mermaid-skills",
+      "sourceType": "github",
+      "computedHash": "7c490ca8cac54a6038dcf31cb5f5472ff1c982e7352763ebb54e5387349529a6"
+    },
+    "prompt-engineering": {
+      "source": "inferen-sh/skills",
+      "sourceType": "github",
+      "computedHash": "f577bd86f62dcd0cba96fdc330efb05a3626179a1dc8e6cd405d4b857712e0b3"
+    },
+    "pydantic-ai": {
+      "source": "itechmeat/llm-code",
+      "sourceType": "github",
+      "computedHash": "5f83208c9bca08db8dd15149b7aea5b969c0bb2fe32117565c383107f52d1b16"
+    },
+    "qdrant": {
+      "source": "itechmeat/llm-code",
+      "sourceType": "github",
+      "computedHash": "23f15e07b83e15526a025d60a430fb11f11fe94f8b1b584ab8cd0d56b89f6cb0"
+    },
+    "react-testing-library": {
+      "source": "itechmeat/llm-code",
+      "sourceType": "github",
+      "computedHash": "643bb2bffa527953f48bcd54fba4ff5666f7b2b0bdd40f158441510412bbe232"
+    },
+    "ui-ux-pro-max": {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill",
+      "sourceType": "github",
+      "computedHash": "0a413bf988d06481f69bb81df2070741c3ba12dd9f1be2706d57f259c905992d"
+    },
+    "vercel-composition-patterns": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "computedHash": "f98931159fa9c7fed043bcd18a891a46dcf89ababa38df13a4c5b7b30dc0ce07"
+    },
+    "vercel-react-best-practices": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "computedHash": "afeca00ac2f492d88fdd010e73d91719a5b57c564bb4a73325b0bd77e11323ab"
+    },
+    "vite": {
+      "source": "itechmeat/llm-code",
+      "sourceType": "github",
+      "computedHash": "c767031c2ca56dfd455a4007bf2e872be73a8306eb8a88eb6bee99dd6021f516"
+    },
+    "vitest": {
+      "source": "itechmeat/llm-code",
+      "sourceType": "github",
+      "computedHash": "a6237a0c61b5c81d398978bf460b13fad326eb79040785a6cdb65bd6f31df64f"
+    },
+    "web-design-guidelines": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "computedHash": "a6a44d5498f7e8f68289902f3dedfc6f38ae0cee1e96527c80724cf27f727c2a"
+    }
+  }
+}

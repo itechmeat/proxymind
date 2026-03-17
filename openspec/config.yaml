@@ -1,0 +1,57 @@
+schema: spec-driven
+
+context: |
+  ProxyMind — self-hosted open-source digital twin. One instance = one twin.
+
+  Before creating any artifact, read:
+  - docs/about.md — product vision
+  - docs/spec.md — tools, versions (single source of truth for all versions), contracts
+  - docs/architecture.md — system architecture, data flows, API contracts
+
+  Read when relevant to the change:
+  - docs/rag.md — RAG pipeline, chunking, retrieval, enrichment
+  - docs/agent.md — persona file configuration
+  - docs/plan.md — stories (each story = one OpenSpec change)
+
+  Key invariants:
+  - All code and docs in English
+  - Multilingual product (English default, configurable per installation)
+  - docs/spec.md is the single source of truth for tool versions — never duplicate
+  - From phase 2 onward, every stable implemented story SHOULD be covered by tests before archive
+  - After implementation: verify all installed package versions are ≥ minimums in docs/spec.md
+  - Three system circuits: dialogue, knowledge, operational (see architecture.md)
+  - Git policy: never commit without explicit user permission
+
+  Note: this config governs artifact generation only. Workflow enforcement
+  (post-implementation test review, post-archive checklist, commit proposals,
+  version checks) is in CLAUDE.md and AGENTS.md.
+
+rules:
+  proposal:
+    - Read docs/plan.md and identify which story this change implements
+    - Include a "Story" section at the top with story ID (e.g., S1-01) and verification criteria
+    - Keep concise — 1 page max
+    - Focus on WHY and WHAT, not HOW
+    - For stories outside phase 1, state which stable behavior must be covered by tests
+  specs:
+    - Reference the story ID from the proposal
+    - Follow patterns from docs/spec.md
+    - Use SHALL/MUST for normative requirements
+    - Every requirement MUST have at least one testable scenario
+    - Distinguish CI tests (deterministic) from evals (real models)
+    - For stories outside phase 1, state what stable behavior MUST be covered by tests before archive
+  design:
+    - Reference the story ID from the proposal
+    - Read docs/architecture.md — state which parts are affected and which remain unchanged
+    - Follow existing patterns (3 circuits, service layer, data flow conventions)
+    - Include Mermaid diagrams where they clarify the design
+    - Reference docs/rag.md for RAG-related changes
+    - When behavior or interfaces change, describe the intended testing approach and boundaries
+  tasks:
+    - Reference the story verification criteria from docs/plan.md
+    - Break into small tasks completable in one session
+    - Include both implementation and test tasks
+    - Order by dependency
+    - For stories outside phase 1, add explicit test tasks for stable implemented behavior before archive
+    - After core implementation, add a test coverage review task that proposes what still needs tests using relevant repo skills when applicable
+    - Include a final task: verify installed package versions against docs/spec.md
