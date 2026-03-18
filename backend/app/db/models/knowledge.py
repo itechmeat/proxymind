@@ -28,6 +28,7 @@ from app.db.models.enums import (
 )
 
 if TYPE_CHECKING:
+    from app.db.models.background_task import BackgroundTask
     from app.db.models.core import CatalogItem
 
 
@@ -62,6 +63,7 @@ class Source(
 
     catalog_item: Mapped[CatalogItem | None] = relationship(back_populates="sources")
     documents: Mapped[list[Document]] = relationship(back_populates="source")
+    background_tasks: Mapped[list[BackgroundTask]] = relationship(back_populates="source")
 
 
 class Document(PrimaryKeyMixin, TenantMixin, TimestampMixin, Base):

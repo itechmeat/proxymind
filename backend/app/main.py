@@ -2,13 +2,18 @@ from contextlib import asynccontextmanager
 
 import httpx
 import structlog
+from arq import create_pool
+from arq.connections import RedisSettings
 from fastapi import FastAPI
+from minio import Minio
 from redis.asyncio import Redis
 
+from app.api.admin import router as admin_router
 from app.api.health import router as health_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db import create_database_engine, create_session_factory
+from app.services import StorageService
 
 
 @asynccontextmanager
@@ -22,8 +27,26 @@ async def lifespan(app: FastAPI):
     app.state.session_factory = create_session_factory(db_engine)
     app.state.redis_client = Redis.from_url(settings.redis_url)
     app.state.http_client = httpx.AsyncClient(timeout=5.0)
+    app.state.storage_service = StorageService(
+        Minio(
+            endpoint=f"{settings.minio_host}:{settings.minio_port}",
+            access_key=settings.minio_root_user,
+            secret_key=settings.minio_root_password,
+            secure=False,
+        ),
+        settings.minio_bucket_sources,
+    )
+    await app.state.storage_service.ensure_bucket()
+    app.state.arq_pool = await create_pool(
+        RedisSettings(host=settings.redis_host, port=settings.redis_port)
+    )
     logger.info("app.startup", log_level=settings.log_level)
     yield
+    try:
+        await app.state.arq_pool.close()
+    except Exception as error:
+        logger.error("app.shutdown.arq_pool_close_failed", error=str(error))
+
     try:
         await app.state.http_client.aclose()
     except Exception as error:
@@ -43,4 +66,5 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="ProxyMind API", version="0.1.0", lifespan=lifespan)
+app.include_router(admin_router)
 app.include_router(health_router)

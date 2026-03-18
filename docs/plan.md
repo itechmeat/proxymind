@@ -31,7 +31,7 @@ Phase outcome: the project starts, all services run, API responds.
 
 Phase outcome: minimal working product. Upload a Markdown file → get a snapshot → ask a question → see an answer.
 
-- [ ] **S2-01: Upload source**
+- [x] **S2-01: Upload source**
       `POST /api/admin/sources` — accept file (Markdown/TXT) + metadata. File → MinIO, metadata → PostgreSQL, task → Redis queue.
   - **Outcome:** a file can be uploaded via API and is persisted
   - **Verification:** `curl -F file=@doc.md /api/admin/sources` → 202 + task_id; file in MinIO; record in PG

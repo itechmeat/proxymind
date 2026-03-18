@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, PrimaryKeyMixin, TimestampMixin
+from app.db.models.background_task import BackgroundTask
 from app.db.models.enums import BatchOperationType, BatchStatus, pg_enum
 
 
@@ -52,3 +53,6 @@ class BatchJob(PrimaryKeyMixin, TimestampMixin, Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+__all__ = ["AuditLog", "BackgroundTask", "BatchJob"]

@@ -23,6 +23,7 @@ EXPECTED_TABLES = {
     "agents",
     "audit_logs",
     "batch_jobs",
+    "background_tasks",
     "catalog_items",
     "chunks",
     "document_versions",

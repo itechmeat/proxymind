@@ -25,10 +25,12 @@ class Settings(BaseSettings):
     minio_port: int = Field(default=9000, ge=1, le=65535)
     minio_root_user: str = Field(min_length=1)
     minio_root_password: str = Field(min_length=1)
+    minio_bucket_sources: str = Field(default="sources", min_length=1)
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     log_level: str = "info"
+    upload_max_file_size_mb: int = Field(default=50, ge=1)
 
     model_config = SettingsConfigDict(
         env_file=(

@@ -98,6 +98,26 @@ services:
       retries: 10
       start_period: 20s
 
+  worker:
+    build:
+      context: ./backend
+    command:
+      - python
+      - -m
+      - app.workers.run
+    env_file:
+      - .env
+      - ./backend/.env
+    environment:
+      SKIP_MIGRATIONS: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres-data:
   qdrant-data:
