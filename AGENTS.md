@@ -20,10 +20,13 @@ All project work is managed through OpenSpec. Each story from `docs/plan.md` = o
 
 After completing implementation (`/opsx:apply`), you MUST:
 
-1. Verify all installed package versions are not below minimums in `docs/spec.md`.
-2. Run CI tests and confirm they pass.
-3. For stories outside Phase 1, review stable implemented behavior and ensure it is covered by tests before considering the change complete.
-4. If test coverage is missing or weak, propose and add the missing tests based on the most relevant repo skills (for example `vitest`, `react-testing-library`, `fastapi`, `postgresql`, `property-based-testing`) before archive.
+1. Before writing code, read `docs/development.md` and treat it as the binding implementation standard.
+2. Before considering the change complete, re-read `docs/development.md` and self-review the change against it.
+3. In the final apply report, explicitly state that the pre-code read and post-code self-review against `docs/development.md` were completed.
+4. Verify all installed package versions are not below minimums in `docs/spec.md`.
+5. Run CI tests and confirm they pass.
+6. For stories outside Phase 1, review stable implemented behavior and ensure it is covered by tests before considering the change complete.
+7. If test coverage is missing or weak, propose and add the missing tests based on the most relevant repo skills (for example `vitest`, `react-testing-library`, `fastapi`, `postgresql`, `property-based-testing`) before archive.
 
 ### Post-archive checklist (after archiving)
 

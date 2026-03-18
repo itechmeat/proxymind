@@ -86,6 +86,11 @@
       "sourceType": "github",
       "computedHash": "0a413bf988d06481f69bb81df2070741c3ba12dd9f1be2706d57f259c905992d"
     },
+    "userinterface-wiki": {
+      "source": "raphaelsalaja/userinterface-wiki",
+      "sourceType": "github",
+      "computedHash": "7bd58aa2aaf874dd421b18700ee688b02ce72276612d7115ad6849d4878e115e"
+    },
     "vercel-composition-patterns": {
       "source": "vercel-labs/agent-skills",
       "sourceType": "github",
