@@ -16,6 +16,11 @@
       "sourceType": "github",
       "computedHash": "7178ae6d25b054d311eee5abf947bc988e79d5ea0ae1d349f32d7a490493f525"
     },
+    "async-jobs": {
+      "source": "yonatangross/orchestkit",
+      "sourceType": "github",
+      "computedHash": "c36f1f9c6d4f0d658216b16ba5246ed26f92cc1ea4ee7328b99e2075448618d2"
+    },
     "bun": {
       "source": "itechmeat/llm-code",
       "sourceType": "github",
@@ -40,6 +45,11 @@
       "source": "google-gemini/gemini-skills",
       "sourceType": "github",
       "computedHash": "cf4ef3b9c9a331f0507357d78fb570b4bdee3010dfd2fb40b3ee3b25269fd3c1"
+    },
+    "minio": {
+      "source": "vm0-ai/vm0-skills",
+      "sourceType": "github",
+      "computedHash": "1baf227ca684fc8ef9f4b12ca08dd145aaf56c46002dec2bc3f29acdf9aef7be"
     },
     "next-best-practices": {
       "source": "vercel-labs/next-skills",

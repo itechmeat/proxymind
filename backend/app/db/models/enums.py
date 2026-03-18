@@ -122,3 +122,15 @@ class BatchStatus(StrEnum):
     COMPLETE = "complete"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+class BackgroundTaskType(StrEnum):
+    INGESTION = "INGESTION"
+
+
+class BackgroundTaskStatus(StrEnum):
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    COMPLETE = "COMPLETE"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
