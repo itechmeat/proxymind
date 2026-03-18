@@ -227,7 +227,7 @@ Before submitting code, verify:
 - [ ] Can this code be changed safely in the next story?
 - [ ] Would another developer understand this code without asking me?
 - [ ] Are there tests for the meaningful behavior introduced?
-- [ ] Are there any mocks outside of `tests/`?
+- [ ] Are there any mocks outside `tests/`?
 - [ ] Are there any fallbacks to stubs or dead code?
 - [ ] Are all stubs linked to a specific story in `docs/plan.md`?
 - [ ] Do all dependencies come from lock files?

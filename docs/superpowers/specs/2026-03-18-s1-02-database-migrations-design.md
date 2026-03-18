@@ -51,7 +51,7 @@
 
 **Decision:** `alembic upgrade head` runs in the Docker entrypoint before `uvicorn` starts. Not inside application lifespan.
 
-**Why:** Clean separation — migrations are an infrastructure concern, not application logic. No race conditions (unlike running migrations in lifespan when multiple replicas start). Standard pattern: `alembic upgrade head && exec uvicorn ...`.
+**Why:** Clean separation — migrations are an infrastructure concern, not application logic. No race conditions (unlike running migrations in lifespan when multiple replicas start). The entrypoint must complete the migration step before uvicorn starts, and it may retry briefly while PostgreSQL becomes ready.
 
 ### 6. Seed agent via Alembic data migration
 
@@ -81,7 +81,7 @@
 
 All paths relative to `backend/`:
 
-```
+```text
 backend/
   app/db/
     __init__.py
@@ -99,9 +99,9 @@ backend/
     env.py                  # async-aware, imports Base.metadata + all models
     versions/
       001_initial_schema.py     # all 12 tables
-      002_seed_agent.py         # default agent insert
+      002_seed_default_agent.py # default agent insert
   alembic.ini
-  entrypoint.sh             # alembic upgrade head && exec uvicorn/arq
+  entrypoint.sh             # retries migrations, then exec uvicorn
 ```
 
 ## Models
@@ -177,7 +177,7 @@ backend/
 - snapshot_id — which snapshot was active at session creation (audit)
 - status (enum: active/closed)
 - message_count — denormalized counter
-- channel (enum: web/api/telegram/facebook/vk/instagram/tiktok) — defaults to web
+- channel (enum values: `web`, `api`, `telegram`, `facebook`, `vk`, `instagram`, `tiktok`; includes TikTok) — defaults to web
 - channel_metadata — JSONB, nullable, for connector-specific data
 - Visitor identity provision: visitor_id (nullable UUID), external_user_id (nullable string), channel_connector (nullable string). Pair (channel_connector, external_user_id) is the stable lookup key for implicit provisioning per spec. All nullable — web chat is anonymous.
 
@@ -283,7 +283,8 @@ The existing Dockerfile currently copies only `app/` and starts uvicorn directly
 ### entrypoint.sh
 
 `backend/entrypoint.sh`:
-- `alembic upgrade head && exec uvicorn app.main:app`
+- runs `alembic upgrade head` before uvicorn starts
+- retries the migration step a bounded number of times for short PostgreSQL startup delays
 - The entrypoint is designed for the api service only in S1-02. Worker mode will be added in S2-01 when the arq worker runtime is introduced.
 
 ### docker-compose.yml changes

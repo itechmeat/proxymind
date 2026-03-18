@@ -9,7 +9,7 @@ import pytest
 import pytest_asyncio
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import event, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from testcontainers.postgres import PostgresContainer
 
@@ -88,20 +88,11 @@ def session_factory(db_engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
 async def db_session(db_engine: AsyncEngine) -> AsyncSession:
     async with db_engine.connect() as connection:
         transaction = await connection.begin()
-        await connection.begin_nested()
-
-        session = AsyncSession(bind=connection, expire_on_commit=False)
-
-        @event.listens_for(session.sync_session, "after_transaction_end")
-        def restart_savepoint(session_: object, trans: object) -> None:
-            parent = getattr(trans, "_parent", None)
-            is_outermost_nested = getattr(trans, "nested", False) and not getattr(
-                parent,
-                "nested",
-                False,
-            )
-            if is_outermost_nested:
-                connection.sync_connection.begin_nested()
+        session = AsyncSession(
+            bind=connection,
+            expire_on_commit=False,
+            join_transaction_mode="create_savepoint",
+        )
 
         try:
             yield session

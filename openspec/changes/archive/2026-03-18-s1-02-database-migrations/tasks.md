@@ -34,7 +34,7 @@
 
 ## 6. Docker Integration
 
-- [x] 6.1 Create `backend/entrypoint.sh` — `alembic upgrade head && exec uvicorn app.main:app` (api mode only, no worker mode)
+- [x] 6.1 Create `backend/entrypoint.sh` — run migrations before uvicorn with bounded retry (api mode only, no worker mode)
 - [x] 6.2 Update `backend/Dockerfile` — COPY `migrations/`, `alembic.ini`, `entrypoint.sh`; `RUN chmod +x entrypoint.sh`; update ENTRYPOINT/CMD to use entrypoint.sh
 - [x] 6.3 Update `docker-compose.yml` — api service uses new entrypoint; NO worker service added (deferred to S2-01)
 - [x] 6.4 Verify `docker-compose up` with empty volumes — all 12 tables created, `/health` returns 200, `/ready` returns 200

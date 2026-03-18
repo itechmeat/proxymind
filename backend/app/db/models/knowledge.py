@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, ForeignKey, Integer, String, Text, text
+from sqlalchemy import BigInteger, ForeignKey, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import (
@@ -18,6 +18,7 @@ from app.db.base import (
 from app.db.models.enums import (
     ChunkStatus,
     DocumentStatus,
+    DocumentVersionStatus,
     ProcessingPath,
     SnapshotStatus,
     SourceStatus,
@@ -79,6 +80,13 @@ class Document(PrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
 
 class DocumentVersion(PrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "document_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id",
+            "version_number",
+            name="uq_document_versions_document_id_version_number",
+        ),
+    )
 
     document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("documents.id"), nullable=False)
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -87,8 +95,8 @@ class DocumentVersion(PrimaryKeyMixin, TimestampMixin, Base):
         pg_enum(ProcessingPath, name="processing_path_enum"),
         nullable=True,
     )
-    status: Mapped[DocumentStatus] = mapped_column(
-        pg_enum(DocumentStatus, name="document_version_status_enum"),
+    status: Mapped[DocumentVersionStatus] = mapped_column(
+        pg_enum(DocumentVersionStatus, name="document_version_status_enum"),
         nullable=False,
     )
 
@@ -98,6 +106,13 @@ class DocumentVersion(PrimaryKeyMixin, TimestampMixin, Base):
 
 class Chunk(PrimaryKeyMixin, TenantMixin, KnowledgeScopeMixin, TimestampMixin, Base):
     __tablename__ = "chunks"
+    __table_args__ = (
+        UniqueConstraint(
+            "document_version_id",
+            "chunk_index",
+            name="uq_chunks_document_version_id_chunk_index",
+        ),
+    )
 
     document_version_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("document_versions.id"),
@@ -105,8 +120,8 @@ class Chunk(PrimaryKeyMixin, TenantMixin, KnowledgeScopeMixin, TimestampMixin, B
     )
     # Both fields stay as plain UUIDs by design: snapshot_id avoids a circular FK path,
     # and source_id is denormalized for citation lookup speed.
-    snapshot_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
-    source_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    snapshot_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    source_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     text_content: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)

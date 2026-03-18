@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, String, Text, text
+from sqlalchemy import Boolean, ForeignKey, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, PrimaryKeyMixin, SoftDeleteMixin, TenantMixin, TimestampMixin
@@ -21,7 +21,10 @@ class Agent(PrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
-    active_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    active_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("knowledge_snapshots.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     default_knowledge_base_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     language: Mapped[str] = mapped_column(String(32), nullable=False)
     timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)

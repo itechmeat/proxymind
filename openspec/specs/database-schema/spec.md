@@ -150,7 +150,7 @@ THEN `archived_at` SHALL be set.
 
 ### Requirement: Dialogue contour models (Session, Message)
 
-**Session** SHALL use PrimaryKeyMixin, TenantMixin, TimestampMixin. Columns: `snapshot_id` (UUID, nullable), `status` (enum: active/closed), `message_count` (Integer, default 0), `channel` (enum: web/api/telegram/facebook/vk/instagram/tiktok, default web), `channel_metadata` (JSONB, nullable), `visitor_id` (UUID, nullable), `external_user_id` (String, nullable), `channel_connector` (String, nullable).
+**Session** SHALL use PrimaryKeyMixin, TenantMixin, TimestampMixin. Columns: `snapshot_id` (UUID, nullable), `status` (enum: active/closed), `message_count` (Integer, default 0), `channel` (enum values: `web`, `api`, `telegram`, `facebook`, `vk`, `instagram`, `tiktok`; includes TikTok, default `web`), `channel_metadata` (JSONB, nullable), `visitor_id` (UUID, nullable), `external_user_id` (String, nullable), `channel_connector` (String, nullable).
 
 **Message** SHALL use PrimaryKeyMixin and TimestampMixin (no TenantMixin — scope inherited via Session FK). Columns: `session_id` (UUID FK to Session, not nullable), `role` (enum: user/assistant), `content` (Text, not nullable), `status` (enum: received/streaming/complete/partial/failed), `idempotency_key` (String, nullable), `snapshot_id` (UUID, nullable), `source_ids` (ARRAY of UUID, nullable), `citations` (JSONB, nullable), `content_type_spans` (JSONB, nullable), `token_count_prompt` (Integer, nullable), `token_count_completion` (Integer, nullable), `model_name` (String, nullable), `config_commit_hash` (String, nullable), `config_content_hash` (String, nullable).
 

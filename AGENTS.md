@@ -16,17 +16,22 @@ ProxyMind is an open-source product designed for **English by default**, but MUS
 
 All project work is managed through OpenSpec. Each story from `docs/plan.md` = one OpenSpec change.
 
-### Post-apply checklist (after implementation)
+### Pre-apply checklist (before implementation)
 
-After completing implementation (`/opsx:apply`), you MUST:
+Before writing code for an implementation (`/opsx:apply`), you MUST:
 
 1. Before writing code, read `docs/development.md` and treat it as the binding implementation standard.
-2. Before considering the change complete, re-read `docs/development.md` and self-review the change against it.
-3. In the final apply report, explicitly state that the pre-code read and post-code self-review against `docs/development.md` were completed.
-4. Verify all installed package versions are not below minimums in `docs/spec.md`.
-5. Run CI tests and confirm they pass.
-6. For stories outside Phase 1, review stable implemented behavior and ensure it is covered by tests before considering the change complete.
-7. If test coverage is missing or weak, propose and add the missing tests based on the most relevant repo skills (for example `vitest`, `react-testing-library`, `fastapi`, `postgresql`, `property-based-testing`) before archive.
+
+### Post-apply checklist (after implementation)
+
+Before considering an implementation complete, you MUST:
+
+1. Re-read `docs/development.md` and self-review the change against it.
+2. In the final apply report, explicitly state that the pre-code read and post-code self-review against `docs/development.md` were completed.
+3. Verify all installed package versions are not below minimums in `docs/spec.md`.
+4. Run CI tests and confirm they pass.
+5. For stories outside Phase 1, review stable implemented behavior and ensure it is covered by tests before considering the change complete.
+6. If test coverage is missing or weak, propose and add the missing tests based on the most relevant repo skills (for example `vitest`, `react-testing-library`, `fastapi`, `postgresql`, `property-based-testing`) before archive.
 
 ### Post-archive checklist (after archiving)
 

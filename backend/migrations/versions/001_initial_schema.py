@@ -320,6 +320,14 @@ def upgrade() -> None:
     op.create_index(
         op.f("ix_knowledge_snapshots_owner_id"), "knowledge_snapshots", ["owner_id"], unique=False
     )
+    op.create_foreign_key(
+        "fk_agents_active_snapshot_id_knowledge_snapshots",
+        "agents",
+        "knowledge_snapshots",
+        ["active_snapshot_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
     op.create_table(
         "sessions",
         sa.Column("snapshot_id", sa.UUID(), nullable=True),
@@ -512,6 +520,11 @@ def upgrade() -> None:
             ["document_id"],
             ["documents.id"],
         ),
+        sa.UniqueConstraint(
+            "document_id",
+            "version_number",
+            name="uq_document_versions_document_id_version_number",
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_table(
@@ -547,9 +560,16 @@ def upgrade() -> None:
             ["document_version_id"],
             ["document_versions.id"],
         ),
+        sa.UniqueConstraint(
+            "document_version_id",
+            "chunk_index",
+            name="uq_chunks_document_version_id_chunk_index",
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(op.f("ix_chunks_agent_id"), "chunks", ["agent_id"], unique=False)
+    op.create_index(op.f("ix_chunks_snapshot_id"), "chunks", ["snapshot_id"], unique=False)
+    op.create_index(op.f("ix_chunks_source_id"), "chunks", ["source_id"], unique=False)
     op.create_index(
         op.f("ix_chunks_knowledge_base_id"), "chunks", ["knowledge_base_id"], unique=False
     )
@@ -560,6 +580,8 @@ def downgrade() -> None:
     """Downgrade schema."""
     op.drop_index(op.f("ix_chunks_owner_id"), table_name="chunks")
     op.drop_index(op.f("ix_chunks_knowledge_base_id"), table_name="chunks")
+    op.drop_index(op.f("ix_chunks_source_id"), table_name="chunks")
+    op.drop_index(op.f("ix_chunks_snapshot_id"), table_name="chunks")
     op.drop_index(op.f("ix_chunks_agent_id"), table_name="chunks")
     op.drop_table("chunks")
     op.drop_table("document_versions")
@@ -582,6 +604,11 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_sessions_owner_id"), table_name="sessions")
     op.drop_index(op.f("ix_sessions_agent_id"), table_name="sessions")
     op.drop_table("sessions")
+    op.drop_constraint(
+        "fk_agents_active_snapshot_id_knowledge_snapshots",
+        "agents",
+        type_="foreignkey",
+    )
     op.drop_index(op.f("ix_knowledge_snapshots_owner_id"), table_name="knowledge_snapshots")
     op.drop_index(
         op.f("ix_knowledge_snapshots_knowledge_base_id"), table_name="knowledge_snapshots"

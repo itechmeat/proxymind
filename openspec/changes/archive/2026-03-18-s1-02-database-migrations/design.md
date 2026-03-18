@@ -51,7 +51,7 @@ All decisions were made during the brainstorm phase and are documented in `docs/
 
 All paths relative to `backend/`:
 
-```
+```text
 app/db/
   __init__.py
   engine.py           -- async engine + session factory
@@ -68,9 +68,9 @@ migrations/
   env.py               -- async-aware, imports Base.metadata
   versions/
     001_initial_schema.py
-    002_seed_agent.py
+    002_seed_default_agent.py
 alembic.ini
-entrypoint.sh          -- alembic upgrade head && exec uvicorn
+entrypoint.sh          -- retries migrations, then exec uvicorn
 ```
 
 ### Integration with existing app
@@ -195,7 +195,7 @@ This matrix defines which tenant-scoping fields each table carries directly vs. 
 | `knowledge_base_id` without FK allows orphan references | Low | Single-agent v1 uses one fixed KB ID from the seed. FK and table added when multi-KB lands. |
 | UUID v7 requires Python 3.14+ | Low | Project already mandates Python 3.14.3+. No fallback needed. |
 | Testcontainers adds Docker dependency to test runs | Low | Docker is already required for development. CI runs Docker natively. |
-| Entrypoint migration blocks startup if DB is unreachable | Medium | Docker Compose `depends_on` with healthcheck on postgres service. Entrypoint can retry with backoff if needed. |
+| Entrypoint migration blocks startup if DB is unreachable | Medium | Docker Compose `depends_on` with healthcheck on postgres service. Entrypoint retries with backoff and still fails fast after the retry budget is exhausted. |
 | No worker service in S1-02 means `batch_jobs` table exists but is unused | None | Table is part of the full schema (Decision 7). Worker arrives in S2-01. |
 
 ## Migration Plan

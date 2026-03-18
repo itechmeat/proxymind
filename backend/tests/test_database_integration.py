@@ -11,7 +11,13 @@ from sqlalchemy.orm import selectinload
 
 from app.db.models import Agent, Chunk, Document, DocumentVersion, Message, Session, Source
 from app.db.models.dialogue import MessageRole, MessageStatus, SessionChannel, SessionStatus
-from app.db.models.knowledge import ChunkStatus, DocumentStatus, SourceStatus, SourceType
+from app.db.models.knowledge import (
+    ChunkStatus,
+    DocumentStatus,
+    DocumentVersionStatus,
+    SourceStatus,
+    SourceType,
+)
 
 EXPECTED_TABLES = {
     "agents",
@@ -58,6 +64,19 @@ async def test_schema_integrity(db_session: AsyncSession) -> None:
     assert "ix_messages_session_id" in message_indexes
     assert "uq_messages_idempotency_key_not_null" in message_indexes
 
+    chunk_indexes = await db_session.execute(
+        text(
+            """
+            SELECT indexname
+            FROM pg_indexes
+            WHERE schemaname = 'public' AND tablename = 'chunks'
+            """
+        )
+    )
+    chunk_index_names = {row[0] for row in chunk_indexes}
+    assert "ix_chunks_snapshot_id" in chunk_index_names
+    assert "ix_chunks_source_id" in chunk_index_names
+
     seed_agent = await db_session.get(Agent, EXPECTED_AGENT_ID)
     assert seed_agent is not None
     assert seed_agent.default_knowledge_base_id is not None
@@ -95,15 +114,18 @@ async def test_relationships_and_fk_constraints(
     db_session: AsyncSession,
     seeded_agent: Agent,
 ) -> None:
+    owner_id = seeded_agent.owner_id
+    agent_id = seeded_agent.id
+    knowledge_base_id = seeded_agent.default_knowledge_base_id
     source_id = uuid.uuid7()
     document_id = uuid.uuid7()
     document_version_id = uuid.uuid7()
     snapshot_id = uuid.uuid4()
     source = Source(
         id=source_id,
-        owner_id=seeded_agent.owner_id,
-        agent_id=seeded_agent.id,
-        knowledge_base_id=seeded_agent.default_knowledge_base_id,
+        owner_id=owner_id,
+        agent_id=agent_id,
+        knowledge_base_id=knowledge_base_id,
         source_type=SourceType.MARKDOWN,
         title="Source",
         file_path="/tmp/source.md",
@@ -122,12 +144,12 @@ async def test_relationships_and_fk_constraints(
         document=document,
         version_number=1,
         file_path="/tmp/source-v1.md",
-        status=DocumentStatus.READY,
+        status=DocumentVersionStatus.READY,
     )
     chunk = Chunk(
-        owner_id=seeded_agent.owner_id,
-        agent_id=seeded_agent.id,
-        knowledge_base_id=seeded_agent.default_knowledge_base_id,
+        owner_id=owner_id,
+        agent_id=agent_id,
+        knowledge_base_id=knowledge_base_id,
         document_version=document_version,
         snapshot_id=snapshot_id,
         source_id=source_id,
@@ -148,8 +170,8 @@ async def test_relationships_and_fk_constraints(
     assert chunk.document_version_id == document_version.id
 
     orphan_document = Document(
-        owner_id=seeded_agent.owner_id,
-        agent_id=seeded_agent.id,
+        owner_id=owner_id,
+        agent_id=agent_id,
         source_id=uuid.uuid4(),
         title="Orphan",
         status=DocumentStatus.PENDING,
@@ -157,6 +179,34 @@ async def test_relationships_and_fk_constraints(
     db_session.add(orphan_document)
     with pytest.raises(IntegrityError):
         await db_session.commit()
+    await db_session.rollback()
+
+    duplicate_version = DocumentVersion(
+        document=document,
+        version_number=1,
+        file_path="/tmp/source-v1-duplicate.md",
+        status=DocumentVersionStatus.PROCESSING,
+    )
+    db_session.add(duplicate_version)
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+    await db_session.rollback()
+
+    duplicate_chunk = Chunk(
+        owner_id=owner_id,
+        agent_id=agent_id,
+        knowledge_base_id=knowledge_base_id,
+        document_version_id=document_version_id,
+        snapshot_id=snapshot_id,
+        source_id=source_id,
+        chunk_index=0,
+        text_content="duplicate chunk body",
+        status=ChunkStatus.PENDING,
+    )
+    db_session.add(duplicate_chunk)
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+    await db_session.rollback()
 
 
 @pytest.mark.asyncio
@@ -180,9 +230,12 @@ async def test_source_soft_delete_preserves_row(
     source.deleted_at = deleted_at
     await db_session.commit()
     await db_session.refresh(source)
+    db_session.expunge(source)
 
     assert source.deleted_at == deleted_at
-    assert await db_session.get(Source, source.id) is not None
+    persisted_source = await db_session.get(Source, source.id)
+    assert persisted_source is not None
+    assert persisted_source.deleted_at == deleted_at
 
 
 @pytest.mark.asyncio
@@ -263,3 +316,41 @@ async def test_partial_unique_index_on_message_idempotency_key(
         None,
         None,
     ]
+
+
+@pytest.mark.asyncio
+async def test_session_messages_are_loaded_in_chronological_order(
+    db_session: AsyncSession,
+    seeded_agent: Agent,
+) -> None:
+    session = Session(
+        owner_id=seeded_agent.owner_id,
+        agent_id=seeded_agent.id,
+        status=SessionStatus.ACTIVE,
+        channel=SessionChannel.WEB,
+    )
+    db_session.add(session)
+    await db_session.commit()
+
+    newer_message = Message(
+        session_id=session.id,
+        role=MessageRole.USER,
+        content="newer",
+        status=MessageStatus.RECEIVED,
+        created_at=datetime(2026, 1, 2, tzinfo=UTC),
+    )
+    older_message = Message(
+        session_id=session.id,
+        role=MessageRole.USER,
+        content="older",
+        status=MessageStatus.RECEIVED,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    db_session.add_all([newer_message, older_message])
+    await db_session.commit()
+
+    loaded_session = await db_session.scalar(
+        select(Session).options(selectinload(Session.messages)).where(Session.id == session.id)
+    )
+    assert loaded_session is not None
+    assert [message.content for message in loaded_session.messages] == ["older", "newer"]

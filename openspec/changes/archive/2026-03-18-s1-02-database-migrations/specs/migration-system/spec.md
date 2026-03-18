@@ -62,7 +62,7 @@ AND all enum types SHALL be dropped.
 
 ### Requirement: Seed data migration (002)
 
-The second migration (`002_seed_agent.py`) SHALL be a data migration that inserts a default agent record. The agent SHALL use a fixed UUID literal constant (e.g., `00000000-0000-0000-0000-000000000001` or another chosen constant) — NOT a UUID v7. This is a bootstrap exception: the seed agent has the same identity across all environments.
+The second migration (`002_seed_default_agent.py`) SHALL be a data migration that inserts a default agent record. The agent SHALL use a fixed UUID literal constant (e.g., `00000000-0000-0000-0000-000000000001` or another chosen constant) — NOT a UUID v7. This is a bootstrap exception: the seed agent has the same identity across all environments.
 
 The seed agent SHALL include a `default_knowledge_base_id` (also a fixed UUID literal constant). In S1-02 this column is a plain UUID and SHALL NOT have an FK constraint because the `knowledge_bases` table does not exist yet. The `name` field SHALL be set to a sensible default (e.g., "Default Agent"). The `language` field SHALL be set to a configurable default (e.g., "en").
 
@@ -101,7 +101,7 @@ The backend Dockerfile SHALL be updated to:
 2. `RUN chmod +x entrypoint.sh`.
 3. Use `entrypoint.sh` as the container entrypoint instead of direct uvicorn invocation.
 
-`backend/entrypoint.sh` SHALL run `alembic upgrade head` before starting the application server. The pattern SHALL be: `alembic upgrade head && exec uvicorn app.main:app ...`. If `alembic upgrade head` fails, the container MUST NOT start uvicorn.
+`backend/entrypoint.sh` SHALL run `alembic upgrade head` (or an equivalent migration step) before starting the application server. The migration step MAY retry for a bounded period while PostgreSQL becomes ready. If the migration step ultimately fails, the container MUST NOT start uvicorn.
 
 The entrypoint SHALL support the api service only in S1-02. Worker mode is NOT added in this story.
 
@@ -170,5 +170,5 @@ The arq worker service and its entrypoint mode SHALL NOT be implemented in S1-02
 #### Scenario: entrypoint.sh does not reference worker mode
 
 WHEN `entrypoint.sh` is inspected
-THEN it SHALL contain only the api startup path (`alembic upgrade head && exec uvicorn ...`)
+THEN it SHALL contain only the api startup path (migration step, then uvicorn on success)
 AND it SHALL NOT contain arq worker invocation or a mode switch for worker startup.

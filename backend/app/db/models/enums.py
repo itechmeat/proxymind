@@ -51,6 +51,13 @@ class DocumentStatus(StrEnum):
     FAILED = "failed"
 
 
+class DocumentVersionStatus(StrEnum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    READY = "ready"
+    FAILED = "failed"
+
+
 class ProcessingPath(StrEnum):
     PATH_A = "path_a"
     PATH_B = "path_b"

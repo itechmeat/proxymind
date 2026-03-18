@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import httpx
@@ -92,3 +93,27 @@ async def test_ready_returns_failure_when_database_is_unreachable(
     assert body["status"] == "degraded"
     assert body["failed"] == ["postgres"]
     assert body["failures"]["postgres"]["error_type"] == "RuntimeError"
+
+
+@pytest.mark.asyncio
+async def test_ready_times_out_when_checks_hang(
+    monkeypatch: pytest.MonkeyPatch,
+    session_factory: async_sessionmaker,
+) -> None:
+    monkeypatch.setattr(health, "HEALTH_CHECK_DEADLINE_SECONDS", 0.05)
+
+    async def slow(*args: object, **kwargs: object) -> None:
+        await asyncio.sleep(health.HEALTH_CHECK_DEADLINE_SECONDS + 0.05)
+
+    monkeypatch.setattr(health, "_check_redis", slow)
+    monkeypatch.setattr(health, "_check_http", slow)
+
+    transport = httpx.ASGITransport(app=_build_health_app(session_factory))
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/ready")
+
+    body = response.json()
+    assert response.status_code == 503
+    assert body["status"] == "degraded"
+    assert body["failed"] == ["postgres", "redis", "qdrant", "minio"]
+    assert body["failures"]["redis"]["error_type"] == "TimeoutError"

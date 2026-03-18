@@ -56,7 +56,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.get_bind().execute(
+    op.execute(
         sa.text("DELETE FROM agents WHERE id = :agent_id"),
         {"agent_id": uuid.UUID(DEFAULT_AGENT_ID)},
     )

@@ -42,7 +42,10 @@ class Session(PrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
     external_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     channel_connector: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    messages: Mapped[list[Message]] = relationship(back_populates="session")
+    messages: Mapped[list[Message]] = relationship(
+        back_populates="session",
+        order_by="Message.created_at",
+    )
 
 
 class Message(PrimaryKeyMixin, TimestampMixin, Base):
