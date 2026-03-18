@@ -15,11 +15,11 @@ Tests are split into two tracks:
 
 Phase outcome: the project starts, all services run, API responds.
 
-- [ ] **S1-01: Project bootstrap**
+- [x] **S1-01: Project bootstrap**
       Monorepo structure (`backend/` + `frontend/` + `persona/` + `config/` + `docs/`), `docker-compose.yml` (PostgreSQL, Qdrant, MinIO, Redis), Dockerfile for backend, Caddyfile, `.editorconfig`, `.gitignore`, separate `.env` files. Backend: `pyproject.toml`, FastAPI app skeleton, structlog, `/health` and `/ready` endpoints. Frontend: Bun + Vite + React + Biome init.
   - **Outcome:** infrastructure starts with a single command, API is accessible
   - **Verification:** `docker-compose up` → all services start; `curl /health` → 200; `cd frontend && bun dev` → dev server starts
-  - Tasks: directory structure, Docker, FastAPI app, frontend init, CI lint
+  - Tasks: directory structure, Docker, FastAPI app, frontend init, CI lint (Biome + Ruff)
 
 - [ ] **S1-02: Database + migrations**
       SQLAlchemy 2.x, Alembic, asyncpg. All base tables: agents, sources, documents, document_versions, chunks (metadata), knowledge_snapshots, sessions, messages, audit_logs, embedding_profiles, batch_jobs, catalog_items. Tenant-ready fields.
