@@ -21,7 +21,7 @@ Phase outcome: the project starts, all services run, API responds.
   - **Verification:** `docker-compose up` → all services start; `curl /health` → 200; `cd frontend && bun dev` → dev server starts
   - Tasks: directory structure, Docker, FastAPI app, frontend init, CI lint (Biome + Ruff)
 
-- [ ] **S1-02: Database + migrations**
+- [x] **S1-02: Database + migrations**
       SQLAlchemy 2.x, Alembic, asyncpg. All base tables: agents, sources, documents, document_versions, chunks (metadata), knowledge_snapshots, sessions, messages, audit_logs, embedding_profiles, batch_jobs, catalog_items. Tenant-ready fields.
   - **Outcome:** DB schema is created automatically on startup
   - **Verification:** `alembic upgrade head` → all tables; basic CRUD agent via tests

@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-03-18
+description: SQLAlchemy models, Alembic migrations, and seed data for S1-02
+version: 1.0.0
+related_pr: 2

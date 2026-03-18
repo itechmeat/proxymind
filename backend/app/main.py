@@ -1,6 +1,5 @@
 from contextlib import asynccontextmanager
 
-import asyncpg
 import httpx
 import structlog
 from fastapi import FastAPI
@@ -9,6 +8,7 @@ from redis.asyncio import Redis
 from app.api.health import router as health_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.db import create_database_engine, create_session_factory
 
 
 @asynccontextmanager
@@ -16,15 +16,10 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     logger = structlog.get_logger(__name__)
     configure_logging(settings.log_level)
+    db_engine = create_database_engine(settings)
     app.state.settings = settings
-    app.state.postgres_pool = await asyncpg.create_pool(
-        user=settings.postgres_user,
-        password=settings.postgres_password,
-        database=settings.postgres_db,
-        host=settings.postgres_host,
-        port=settings.postgres_port,
-        min_size=0,
-    )
+    app.state.db_engine = db_engine
+    app.state.session_factory = create_session_factory(db_engine)
     app.state.redis_client = Redis.from_url(settings.redis_url)
     app.state.http_client = httpx.AsyncClient(timeout=5.0)
     logger.info("app.startup", log_level=settings.log_level)
@@ -40,9 +35,9 @@ async def lifespan(app: FastAPI):
         logger.error("app.shutdown.redis_client_close_failed", error=str(error))
 
     try:
-        await app.state.postgres_pool.close()
+        await app.state.db_engine.dispose()
     except Exception as error:
-        logger.error("app.shutdown.postgres_pool_close_failed", error=str(error))
+        logger.error("app.shutdown.db_engine_dispose_failed", error=str(error))
 
     logger.info("app.shutdown")
 

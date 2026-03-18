@@ -1,10 +1,11 @@
 import asyncio
 
-import asyncpg
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 router = APIRouter(tags=["health"])
 HEALTH_CHECK_TIMEOUT_SECONDS = 3.0
@@ -16,10 +17,10 @@ async def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
 
 
-async def _check_postgres(pool: asyncpg.Pool) -> None:
+async def _check_postgres(session_factory: async_sessionmaker[AsyncSession]) -> None:
     async with asyncio.timeout(HEALTH_CHECK_TIMEOUT_SECONDS):
-        async with pool.acquire() as connection:
-            await connection.execute("SELECT 1")
+        async with session_factory() as session:
+            await session.execute(text("SELECT 1"))
 
 
 async def _check_redis(client: Redis) -> None:
@@ -37,7 +38,7 @@ async def _check_http(client: httpx.AsyncClient, url: str) -> None:
 async def readiness(request: Request) -> JSONResponse | dict[str, str]:
     settings = request.app.state.settings
     checks = {
-        "postgres": _check_postgres(request.app.state.postgres_pool),
+        "postgres": _check_postgres(request.app.state.session_factory),
         "redis": _check_redis(request.app.state.redis_client),
         "qdrant": _check_http(request.app.state.http_client, f"{settings.qdrant_url}/readyz"),
         "minio": _check_http(

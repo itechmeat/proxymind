@@ -18,14 +18,22 @@ ProxyMind is an open-source product designed for **English by default**, but MUS
 
 All project work is managed through OpenSpec. Each story from `docs/plan.md` = one OpenSpec change.
 
+### Pre-apply checklist (before implementation)
+
+Before writing code for an implementation (`/opsx:apply`), you MUST:
+
+1. Before writing code, read `docs/development.md` and treat it as the binding implementation standard.
+
 ### Post-apply checklist (after implementation)
 
-After completing implementation (`/opsx:apply`), you MUST:
+Before considering an implementation complete, you MUST:
 
-1. Verify all installed package versions are not below minimums in `docs/spec.md`.
-2. Run CI tests and confirm they pass.
-3. For stories outside Phase 1, review stable implemented behavior and ensure it is covered by tests before considering the change complete.
-4. If test coverage is missing or weak, propose and add the missing tests based on the most relevant repo skills (for example `vitest`, `react-testing-library`, `fastapi`, `postgresql`, `property-based-testing`) before archive.
+1. Re-read `docs/development.md` and self-review the change against it.
+2. In the final apply report, explicitly state that the pre-code read and post-code self-review against `docs/development.md` were completed.
+3. Verify all installed package versions are not below minimums in `docs/spec.md`.
+4. Run CI tests and confirm they pass.
+5. For stories outside Phase 1, review stable implemented behavior and ensure it is covered by tests before considering the change complete.
+6. If test coverage is missing or weak, propose and add the missing tests based on the most relevant repo skills (for example `vitest`, `react-testing-library`, `fastapi`, `postgresql`, `property-based-testing`) before archive.
 
 ### Post-archive checklist (after archiving)
 

@@ -7,6 +7,7 @@ context: |
   - docs/about.md — product vision
   - docs/spec.md — tools, versions (single source of truth for all versions), contracts
   - docs/architecture.md — system architecture, data flows, API contracts
+  - docs/development.md — development standards (SOLID, KISS, DRY, YAGNI, mocks/stubs policy)
 
   Read when relevant to the change:
   - docs/rag.md — RAG pipeline, chunking, retrieval, enrichment
@@ -22,9 +23,9 @@ context: |
   - Three system circuits: dialogue, knowledge, operational (see architecture.md)
   - Git policy: never commit without explicit user permission
 
-  Note: this config governs artifact generation only. Workflow enforcement
-  (post-implementation test review, post-archive checklist, commit proposals,
-  version checks) is in CLAUDE.md and AGENTS.md.
+  Note: this config governs both artifact-generation context and OpenSpec apply
+  guidance. Operational checklists are duplicated in CLAUDE.md and AGENTS.md
+  and MUST stay consistent with this file.
 
 rules:
   proposal:
@@ -49,9 +50,17 @@ rules:
     - When behavior or interfaces change, describe the intended testing approach and boundaries
   tasks:
     - Reference the story verification criteria from docs/plan.md
+    - "Before writing tasks, scan the codebase for TODO comments referencing this change's story ID (e.g., grep for TODO(S2-01)). Each found TODO represents a stub that MUST be resolved in this change. Add a task for each TODO: implement the real functionality, remove the TODO comment and the stub. List these TODO-resolution tasks in their own section before implementation tasks."
     - Break into small tasks completable in one session
     - Include both implementation and test tasks
     - Order by dependency
     - For stories outside phase 1, add explicit test tasks for stable implemented behavior before archive
     - After core implementation, add a test coverage review task that proposes what still needs tests using relevant repo skills when applicable
     - Include a final task: verify installed package versions against docs/spec.md
+
+apply:
+  before:
+    - "Read docs/development.md before writing any code. Treat it as the binding standard for all implementation decisions — SOLID, KISS, DRY, YAGNI, mocks/stubs policy, and engineering principles."
+  after:
+    - "Self-review: re-read docs/development.md, then review all code written in this change against it. Check specifically: no mocks outside tests/, no fallbacks to stubs or dead code, all stubs have TODO with story ID, no premature abstractions, code is readable without comments explaining 'why this works'. Fix any violations before marking the change as complete."
+    - "In the apply completion report, explicitly state that docs/development.md was reviewed before coding and re-reviewed after implementation. If not done, the change is not complete."
