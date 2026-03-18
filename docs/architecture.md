@@ -308,7 +308,7 @@ Persona and promo files. Versioned via git. In v1, managed manually.
 
 ## Repository structure
 
-Monorepo. Backend and frontend are separate directories with separate `.env` files.
+Monorepo. Infrastructure primitives live in the root `.env`, backend app config lives in `backend/.env`, and frontend client config lives in `frontend/.env`.
 
 ```
 proxymind/
@@ -334,7 +334,7 @@ proxymind/
 │   │   └── evals/
 │   ├── Dockerfile
 │   ├── pyproject.toml
-│   └── .env
+│   └── .env                  # App-only config (LOG_LEVEL, API keys)
 ├── frontend/                 # Bun + React + Vite
 │   ├── src/
 │   │   ├── components/
@@ -343,14 +343,15 @@ proxymind/
 │   ├── biome.json
 │   ├── vite.config.ts
 │   ├── package.json
-│   └── .env
+│   └── .env                  # Client-only VITE_* config
 ├── persona/                  # Twin persona files
 │   ├── IDENTITY.md
 │   ├── SOUL.md
 │   └── BEHAVIOR.md
 ├── config/                   # Operational configs
 │   └── PROMOTIONS.md
-├── docker-compose.yml        # PostgreSQL, Qdrant, MinIO, Redis, backend, worker
+├── .env                      # Store hosts, ports, and credentials
+├── docker-compose.yml        # PostgreSQL, Qdrant, MinIO, Redis, backend
 ├── Caddyfile
 ├── docs/
 │   ├── about.md

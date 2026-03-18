@@ -1,0 +1,8 @@
+:80 {
+    @api path /api/*
+    reverse_proxy @api localhost:8000
+
+    root * frontend/dist
+    try_files {path} /index.html
+    file_server
+}
