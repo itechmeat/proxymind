@@ -138,7 +138,7 @@ S2-01 is the first story of Phase 2 (First E2E Slice) and the first endpoint in 
 
 ### Data Flow
 
-```
+```text
 Client                    FastAPI                 MinIO           PostgreSQL         Redis/arq
   |                         |                      |                 |                 |
   |-- POST /api/admin/sources (multipart: file + metadata JSON)      |                 |
@@ -188,7 +188,7 @@ Client                    FastAPI                 MinIO           PostgreSQL    
 
 ### New migration: `003_add_tasks_table.py`
 
-```
+```text
 background_tasks
 +-- id                  UUID, PK (uuid7)
 +-- task_type           ENUM backgroundtasktype (INGESTION)
@@ -250,7 +250,7 @@ background_tasks
   "task_id": "uuid",
   "status": "pending",
   "file_path": "00000000-.../a1b2c3-.../document.md",
-  "message": "Source uploaded, processing queued"
+  "message": "Source uploaded and queued for ingestion."
 }
 ```
 
@@ -279,7 +279,7 @@ background_tasks
 
 ### Configuration
 
-`UPLOAD_MAX_FILE_SIZE_MB=50` in settings. Validation approach: after FastAPI receives the file (buffered in memory/temp), check `file.size` before uploading to MinIO. For Markdown/TXT files at 50 MB limit, memory buffering is acceptable. For large binary formats (S3-01+), streaming size tracking may be revisited.
+`UPLOAD_MAX_FILE_SIZE_MB=50` in settings. Validation approach: read the upload in chunks, track cumulative bytes during the read, and reject the request with 413 before uploading anything to MinIO once the configured limit is exceeded. This keeps the S2-01 Markdown/TXT flow simple while avoiding an unconditional full-file `read()` into memory.
 
 ---
 
@@ -346,7 +346,7 @@ Worker creates its own async DB engine and session factory via arq `on_startup` 
 | MinIO upload fails | 500, nothing created in PG | Nothing to clean |
 | PG create fails after MinIO upload | 500, delete file from MinIO | `storage.delete(key)` |
 | arq enqueue fails after MinIO + PG commit | Compensating update: Source -> FAILED, Task -> FAILED. Return 500 | PG records marked FAILED, MinIO file remains (orphan cleanup in future) |
-| Duplicate filename | Not a problem: key contains `source_id` (UUID), each upload creates a new source |
+| Duplicate filename | Not a problem: key contains `source_id` (UUID), each upload creates a new source | N/A |
 
 **Operation order in endpoint (fail-safe, commit-before-enqueue):**
 

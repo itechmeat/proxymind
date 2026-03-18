@@ -25,10 +25,12 @@ This separation ensures resilience: chat does not depend on heavy indexing, and 
 | Alembic    | 1.18.4+      | DB schema migrations                           |
 | asyncpg    | 0.31.0+      | Async PostgreSQL driver                        |
 | HTTPX      | 0.28.1+      | HTTP client for external calls                 |
+| minio      | 7.2.0+       | Python SDK for S3-compatible object storage    |
 | tenacity   | 9.1.4+       | Retry/backoff for external call resilience     |
 | structlog  | 25.5.0+      | Structured JSON logging                        |
 | arq        | 0.27.0+      | Async background jobs on Redis                 |
 | LiteLLM    | 1.82.3+      | Unified interface to LLM providers             |
+| python-multipart | 0.0.20+ | Multipart/form-data parsing for FastAPI uploads |
 
 ### Data stores
 
@@ -36,7 +38,7 @@ This separation ensures resilience: chat does not depend on heavy indexing, and 
 | ---------- | ----------------------------- | -------------------------------------------------------- |
 | PostgreSQL | 18.3+                         | Source of truth, business entities, built-in OAuth       |
 | Qdrant     | 1.17.0+                       | Vector retrieval, payload filtering, payload indexes     |
-| MinIO      | RELEASE.2025-10-15T17-29-55Z+ | Object storage: files, pipeline artifacts                |
+| MinIO Server | RELEASE.2025-10-15T17-29-55Z+ | Object storage: files, pipeline artifacts         |
 | Redis      | 8.6.1+                        | Cache, locks, rate limits, idempotency keys, task broker |
 
 ### AI and data processing
