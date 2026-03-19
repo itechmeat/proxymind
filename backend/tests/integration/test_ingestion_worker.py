@@ -1,13 +1,36 @@
 from __future__ import annotations
 
 import uuid
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
-from app.db.models import BackgroundTask, Source
-from app.db.models.enums import BackgroundTaskStatus, BackgroundTaskType, SourceStatus, SourceType
+from app.db.models import (
+    BackgroundTask,
+    Chunk,
+    Document,
+    DocumentVersion,
+    EmbeddingProfile,
+    KnowledgeSnapshot,
+    Source,
+)
+from app.db.models.enums import (
+    BackgroundTaskStatus,
+    BackgroundTaskType,
+    ChunkStatus,
+    DocumentStatus,
+    DocumentVersionStatus,
+    ProcessingPath,
+    SnapshotStatus,
+    SourceStatus,
+    SourceType,
+)
+from app.services.docling_parser import ChunkData
+from app.services.snapshot import SnapshotService
 from app.workers.tasks import ingestion
 
 
@@ -42,18 +65,72 @@ async def _seed_task(
     return source_id, task_id
 
 
+def _worker_context(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    chunk_data: list[ChunkData] | None = None,
+    embedding_side_effect: object | None = None,
+) -> dict[str, object]:
+    if chunk_data is None:
+        chunk_data = [
+            ChunkData(
+                text_content="ProxyMind is searchable.",
+                token_count=4,
+                chunk_index=0,
+                anchor_page=None,
+                anchor_chapter="Intro",
+                anchor_section="Overview",
+            ),
+            ChunkData(
+                text_content="Chunks should be indexed in Qdrant.",
+                token_count=6,
+                chunk_index=1,
+                anchor_page=None,
+                anchor_chapter="Intro",
+                anchor_section="Indexing",
+            ),
+        ]
+
+    embedding_service = SimpleNamespace(
+        model="gemini-embedding-2-preview",
+        dimensions=3,
+        embed_texts=(
+            AsyncMock(side_effect=embedding_side_effect)
+            if embedding_side_effect is not None
+            else AsyncMock(return_value=[[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
+        ),
+    )
+    return {
+        "session_factory": session_factory,
+        "storage_service": SimpleNamespace(download=AsyncMock(return_value=b"# ProxyMind")),
+        "docling_parser": SimpleNamespace(parse_and_chunk=AsyncMock(return_value=chunk_data)),
+        "embedding_service": embedding_service,
+        "qdrant_service": SimpleNamespace(
+            upsert_chunks=AsyncMock(),
+            delete_chunks=AsyncMock(),
+        ),
+        "snapshot_service": SnapshotService(),
+    }
+
+
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("committed_data_cleanup")
 async def test_worker_processes_task_full_lifecycle(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     source_id, task_id = await _seed_task(session_factory)
+    worker_ctx = _worker_context(session_factory)
 
-    await ingestion.process_ingestion({"session_factory": session_factory}, str(task_id))
+    await ingestion.process_ingestion(worker_ctx, str(task_id))
 
     async with session_factory() as session:
         task = await session.get(BackgroundTask, task_id)
         source = await session.get(Source, source_id)
+        documents = (await session.scalars(select(Document))).all()
+        versions = (await session.scalars(select(DocumentVersion))).all()
+        chunks = (await session.scalars(select(Chunk).order_by(Chunk.chunk_index.asc()))).all()
+        snapshots = (await session.scalars(select(KnowledgeSnapshot))).all()
+        embedding_profiles = (await session.scalars(select(EmbeddingProfile))).all()
 
     assert task is not None
     assert source is not None
@@ -61,7 +138,42 @@ async def test_worker_processes_task_full_lifecycle(
     assert task.progress == 100
     assert task.started_at is not None
     assert task.completed_at is not None
+    assert task.result_metadata is not None
+    assert task.result_metadata["chunk_count"] == 2
+    assert task.result_metadata["processing_path"] == "path_b"
     assert source.status is SourceStatus.READY
+    assert len(documents) == 1
+    assert documents[0].status is DocumentStatus.READY
+    assert len(versions) == 1
+    assert versions[0].status is DocumentVersionStatus.READY
+    assert versions[0].processing_path is ProcessingPath.PATH_B
+    assert [chunk.status for chunk in chunks] == [ChunkStatus.INDEXED, ChunkStatus.INDEXED]
+    assert len(snapshots) == 1
+    assert snapshots[0].status is SnapshotStatus.DRAFT
+    assert snapshots[0].chunk_count == 2
+    assert len(embedding_profiles) == 1
+    worker_ctx["qdrant_service"].upsert_chunks.assert_awaited_once()  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_worker_reuses_draft_and_accumulates_chunk_count(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    _, first_task_id = await _seed_task(session_factory)
+    _, second_task_id = await _seed_task(session_factory)
+    worker_ctx = _worker_context(session_factory)
+
+    await ingestion.process_ingestion(worker_ctx, str(first_task_id))
+    await ingestion.process_ingestion(worker_ctx, str(second_task_id))
+
+    async with session_factory() as session:
+        snapshots = (await session.scalars(select(KnowledgeSnapshot))).all()
+
+    assert len(snapshots) == 1
+    assert snapshots[0].status is SnapshotStatus.DRAFT
+    assert snapshots[0].chunk_count == 4
+    assert worker_ctx["qdrant_service"].upsert_chunks.await_count == 2  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio
@@ -105,16 +217,58 @@ async def test_worker_marks_failed_on_unhandled_exception(
     async def explode(*args, **kwargs) -> None:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(ingestion, "_run_noop_ingestion", explode)
+    worker_ctx = _worker_context(session_factory, embedding_side_effect=explode)
 
-    await ingestion.process_ingestion({"session_factory": session_factory}, str(task_id))
+    await ingestion.process_ingestion(worker_ctx, str(task_id))
 
     async with session_factory() as session:
         task = await session.get(BackgroundTask, task_id)
         source = await session.get(Source, source_id)
+        document = await session.scalar(select(Document))
+        document_version = await session.scalar(select(DocumentVersion))
+        chunks = (await session.scalars(select(Chunk))).all()
 
     assert task is not None
     assert source is not None
     assert task.status is BackgroundTaskStatus.FAILED
     assert task.error_message == "boom"
     assert source.status is SourceStatus.FAILED
+    assert document is not None
+    assert document.status is DocumentStatus.FAILED
+    assert document_version is not None
+    assert document_version.status is DocumentVersionStatus.FAILED
+    assert chunks
+    assert all(chunk.status is ChunkStatus.FAILED for chunk in chunks)
+    worker_ctx["qdrant_service"].upsert_chunks.assert_not_awaited()  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_worker_deletes_qdrant_points_when_finalization_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id, task_id = await _seed_task(session_factory)
+    worker_ctx = _worker_context(session_factory)
+
+    async def explode(**kwargs) -> None:
+        raise RuntimeError("finalize failed")
+
+    monkeypatch.setattr(ingestion, "_finalize_pipeline_success", explode)
+
+    await ingestion.process_ingestion(worker_ctx, str(task_id))
+
+    async with session_factory() as session:
+        task = await session.get(BackgroundTask, task_id)
+        source = await session.get(Source, source_id)
+        chunks = (await session.scalars(select(Chunk))).all()
+
+    assert task is not None
+    assert source is not None
+    assert task.status is BackgroundTaskStatus.FAILED
+    assert task.error_message == "finalize failed"
+    assert source.status is SourceStatus.FAILED
+    assert chunks
+    assert all(chunk.status is ChunkStatus.FAILED for chunk in chunks)
+    worker_ctx["qdrant_service"].upsert_chunks.assert_awaited_once()  # type: ignore[attr-defined]
+    worker_ctx["qdrant_service"].delete_chunks.assert_awaited_once()  # type: ignore[attr-defined]

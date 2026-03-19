@@ -1,0 +1,1 @@
+Plain text files should also be chunked and embedded.

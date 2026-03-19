@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.constants import DEFAULT_AGENT_ID
 from app.db.models import BackgroundTask, Source
 from app.db.models.enums import BackgroundTaskStatus, BackgroundTaskType, SourceStatus, SourceType
+from app.services.docling_parser import ChunkData
+from app.services.snapshot import SnapshotService
 from app.workers.tasks.ingestion import process_ingestion
 
 
@@ -70,6 +72,65 @@ async def test_upload_endpoint_accepts_markdown_and_txt(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("committed_data_cleanup")
+async def test_upload_endpoint_persists_language_metadata(
+    api_client,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    response = await api_client.post(
+        "/api/admin/sources",
+        data={"metadata": '{"title":"Localized document","language":"russian"}'},
+        files={"file": ("doc.md", b"hello world", "text/markdown")},
+    )
+
+    assert response.status_code == 202
+
+    sources, _ = await _load_source_and_task(session_factory)
+    assert len(sources) == 1
+    assert sources[0].language == "russian"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_upload_endpoint_accepts_max_length_language(
+    api_client,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    language = "r" * 32
+
+    response = await api_client.post(
+        "/api/admin/sources",
+        data={"metadata": f'{{"title":"Localized document","language":"{language}"}}'},
+        files={"file": ("doc.md", b"hello world", "text/markdown")},
+    )
+
+    assert response.status_code == 202
+
+    sources, _ = await _load_source_and_task(session_factory)
+    assert len(sources) == 1
+    assert sources[0].language == language
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_upload_endpoint_normalizes_blank_language_to_null(
+    api_client,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    response = await api_client.post(
+        "/api/admin/sources",
+        data={"metadata": '{"title":"Localized document","language":"   "}'},
+        files={"file": ("doc.md", b"hello world", "text/markdown")},
+    )
+
+    assert response.status_code == 202
+
+    sources, _ = await _load_source_and_task(session_factory)
+    assert len(sources) == 1
+    assert sources[0].language is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
 async def test_upload_endpoint_rejects_unsupported_extension(api_client) -> None:
     response = await api_client.post(
         "/api/admin/sources",
@@ -121,6 +182,7 @@ async def test_upload_endpoint_rejects_oversized_file(admin_app) -> None:
         "{}",
         "not json",
         '{"title":"Doc","public_url":"ftp://example.com"}',
+        '{"title":"Doc","language":"' + ("r" * 33) + '"}',
     ],
 )
 async def test_upload_endpoint_rejects_invalid_metadata(api_client, metadata: str) -> None:
@@ -178,7 +240,37 @@ async def test_upload_worker_and_task_status_round_trip(
     assert upload_response.status_code == 202
     task_id = upload_response.json()["task_id"]
 
-    await process_ingestion({"session_factory": session_factory}, task_id)
+    await process_ingestion(
+        {
+            "session_factory": session_factory,
+            "storage_service": SimpleNamespace(download=AsyncMock(return_value=b"# hello world")),
+            "docling_parser": SimpleNamespace(
+                parse_and_chunk=AsyncMock(
+                    return_value=[
+                        ChunkData(
+                            text_content="hello world",
+                            token_count=2,
+                            chunk_index=0,
+                            anchor_page=None,
+                            anchor_chapter="hello",
+                            anchor_section=None,
+                        )
+                    ]
+                )
+            ),
+            "embedding_service": SimpleNamespace(
+                model="gemini-embedding-2-preview",
+                dimensions=3,
+                embed_texts=AsyncMock(return_value=[[0.1, 0.2, 0.3]]),
+            ),
+            "qdrant_service": SimpleNamespace(
+                upsert_chunks=AsyncMock(),
+                delete_chunks=AsyncMock(),
+            ),
+            "snapshot_service": SnapshotService(),
+        },
+        task_id,
+    )
 
     task_response = await api_client.get(f"/api/admin/tasks/{task_id}")
     assert task_response.status_code == 200

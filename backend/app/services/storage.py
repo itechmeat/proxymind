@@ -82,5 +82,16 @@ class StorageService:
             content_type=content_type or "application/octet-stream",
         )
 
+    async def download(self, object_key: str) -> bytes:
+        def _download() -> bytes:
+            response = self._client.get_object(self.bucket_name, object_key)
+            try:
+                return response.read()
+            finally:
+                response.close()
+                response.release_conn()
+
+        return await asyncio.to_thread(_download)
+
     async def delete(self, object_key: str) -> None:
         await asyncio.to_thread(self._client.remove_object, self.bucket_name, object_key)

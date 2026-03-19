@@ -37,7 +37,7 @@ Phase outcome: minimal working product. Upload a Markdown file → get a snapsho
   - **Verification:** `curl -F file=@doc.md /api/admin/sources` → 202 + task_id; file in MinIO; record in PG
   - Tasks: MinIO client, upload endpoint, task queue (arq), GET /api/admin/tasks/:id
 
-- [ ] **S2-02: Parse + chunk + embed**
+- [x] **S2-02: Parse + chunk + embed**
       Worker picks up the task: Docling parses the file → HybridChunker splits into chunks with anchor metadata → Gemini Embedding 2 generates dense vectors → upsert into Qdrant with payload.
   - **Outcome:** uploaded document is indexed and available for search
   - **Verification:** upload MD file → chunks in PG with metadata; chunks in Qdrant; vector search returns results

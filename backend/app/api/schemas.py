@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, UrlConstraints, field_validator
 
 from app.db.models.background_task import BackgroundTask
 
@@ -12,9 +12,17 @@ from app.db.models.background_task import BackgroundTask
 class SourceUploadMetadata(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=2000)
-    public_url: HttpUrl | None = None
+    public_url: Annotated[AnyHttpUrl, UrlConstraints(max_length=2048)] | None = None
     catalog_item_id: uuid.UUID | None = None
     language: str | None = Field(default=None, max_length=32)
+
+    @field_validator("language", mode="before")
+    @classmethod
+    def normalize_language(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return value
 
 
 class SourceUploadResponse(BaseModel):

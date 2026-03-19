@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, ForeignKey, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import (
@@ -52,6 +52,7 @@ class Source(
     file_path: Mapped[str] = mapped_column(String(2048), nullable=False)
     file_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     mime_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    language: Mapped[str | None] = mapped_column(String(32), nullable=True)
     catalog_item_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("catalog_items.id"),
         nullable=True,
@@ -141,6 +142,15 @@ class Chunk(PrimaryKeyMixin, TenantMixin, KnowledgeScopeMixin, TimestampMixin, B
 
 class KnowledgeSnapshot(PrimaryKeyMixin, TenantMixin, KnowledgeScopeMixin, TimestampMixin, Base):
     __tablename__ = "knowledge_snapshots"
+    __table_args__ = (
+        Index(
+            "uq_one_draft_per_scope",
+            "agent_id",
+            "knowledge_base_id",
+            unique=True,
+            postgresql_where=text("status = 'draft'"),
+        ),
+    )
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

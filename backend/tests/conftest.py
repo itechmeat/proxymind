@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -14,6 +15,7 @@ from alembic.config import Config
 from fastapi import FastAPI
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from testcontainers.core.container import DockerContainer
 from testcontainers.postgres import PostgresContainer
 
 from app.api.admin import router as admin_router
@@ -44,6 +46,7 @@ TRUNCATE_TEST_DATA_SQL = text(
     RESTART IDENTITY CASCADE
     """
 )
+DELETE_KNOWLEDGE_SNAPSHOTS_SQL = text("DELETE FROM knowledge_snapshots")
 
 
 def _connection_url_to_env(url: str) -> dict[str, str]:
@@ -179,10 +182,37 @@ async def committed_data_cleanup(
 ) -> None:
     async with session_factory() as session:
         await session.execute(TRUNCATE_TEST_DATA_SQL)
+        # knowledge_snapshots cannot participate in the shared TRUNCATE ... CASCADE
+        # helper because that would also truncate the seeded agents table via
+        # agents.active_snapshot_id -> knowledge_snapshots.
+        await session.execute(DELETE_KNOWLEDGE_SNAPSHOTS_SQL)
         await session.commit()
 
     yield
 
     async with session_factory() as session:
         await session.execute(TRUNCATE_TEST_DATA_SQL)
+        await session.execute(DELETE_KNOWLEDGE_SNAPSHOTS_SQL)
         await session.commit()
+
+
+@pytest.fixture(scope="session")
+def qdrant_url() -> str:
+    with DockerContainer("qdrant/qdrant:v1.17.0").with_exposed_ports(6333) as container:
+        host = container.get_container_host_ip()
+        port = container.get_exposed_port(6333)
+        url = f"http://{host}:{port}"
+
+        deadline = time.time() + 30
+        last_error: Exception | None = None
+        while time.time() < deadline:
+            try:
+                response = httpx.get(f"{url}/collections", timeout=2.0)
+                if response.status_code == 200:
+                    yield url
+                    return
+            except Exception as error:  # pragma: no cover - best effort wait loop
+                last_error = error
+            time.sleep(1)
+
+        raise RuntimeError("Qdrant test container did not become ready") from last_error

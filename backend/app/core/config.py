@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     minio_root_password: str = Field(min_length=1)
     minio_bucket_sources: str = Field(default="sources", min_length=1)
 
+    gemini_api_key: str | None = Field(default=None)
+    embedding_model: str = Field(default="gemini-embedding-2-preview", min_length=1)
+    embedding_dimensions: int = Field(default=3072, ge=128, le=3072)
+    embedding_batch_size: int = Field(default=100, ge=1)
+    chunk_max_tokens: int = Field(default=1024, ge=1, le=8192)
+    qdrant_collection: str = Field(default="proxymind_chunks", min_length=1)
+    bm25_language: str = Field(default="english", min_length=1)
+
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     log_level: str = "info"
