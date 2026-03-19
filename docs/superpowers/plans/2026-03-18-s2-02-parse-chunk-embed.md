@@ -281,7 +281,7 @@ A short paragraph with minimal content.
 ```
 
 `backend/tests/fixtures/sample.txt`:
-```
+```text
 This is a plain text document without any structure.
 It contains multiple sentences that should be chunked based on size.
 The chunker should handle plain text gracefully.

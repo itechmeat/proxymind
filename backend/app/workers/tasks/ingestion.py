@@ -46,6 +46,7 @@ class PipelineServices:
     embedding_service: EmbeddingService
     qdrant_service: QdrantService
     snapshot_service: SnapshotService
+    default_language: str
 
 
 @dataclass(slots=True)
@@ -64,6 +65,7 @@ def _load_pipeline_services(ctx: dict[str, Any]) -> PipelineServices:
         embedding_service = ctx["embedding_service"]
         qdrant_service = ctx["qdrant_service"]
         snapshot_service = ctx["snapshot_service"]
+        settings = ctx["settings"]
     except KeyError as error:
         raise RuntimeError(
             f"Worker context is missing required pipeline service: {error.args[0]}"
@@ -79,6 +81,8 @@ def _load_pipeline_services(ctx: dict[str, Any]) -> PipelineServices:
         raise RuntimeError("Worker context contains an invalid Qdrant service")
     if not hasattr(snapshot_service, "get_or_create_draft"):
         raise RuntimeError("Worker context contains an invalid snapshot service")
+    if not hasattr(settings, "bm25_language"):
+        raise RuntimeError("Worker context contains invalid settings for ingestion")
 
     return PipelineServices(
         storage_service=storage_service,
@@ -86,6 +90,7 @@ def _load_pipeline_services(ctx: dict[str, Any]) -> PipelineServices:
         embedding_service=embedding_service,
         qdrant_service=qdrant_service,
         snapshot_service=snapshot_service,
+        default_language=settings.bm25_language,
     )
 
 
@@ -164,7 +169,7 @@ async def _run_ingestion_pipeline(
         raise RuntimeError("Ingestion task is missing a source")
 
     persisted_state: PersistedPipelineState | None = None
-    qdrant_upsert_completed = False
+    qdrant_write_may_have_happened = False
 
     try:
         file_bytes = await services.storage_service.download(source.file_path)
@@ -261,13 +266,13 @@ async def _run_ingestion_pipeline(
                 anchor_section=row.anchor_section,
                 anchor_timecode=row.anchor_timecode,
                 source_type=source.source_type,
-                language=source.language,
+                language=source.language or services.default_language,
                 status=ChunkStatus.INDEXED,
             )
             for row, vector in zip(chunk_rows, vectors, strict=True)
         ]
+        qdrant_write_may_have_happened = True
         await services.qdrant_service.upsert_chunks(qdrant_points)
-        qdrant_upsert_completed = True
         task.progress = 95
         await session.commit()
 
@@ -285,7 +290,7 @@ async def _run_ingestion_pipeline(
         )
     except Exception:
         await session.rollback()
-        if qdrant_upsert_completed and persisted_state is not None:
+        if qdrant_write_may_have_happened and persisted_state is not None:
             await _cleanup_qdrant_chunks(services.qdrant_service, persisted_state.chunk_ids)
         if persisted_state is not None:
             await _mark_persisted_records_failed(

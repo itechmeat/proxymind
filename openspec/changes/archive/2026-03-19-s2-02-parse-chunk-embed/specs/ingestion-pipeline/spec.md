@@ -96,7 +96,7 @@ The `EmbeddingService` SHALL batch texts into groups of up to `embedding_batch_s
 
 ### Requirement: Tenacity retry on embedding API calls
 
-Each batch embedding API call SHALL be wrapped with tenacity retry. The retry SHALL trigger on HTTP 429 (rate limit) and 5xx errors. The retry strategy SHALL use exponential backoff with a maximum of 3 attempts. Docling parse calls SHALL NOT be retried (deterministic failures do not benefit from retry).
+Each batch embedding API call SHALL be wrapped with tenacity retry. The retry SHALL trigger on HTTP 429 (rate limit) and 5xx errors. The retry strategy SHALL use exponential backoff with `multiplier=1`, `min=1`, `max=8`, and a maximum of 3 attempts. Docling parse calls SHALL NOT be retried (deterministic failures do not benefit from retry).
 
 #### Scenario: Transient 429 error is retried
 
@@ -157,7 +157,7 @@ The ingestion worker task (`app/workers/tasks/ingestion.py`) SHALL replace the n
 
 ### Requirement: Two-transaction boundary
 
-The pipeline SHALL use two distinct transaction scopes. Tx 1 (Stage 3) SHALL persist the draft snapshot, Document, DocumentVersion, and Chunk records, and COMMIT before any external API calls. Tx 2 (Stage 6) SHALL update Chunk statuses to INDEXED, update DocumentVersion/Document/Source to READY, create the EmbeddingProfile, and mark the task COMPLETE. Tx 2 SHALL only execute after successful Qdrant upsert.
+The pipeline SHALL use two distinct transaction scopes. Tx 1 (Stage 3) SHALL persist the draft snapshot, Document, DocumentVersion, and Chunk records, and COMMIT before any external API calls. Tx 2 (Stage 6) SHALL, only after successful Qdrant upsert, update Chunk statuses to INDEXED; update DocumentVersion, Document, and Source to READY; create the EmbeddingProfile; and mark the task COMPLETE.
 
 #### Scenario: Tx 1 commits before Gemini API call
 
@@ -189,7 +189,7 @@ The worker task SHALL update `BackgroundTask.progress` at each stage boundary: S
 
 ### Requirement: All-or-nothing error handling with failure cleanup
 
-On any failure after Tx 1 has committed, the pipeline SHALL execute a recovery transaction that marks the DocumentVersion, all associated Chunks, and the Document as FAILED. The Source SHALL be marked FAILED. The BackgroundTask SHALL be marked FAILED with `error_message` populated. No partial data SHALL exist in Qdrant (vectors are upserted only after ALL embeddings succeed). Failed records in PostgreSQL are NOT deleted; they serve as audit trail.
+On any failure after Tx 1 has committed, the pipeline SHALL execute a recovery transaction that marks the DocumentVersion, all associated Chunks, and the Document as FAILED. The Source SHALL be marked FAILED. The BackgroundTask SHALL be marked FAILED with `error_message` populated. Qdrant points SHALL use stable deterministic IDs derived from `chunk_id`, so re-upserts remain idempotent. If the worker cannot prove whether a Qdrant upsert wrote data, it SHALL attempt compensating deletion by those same `chunk_id` values before final failure handling. Failed records in PostgreSQL are NOT deleted; they serve as audit trail.
 
 #### Scenario: Failure during embedding marks all records as FAILED
 
@@ -210,6 +210,12 @@ On any failure after Tx 1 has committed, the pipeline SHALL execute a recovery t
 
 - **WHEN** ingestion fails and records are marked FAILED
 - **THEN** the DocumentVersion and Chunk records SHALL remain in PostgreSQL (not deleted)
+
+#### Scenario: Ambiguous Qdrant upsert triggers compensating cleanup
+
+- **WHEN** the Qdrant upsert may have partially succeeded but the worker loses the response or later finalization fails
+- **THEN** the worker SHALL attempt to delete the affected Qdrant points by deterministic `chunk_id`
+- **AND** a later retry or re-upsert SHALL remain idempotent because the point IDs are stable
 
 ---
 
@@ -239,17 +245,17 @@ The pipeline SHALL create one `EmbeddingProfile` record per successful ingestion
 
 ### Requirement: Worker service initialization
 
-The arq worker `on_startup` hook SHALL initialize and store in the worker context: `StorageService` (MinIO client), `QdrantService` (async Qdrant client), `EmbeddingService` (GenAI client), and `settings`. The `on_startup` hook SHALL call `qdrant_service.ensure_collection()` (idempotent). The `on_shutdown` hook SHALL close the Qdrant client connection.
+The arq worker `on_startup` hook SHALL initialize and store in the worker context: `StorageService` (MinIO client), `DoclingParser`, `QdrantService` (async Qdrant client), `EmbeddingService` (GenAI client), `SnapshotService`, and `settings`. The `on_startup` hook SHALL call `qdrant_service.ensure_collection()` (idempotent). The `on_shutdown` hook SHALL close the Qdrant client connection.
 
 #### Scenario: All services available in worker context after startup
 
 - **WHEN** the arq worker completes startup
-- **THEN** `ctx["storage_service"]`, `ctx["qdrant_service"]`, `ctx["embedding_service"]`, and `ctx["settings"]` SHALL all be present and initialized
+- **THEN** `ctx["storage_service"]`, `ctx["docling_parser"]`, `ctx["qdrant_service"]`, `ctx["embedding_service"]`, `ctx["snapshot_service"]`, and `ctx["settings"]` SHALL all be present and initialized
 
 #### Scenario: Qdrant collection ensured on startup
 
 - **WHEN** the arq worker starts
-- **THEN** `ensure_collection()` SHALL be called exactly once
+- **THEN** `ensure_collection()` SHALL be called during startup to verify collection readiness
 
 #### Scenario: Qdrant client closed on shutdown
 

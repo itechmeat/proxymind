@@ -243,6 +243,7 @@ async def test_upload_worker_and_task_status_round_trip(
     await process_ingestion(
         {
             "session_factory": session_factory,
+            "settings": SimpleNamespace(bm25_language="english"),
             "storage_service": SimpleNamespace(download=AsyncMock(return_value=b"# hello world")),
             "docling_parser": SimpleNamespace(
                 parse_and_chunk=AsyncMock(

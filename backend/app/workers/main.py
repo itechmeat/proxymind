@@ -43,7 +43,7 @@ async def on_startup(ctx: dict[str, Any]) -> None:
         model=settings.embedding_model,
         dimensions=settings.embedding_dimensions,
         batch_size=settings.embedding_batch_size,
-        api_key=settings.gemini_api_key or None,
+        api_key=settings.gemini_api_key,
     )
     ctx["db_engine"] = engine
     ctx["session_factory"] = create_session_factory(engine)

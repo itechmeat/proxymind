@@ -241,7 +241,7 @@ These records are NOT deleted — they serve as audit trail. **Retry path:** re-
 
 ### New Services
 
-```
+```text
 app/services/
 ├── storage.py          # Existing — add download() method
 ├── source.py           # Existing — no changes
@@ -325,7 +325,7 @@ sequenceDiagram
 
 ### Data Flow: Chunk through the pipeline
 
-```
+```text
 Source file (MinIO)
   │
   ▼

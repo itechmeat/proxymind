@@ -102,6 +102,7 @@ def _worker_context(
     )
     return {
         "session_factory": session_factory,
+        "settings": SimpleNamespace(bm25_language="english"),
         "storage_service": SimpleNamespace(download=AsyncMock(return_value=b"# ProxyMind")),
         "docling_parser": SimpleNamespace(parse_and_chunk=AsyncMock(return_value=chunk_data)),
         "embedding_service": embedding_service,
@@ -153,6 +154,8 @@ async def test_worker_processes_task_full_lifecycle(
     assert snapshots[0].chunk_count == 2
     assert len(embedding_profiles) == 1
     worker_ctx["qdrant_service"].upsert_chunks.assert_awaited_once()  # type: ignore[attr-defined]
+    qdrant_points = worker_ctx["qdrant_service"].upsert_chunks.await_args.args[0]  # type: ignore[attr-defined]
+    assert all(point.language == "english" for point in qdrant_points)
 
 
 @pytest.mark.asyncio
@@ -240,6 +243,34 @@ async def test_worker_marks_failed_on_unhandled_exception(
     assert chunks
     assert all(chunk.status is ChunkStatus.FAILED for chunk in chunks)
     worker_ctx["qdrant_service"].upsert_chunks.assert_not_awaited()  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_worker_attempts_qdrant_cleanup_when_upsert_raises(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id, task_id = await _seed_task(session_factory)
+    worker_ctx = _worker_context(session_factory)
+    worker_ctx["qdrant_service"].upsert_chunks = AsyncMock(
+        side_effect=RuntimeError("qdrant timeout")
+    )  # type: ignore[index]
+
+    await ingestion.process_ingestion(worker_ctx, str(task_id))
+
+    async with session_factory() as session:
+        task = await session.get(BackgroundTask, task_id)
+        source = await session.get(Source, source_id)
+        chunks = (await session.scalars(select(Chunk))).all()
+
+    assert task is not None
+    assert source is not None
+    assert task.status is BackgroundTaskStatus.FAILED
+    assert task.error_message == "qdrant timeout"
+    assert source.status is SourceStatus.FAILED
+    assert chunks
+    assert all(chunk.status is ChunkStatus.FAILED for chunk in chunks)
+    worker_ctx["qdrant_service"].delete_chunks.assert_awaited_once()  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio
