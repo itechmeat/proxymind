@@ -62,6 +62,7 @@ class SourceService:
             file_path=file_path,
             file_size_bytes=file_size_bytes,
             mime_type=mime_type,
+            language=metadata.language,
             catalog_item_id=metadata.catalog_item_id,
             status=SourceStatus.PENDING,
         )

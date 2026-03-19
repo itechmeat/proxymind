@@ -41,7 +41,9 @@ The API SHALL expose a `POST /api/admin/sources` endpoint that accepts a multipa
 
 ### Requirement: Upload metadata validation
 
-The `metadata` field SHALL be validated as JSON conforming to a Pydantic schema with the following fields: `title` (string, required, 1-255 characters), `description` (string, optional, max 2000 characters), `public_url` (string, optional, valid HTTP/HTTPS URL), `catalog_item_id` (UUID, optional), `language` (string, optional). The `source_type` SHALL be determined automatically from the file extension (`.md` -> MARKDOWN, `.txt` -> TXT) and SHALL NOT be part of the metadata input.
+The `metadata` field SHALL be validated as JSON conforming to a Pydantic schema with the following fields: `title` (string, required, 1-255 characters), `description` (string, optional, max 2000 characters), `public_url` (string, optional, valid HTTP/HTTPS URL, max 2048 characters), `catalog_item_id` (UUID, optional), `language` (string, optional, max 32 characters). The `source_type` SHALL be determined automatically from the file extension (`.md` -> MARKDOWN, `.txt` -> TXT) and SHALL NOT be part of the metadata input.
+
+The `language` field from `SourceUploadMetadata` SHALL be persisted on the `Source` record. The `source.py` service `create_source_and_task()` method MUST pass `language=metadata.language` to the Source constructor. Empty or whitespace-only `language` values SHALL be normalized to NULL before persistence. A nullable `language` column (VARCHAR(32)) exists on the `sources` table (added in S2-02 migration 004). Existing sources have NULL, which means "use system default."
 
 #### Scenario: Missing title in metadata
 
@@ -70,6 +72,21 @@ The `metadata` field SHALL be validated as JSON conforming to a Pydantic schema 
 
 - **WHEN** a `.txt` file is uploaded
 - **THEN** the created Source record SHALL have `source_type` set to TXT
+
+#### Scenario: Language field is persisted on Source record
+
+- **WHEN** a POST request is sent with metadata containing `"language": "russian"`
+- **THEN** the created Source record in PostgreSQL SHALL have `language` set to `"russian"`
+
+#### Scenario: Missing language field results in NULL
+
+- **WHEN** a POST request is sent with metadata that does not include `language`
+- **THEN** the created Source record in PostgreSQL SHALL have `language` set to NULL
+
+#### Scenario: Blank language is normalized to NULL
+
+- **WHEN** a POST request is sent with metadata containing `"language": "   "`
+- **THEN** the created Source record in PostgreSQL SHALL have `language` set to NULL
 
 ---
 
