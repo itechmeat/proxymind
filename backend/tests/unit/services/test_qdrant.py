@@ -15,6 +15,7 @@ from app.services.qdrant import (
     CollectionSchemaMismatchError,
     QdrantChunkPoint,
     QdrantService,
+    RetrievedChunk,
 )
 
 
@@ -209,3 +210,115 @@ async def test_delete_chunks_sends_point_ids_to_qdrant() -> None:
     assert kwargs["collection_name"] == "proxymind_chunks"
     assert kwargs["wait"] is True
     assert kwargs["points_selector"].points == [str(chunk_id) for chunk_id in chunk_ids]
+
+
+@pytest.mark.asyncio
+async def test_search_builds_dense_query_with_scope_filters() -> None:
+    snapshot_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    knowledge_base_id = uuid.uuid4()
+    chunk_id = uuid.uuid4()
+    source_id = uuid.uuid4()
+    client = SimpleNamespace(
+        query_points=AsyncMock(
+            return_value=SimpleNamespace(
+                points=[
+                    SimpleNamespace(
+                        score=0.91,
+                        payload={
+                            "chunk_id": str(chunk_id),
+                            "source_id": str(source_id),
+                            "text_content": "retrieved body",
+                            "anchor_page": 7,
+                            "anchor_chapter": "Ch. 1",
+                            "anchor_section": "Intro",
+                            "anchor_timecode": None,
+                        },
+                    )
+                ]
+            )
+        )
+    )
+    service = QdrantService(
+        client=client,  # type: ignore[arg-type]
+        collection_name="proxymind_chunks",
+        embedding_dimensions=3,
+    )
+
+    results = await service.search(
+        vector=[0.1, 0.2, 0.3],
+        snapshot_id=snapshot_id,
+        agent_id=agent_id,
+        knowledge_base_id=knowledge_base_id,
+        limit=5,
+        score_threshold=0.5,
+    )
+
+    assert results == [
+        RetrievedChunk(
+            chunk_id=chunk_id,
+            source_id=source_id,
+            text_content="retrieved body",
+            score=0.91,
+            anchor_metadata={
+                "anchor_page": 7,
+                "anchor_chapter": "Ch. 1",
+                "anchor_section": "Intro",
+                "anchor_timecode": None,
+            },
+        )
+    ]
+    kwargs = client.query_points.await_args.kwargs
+    assert kwargs["query"] == [0.1, 0.2, 0.3]
+    assert kwargs["using"] == "dense"
+    assert kwargs["limit"] == 5
+    assert kwargs["score_threshold"] == 0.5
+    filters = kwargs["query_filter"].must
+    assert [(condition.key, condition.match.value) for condition in filters] == [
+        ("snapshot_id", str(snapshot_id)),
+        ("agent_id", str(agent_id)),
+        ("knowledge_base_id", str(knowledge_base_id)),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_search_omits_score_threshold_when_disabled() -> None:
+    client = SimpleNamespace(query_points=AsyncMock(return_value=SimpleNamespace(points=[])))
+    service = QdrantService(
+        client=client,  # type: ignore[arg-type]
+        collection_name="proxymind_chunks",
+        embedding_dimensions=3,
+    )
+
+    results = await service.search(
+        vector=[0.3, 0.2, 0.1],
+        snapshot_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        knowledge_base_id=uuid.uuid4(),
+        limit=3,
+        score_threshold=None,
+    )
+
+    assert results == []
+    kwargs = client.query_points.await_args.kwargs
+    assert "score_threshold" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_search_returns_empty_list_when_qdrant_finds_nothing() -> None:
+    client = SimpleNamespace(query_points=AsyncMock(return_value=SimpleNamespace(points=[])))
+    service = QdrantService(
+        client=client,  # type: ignore[arg-type]
+        collection_name="proxymind_chunks",
+        embedding_dimensions=3,
+    )
+
+    results = await service.search(
+        vector=[0.9, 0.1, 0.0],
+        snapshot_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        knowledge_base_id=uuid.uuid4(),
+        limit=2,
+    )
+
+    assert results == []

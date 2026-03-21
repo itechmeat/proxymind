@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     chunk_max_tokens: int = Field(default=1024, ge=1, le=8192)
     qdrant_collection: str = Field(default="proxymind_chunks", min_length=1)
     bm25_language: str = Field(default="english", min_length=1)
+    llm_model: str = Field(default="openai/gpt-4o", min_length=1)
+    llm_api_key: str | None = Field(default=None)
+    llm_api_base: str | None = Field(default=None)
+    llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    retrieval_top_n: int = Field(default=5, ge=1)
+    min_retrieved_chunks: int = Field(default=1, ge=0)
+    min_dense_similarity: float | None = Field(default=None, ge=0.0, le=1.0)
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000

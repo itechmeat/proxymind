@@ -47,6 +47,15 @@ class QdrantChunkPoint:
     status: ChunkStatus
 
 
+@dataclass(slots=True, frozen=True)
+class RetrievedChunk:
+    chunk_id: UUID
+    source_id: UUID
+    text_content: str
+    score: float
+    anchor_metadata: dict[str, int | str | None]
+
+
 class QdrantService:
     def __init__(
         self,
@@ -132,6 +141,45 @@ class QdrantService:
 
         await self._delete_points([str(chunk_id) for chunk_id in chunk_ids])
 
+    async def search(
+        self,
+        *,
+        vector: list[float],
+        snapshot_id: UUID,
+        agent_id: UUID,
+        knowledge_base_id: UUID,
+        limit: int,
+        score_threshold: float | None = None,
+    ) -> list[RetrievedChunk]:
+        search_kwargs: dict[str, Any] = {
+            "collection_name": self._collection_name,
+            "query": vector,
+            "using": "dense",
+            "query_filter": models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="snapshot_id",
+                        match=models.MatchValue(value=str(snapshot_id)),
+                    ),
+                    models.FieldCondition(
+                        key="agent_id",
+                        match=models.MatchValue(value=str(agent_id)),
+                    ),
+                    models.FieldCondition(
+                        key="knowledge_base_id",
+                        match=models.MatchValue(value=str(knowledge_base_id)),
+                    ),
+                ]
+            ),
+            "limit": limit,
+            "with_payload": True,
+        }
+        if score_threshold is not None:
+            search_kwargs["score_threshold"] = score_threshold
+
+        response = await self._search_points(**search_kwargs)
+        return [self._to_retrieved_chunk(point) for point in response.points]
+
     async def close(self) -> None:
         await self._client.close()
 
@@ -158,6 +206,31 @@ class QdrantService:
             collection_name=self._collection_name,
             points_selector=models.PointIdsList(points=point_ids),
             wait=True,
+        )
+
+    @retry(
+        retry=retry_if_exception_type((httpx.TransportError, ResponseHandlingException)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=8),
+        reraise=True,
+    )
+    async def _search_points(self, **kwargs: Any) -> models.QueryResponse:
+        return await self._client.query_points(**kwargs)
+
+    @staticmethod
+    def _to_retrieved_chunk(point: Any) -> RetrievedChunk:
+        payload = point.payload or {}
+        return RetrievedChunk(
+            chunk_id=UUID(str(payload["chunk_id"])),
+            source_id=UUID(str(payload["source_id"])),
+            text_content=str(payload["text_content"]),
+            score=float(point.score),
+            anchor_metadata={
+                "anchor_page": payload.get("anchor_page"),
+                "anchor_chapter": payload.get("anchor_chapter"),
+                "anchor_section": payload.get("anchor_section"),
+                "anchor_timecode": payload.get("anchor_timecode"),
+            },
         )
 
     @staticmethod

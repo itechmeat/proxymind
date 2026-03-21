@@ -8,7 +8,14 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
-from app.services import SnapshotService, SourceService, StorageService
+from app.services import (
+    ChatService,
+    LLMService,
+    RetrievalService,
+    SnapshotService,
+    SourceService,
+    StorageService,
+)
 from app.services.source import TaskEnqueuer
 
 
@@ -42,3 +49,27 @@ def get_snapshot_service(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SnapshotService:
     return SnapshotService(session=session)
+
+
+def get_llm_service(request: Request) -> LLMService:
+    return request.app.state.llm_service
+
+
+def get_retrieval_service(request: Request) -> RetrievalService:
+    return request.app.state.retrieval_service
+
+
+def get_chat_service(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    snapshot_service: Annotated[SnapshotService, Depends(get_snapshot_service)],
+    retrieval_service: Annotated[RetrievalService, Depends(get_retrieval_service)],
+    llm_service: Annotated[LLMService, Depends(get_llm_service)],
+) -> ChatService:
+    return ChatService(
+        session=session,
+        snapshot_service=snapshot_service,
+        retrieval_service=retrieval_service,
+        llm_service=llm_service,
+        min_retrieved_chunks=request.app.state.settings.min_retrieved_chunks,
+    )
