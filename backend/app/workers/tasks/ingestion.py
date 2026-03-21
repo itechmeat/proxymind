@@ -79,7 +79,9 @@ def _load_pipeline_services(ctx: dict[str, Any]) -> PipelineServices:
         raise RuntimeError("Worker context contains an invalid embedding service")
     if not hasattr(qdrant_service, "upsert_chunks") or not hasattr(qdrant_service, "delete_chunks"):
         raise RuntimeError("Worker context contains an invalid Qdrant service")
-    if not hasattr(snapshot_service, "get_or_create_draft"):
+    if not hasattr(snapshot_service, "get_or_create_draft") or not hasattr(
+        snapshot_service, "ensure_draft_or_rebind"
+    ):
         raise RuntimeError("Worker context contains an invalid snapshot service")
     if not hasattr(settings, "bm25_language"):
         raise RuntimeError("Worker context contains invalid settings for ingestion")
@@ -208,6 +210,13 @@ async def _run_ingestion_pipeline(
             status=DocumentVersionStatus.PROCESSING,
         )
         session.add_all([document, document_version])
+
+        snapshot = await services.snapshot_service.ensure_draft_or_rebind(
+            session,
+            snapshot_id=snapshot.id,
+            agent_id=source.agent_id,
+            knowledge_base_id=source.knowledge_base_id,
+        )
 
         chunk_rows = [
             Chunk(

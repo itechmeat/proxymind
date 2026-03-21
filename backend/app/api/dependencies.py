@@ -8,7 +8,7 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
-from app.services import SourceService, StorageService
+from app.services import SnapshotService, SourceService, StorageService
 from app.services.source import TaskEnqueuer
 
 
@@ -36,3 +36,9 @@ def get_source_service(
     task_enqueuer: Annotated[TaskEnqueuer, Depends(get_task_enqueuer)],
 ) -> SourceService:
     return SourceService(session=session, task_enqueuer=task_enqueuer)
+
+
+def get_snapshot_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SnapshotService:
+    return SnapshotService(session=session)

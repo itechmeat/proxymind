@@ -9,12 +9,22 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.db.models import Agent, Chunk, Document, DocumentVersion, Message, Session, Source
+from app.db.models import (
+    Agent,
+    Chunk,
+    Document,
+    DocumentVersion,
+    KnowledgeSnapshot,
+    Message,
+    Session,
+    Source,
+)
 from app.db.models.dialogue import MessageRole, MessageStatus, SessionChannel, SessionStatus
 from app.db.models.knowledge import (
     ChunkStatus,
     DocumentStatus,
     DocumentVersionStatus,
+    SnapshotStatus,
     SourceStatus,
     SourceType,
 )
@@ -77,6 +87,19 @@ async def test_schema_integrity(db_session: AsyncSession) -> None:
     chunk_index_names = {row[0] for row in chunk_indexes}
     assert "ix_chunks_snapshot_id" in chunk_index_names
     assert "ix_chunks_source_id" in chunk_index_names
+
+    snapshot_indexes = await db_session.execute(
+        text(
+            """
+            SELECT indexname
+            FROM pg_indexes
+            WHERE schemaname = 'public' AND tablename = 'knowledge_snapshots'
+            """
+        )
+    )
+    snapshot_index_names = {row[0] for row in snapshot_indexes}
+    assert "uq_one_draft_per_scope" in snapshot_index_names
+    assert "uq_one_active_per_scope" in snapshot_index_names
 
     seed_agent = await db_session.get(Agent, EXPECTED_AGENT_ID)
     assert seed_agent is not None
@@ -208,6 +231,54 @@ async def test_relationships_and_fk_constraints(
     with pytest.raises(IntegrityError):
         await db_session.commit()
     await db_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_partial_unique_index_allows_only_one_active_per_scope(
+    db_session: AsyncSession,
+    seeded_agent: Agent,
+) -> None:
+    owner_id = seeded_agent.owner_id
+    agent_id = seeded_agent.id
+    default_knowledge_base_id = seeded_agent.default_knowledge_base_id
+
+    db_session.add(
+        KnowledgeSnapshot(
+            id=uuid.uuid7(),
+            owner_id=owner_id,
+            agent_id=agent_id,
+            knowledge_base_id=default_knowledge_base_id,
+            name="Active 1",
+            status=SnapshotStatus.ACTIVE,
+        )
+    )
+    await db_session.commit()
+
+    db_session.add(
+        KnowledgeSnapshot(
+            id=uuid.uuid7(),
+            owner_id=owner_id,
+            agent_id=agent_id,
+            knowledge_base_id=default_knowledge_base_id,
+            name="Active 2",
+            status=SnapshotStatus.ACTIVE,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+    await db_session.rollback()
+
+    db_session.add(
+        KnowledgeSnapshot(
+            id=uuid.uuid7(),
+            owner_id=owner_id,
+            agent_id=agent_id,
+            knowledge_base_id=uuid.uuid7(),
+            name="Active other scope",
+            status=SnapshotStatus.ACTIVE,
+        )
+    )
+    await db_session.commit()
 
 
 @pytest.mark.asyncio

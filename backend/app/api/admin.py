@@ -3,17 +3,47 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from pydantic import ValidationError
 
-from app.api.dependencies import get_source_service, get_storage_service
+from app.api.dependencies import get_snapshot_service, get_source_service, get_storage_service
 from app.api.schemas import SourceUploadMetadata, SourceUploadResponse, TaskStatusResponse
-from app.core.constants import DEFAULT_AGENT_ID
-from app.services import StorageService, determine_source_type, validate_file_extension
+from app.api.snapshot_schemas import SnapshotResponse
+from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
+from app.db.models.enums import SnapshotStatus
+from app.services import (
+    SnapshotConflictError,
+    SnapshotNotFoundError,
+    SnapshotService,
+    SnapshotValidationError,
+    StorageService,
+    determine_source_type,
+    validate_file_extension,
+)
 from app.services.source import SourcePersistenceError, SourceService, TaskEnqueueError
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 UPLOAD_READ_CHUNK_SIZE = 64 * 1024
+
+
+def _raise_snapshot_http_error(error: Exception) -> None:
+    if isinstance(error, SnapshotNotFoundError):
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    if isinstance(error, SnapshotConflictError):
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if isinstance(error, SnapshotValidationError):
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    raise error
 
 
 async def _read_upload_content(file: UploadFile, max_size_bytes: int) -> bytes:
@@ -117,3 +147,77 @@ async def get_task_status(
     if task is None:
         raise HTTPException(status_code=404, detail="Background task not found")
     return TaskStatusResponse.from_task(task)
+
+
+@router.get("/snapshots", response_model=list[SnapshotResponse])
+async def list_snapshots(
+    snapshot_service: Annotated[SnapshotService, Depends(get_snapshot_service)],
+    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
+    knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
+    status_filters: Annotated[list[SnapshotStatus] | None, Query(alias="status")] = None,
+    include_archived: bool = False,
+) -> list[SnapshotResponse]:
+    snapshots = await snapshot_service.list_snapshots(
+        agent_id=agent_id,
+        knowledge_base_id=knowledge_base_id,
+        statuses=status_filters,
+        include_archived=include_archived,
+    )
+    return [SnapshotResponse.model_validate(snapshot) for snapshot in snapshots]
+
+
+@router.get("/snapshots/{snapshot_id}", response_model=SnapshotResponse)
+async def get_snapshot(
+    snapshot_id: uuid.UUID,
+    snapshot_service: Annotated[SnapshotService, Depends(get_snapshot_service)],
+    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
+    knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
+) -> SnapshotResponse:
+    snapshot = await snapshot_service.get_snapshot(
+        snapshot_id,
+        agent_id=agent_id,
+        knowledge_base_id=knowledge_base_id,
+    )
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    return SnapshotResponse.model_validate(snapshot)
+
+
+@router.post("/snapshots/{snapshot_id}/publish", response_model=SnapshotResponse)
+async def publish_snapshot(
+    snapshot_id: uuid.UUID,
+    snapshot_service: Annotated[SnapshotService, Depends(get_snapshot_service)],
+    activate: bool = False,
+    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
+    knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
+) -> SnapshotResponse:
+    try:
+        snapshot = await snapshot_service.publish(
+            snapshot_id,
+            activate=activate,
+            agent_id=agent_id,
+            knowledge_base_id=knowledge_base_id,
+        )
+    except Exception as error:
+        _raise_snapshot_http_error(error)
+
+    return SnapshotResponse.model_validate(snapshot)
+
+
+@router.post("/snapshots/{snapshot_id}/activate", response_model=SnapshotResponse)
+async def activate_snapshot(
+    snapshot_id: uuid.UUID,
+    snapshot_service: Annotated[SnapshotService, Depends(get_snapshot_service)],
+    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
+    knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
+) -> SnapshotResponse:
+    try:
+        snapshot = await snapshot_service.activate(
+            snapshot_id,
+            agent_id=agent_id,
+            knowledge_base_id=knowledge_base_id,
+        )
+    except Exception as error:
+        _raise_snapshot_http_error(error)
+
+    return SnapshotResponse.model_validate(snapshot)

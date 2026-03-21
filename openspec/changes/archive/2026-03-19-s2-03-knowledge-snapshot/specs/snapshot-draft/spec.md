@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: SnapshotService with get_or_create_draft
 
@@ -117,7 +117,7 @@ The auto-created `DRAFT` snapshot SHALL serve as the target for chunk tagging du
 
 ### Requirement: ensure_draft_or_rebind method with FOR UPDATE locking
 
-**[Added by S2-03]** The `SnapshotService` SHALL provide an `ensure_draft_or_rebind(session, snapshot_id, agent_id, knowledge_base_id) -> KnowledgeSnapshot` method. This method SHALL always return a FOR UPDATE-locked DRAFT snapshot. The method SHALL:
+**[ADDED by S2-03]** The `SnapshotService` SHALL provide an `ensure_draft_or_rebind(session, snapshot_id, agent_id, knowledge_base_id) -> KnowledgeSnapshot` method. This method SHALL always return a FOR UPDATE-locked DRAFT snapshot. The method SHALL:
 
 1. Acquire `SELECT ... FROM knowledge_snapshots WHERE id = :snapshot_id FOR UPDATE` on the given snapshot row.
 2. Check the locked snapshot's status:
@@ -164,4 +164,4 @@ The following stable behavior MUST be covered by CI tests before archive:
 - **SnapshotService integration tests with real PG**: verify first call creates a DRAFT snapshot, second call returns the same snapshot (reuse), snapshot has correct `agent_id` and `knowledge_base_id`, snapshot status is DRAFT.
 - **Partial unique index test**: verify that inserting two DRAFT snapshots with the same scope raises `IntegrityError`, while DRAFT + PUBLISHED for the same scope does not conflict.
 - **Migration test**: verify migration applies cleanly and the index exists.
-- **ensure_draft_or_rebind tests with real PG** [Added by S2-03]: verify method returns locked DRAFT when snapshot is still draft. Verify method rebinds to new draft when snapshot status is PUBLISHED. Verify the returned snapshot is always FOR UPDATE-locked. Verify serialization with concurrent publish (publish blocks while ingestion holds lock).
+- **ensure_draft_or_rebind tests with real PG** [ADDED by S2-03]: verify method returns locked DRAFT when snapshot is still draft. Verify method rebinds to new draft when snapshot status is PUBLISHED. Verify the returned snapshot is always FOR UPDATE-locked. Verify serialization with concurrent publish (publish blocks while ingestion holds lock).

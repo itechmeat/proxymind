@@ -1,7 +1,12 @@
 from app.services.docling_parser import ChunkData, DoclingParser
 from app.services.embedding import EmbeddingService
 from app.services.qdrant import CollectionSchemaMismatchError, QdrantChunkPoint, QdrantService
-from app.services.snapshot import SnapshotService
+from app.services.snapshot import (
+    SnapshotConflictError,
+    SnapshotNotFoundError,
+    SnapshotService,
+    SnapshotValidationError,
+)
 from app.services.source import SourcePersistenceError, SourceService, TaskEnqueueError
 from app.services.storage import StorageService, determine_source_type, validate_file_extension
 
@@ -12,7 +17,10 @@ __all__ = [
     "EmbeddingService",
     "QdrantChunkPoint",
     "QdrantService",
+    "SnapshotConflictError",
+    "SnapshotNotFoundError",
     "SnapshotService",
+    "SnapshotValidationError",
     "SourcePersistenceError",
     "SourceService",
     "StorageService",

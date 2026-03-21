@@ -150,6 +150,13 @@ class KnowledgeSnapshot(PrimaryKeyMixin, TenantMixin, KnowledgeScopeMixin, Times
             unique=True,
             postgresql_where=text("status = 'draft'"),
         ),
+        Index(
+            "uq_one_active_per_scope",
+            "agent_id",
+            "knowledge_base_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
     )
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
