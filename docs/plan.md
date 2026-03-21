@@ -43,11 +43,11 @@ Phase outcome: minimal working product. Upload a Markdown file → get a snapsho
   - **Verification:** upload MD file → chunks in PG with metadata; chunks in Qdrant; vector search returns results
   - Tasks: Docling integration, HybridChunker config, Gemini Embedding 2 client, Qdrant client, worker task
 
-- [ ] **S2-03: Knowledge snapshot (minimal)**
-      Draft → publish → active lifecycle. On source upload, chunks are linked to a draft snapshot. Publish makes the snapshot active. Retrieval only from active.
-  - **Outcome:** knowledge can be published and search works only against published content
-  - **Verification:** create draft → upload source → publish → vector search against active snapshot works; chunks from draft are not visible
-  - Tasks: snapshot CRUD API, snapshot_id in Qdrant payload, publish/activate logic
+- [x] **S2-03: Knowledge snapshot (minimal)**
+      Draft → publish → active lifecycle. On source upload, chunks are linked to a draft snapshot. Publish finalizes the snapshot, activate selects it for retrieval, and publish supports `?activate=true` as a convenience path. Retrieval only from active.
+  - **Outcome:** knowledge versions can be listed, inspected, published, activated, and search works only against active content
+  - **Verification:** create draft → upload source → publish+activate → vector search against active snapshot works; chunks from draft are not visible
+  - Tasks: snapshot list/detail API, publish/activate logic, active snapshot invariant, ingestion-side snapshot locking
 
 - [ ] **S2-04: Minimal chat**
       `POST /api/chat/messages` — accept a question, find relevant chunks in Qdrant (dense vector search against active snapshot), assemble prompt (minimal: system + retrieval context + question), call LLM via LiteLLM, return response (JSON, no streaming).
@@ -84,7 +84,7 @@ Phase outcome: full-featured ingestion pipeline — all formats, hybrid search, 
   - Tasks: Gemini GenerateContent for text extraction, Path A/B routing logic, threshold config
 
 - [ ] **S3-05: Snapshot lifecycle (full)**
-      Rollback to previous published. Draft testing via Admin API (`POST /api/admin/snapshots/:id/test`). GET list snapshots. Soft delete source considering published snapshots.
+      Rollback to previous published. Draft testing via Admin API (`POST /api/admin/snapshots/:id/test`). Soft delete source considering published snapshots. Snapshot list/detail already delivered in S2-03.
   - **Outcome:** full knowledge version management
   - **Verification:** publish → rollback → twin responds from old snapshot; test draft → only draft chunks visible
   - Tasks: rollback endpoint, draft test endpoint, source soft delete logic

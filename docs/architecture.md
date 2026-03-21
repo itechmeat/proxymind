@@ -117,8 +117,7 @@ stateDiagram-v2
     draft --> draft: add/remove chunks
     draft --> published: publish
     published --> active: set as active
-    active --> archived: new snapshot became active
-    published --> archived: superseded
+    active --> published: new snapshot became active
     active --> active: rollback (switch to another published)
 ```
 
@@ -129,11 +128,11 @@ States:
 - **draft** — being populated. Chunks in Qdrant are tagged with this draft's `snapshot_id`. Retrieval against a draft is available only for testing via Admin API (`POST /api/admin/snapshots/:id/test`).
 - **published** — finalized, immutable. All chunks are bound to a specific `snapshot_id`.
 - **active** — the current published snapshot used by the twin to answer. Exactly one snapshot is active at any time. Its `snapshot_id` is stored as `active_snapshot_id` in agent settings (PostgreSQL).
-- **archived** — former active, retained for audit and rollback.
+- **archived** — historical snapshot retained for audit and future owner-driven archive actions. Deactivation returns an active snapshot to **published**, so the published pool remains available for rollback.
 
 Qdrant payload contains **`snapshot_id`** — the sole key linking a chunk to a snapshot. Chat API retrieval filters by `snapshot_id` == `active_snapshot_id`. Draft chunks are invisible to Chat API.
 
-Rollback: switching `active_snapshot_id` to the `snapshot_id` of another published snapshot. Atomic operation in PostgreSQL.
+Rollback: switching `active_snapshot_id` to the `snapshot_id` of another published snapshot. Atomic operation in PostgreSQL. When a new snapshot becomes active, the previously active snapshot returns to **published** rather than becoming archived automatically.
 
 > **Term mapping:** spec.md uses `published_version_id` — this is the `snapshot_id` of the snapshot with active status. The codebase uniformly uses `snapshot_id`.
 

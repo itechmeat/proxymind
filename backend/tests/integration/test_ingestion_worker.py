@@ -181,6 +181,85 @@ async def test_worker_reuses_draft_and_accumulates_chunk_count(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("committed_data_cleanup")
+async def test_worker_rebinds_to_new_draft_when_snapshot_was_published(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    _, task_id = await _seed_task(session_factory)
+
+    async with session_factory() as session:
+        seeded_snapshot = KnowledgeSnapshot(
+            id=uuid.uuid7(),
+            agent_id=DEFAULT_AGENT_ID,
+            knowledge_base_id=DEFAULT_KNOWLEDGE_BASE_ID,
+            name="Original draft",
+            status=SnapshotStatus.DRAFT,
+        )
+        session.add(seeded_snapshot)
+        await session.commit()
+
+    class PublishingSnapshotService(SnapshotService):
+        def __init__(self) -> None:
+            super().__init__()
+            self._published = False
+
+        async def get_or_create_draft(self, session, *, agent_id, knowledge_base_id):
+            snapshot = await session.get(KnowledgeSnapshot, seeded_snapshot.id)
+            assert snapshot is not None
+            if snapshot.status is SnapshotStatus.DRAFT:
+                return snapshot
+            return await super().get_or_create_draft(
+                session,
+                agent_id=agent_id,
+                knowledge_base_id=knowledge_base_id,
+            )
+
+        async def ensure_draft_or_rebind(
+            self, session, *, snapshot_id, agent_id, knowledge_base_id
+        ):
+            if not self._published:
+                self._published = True
+                async with session_factory() as publish_session:
+                    published_snapshot = await publish_session.get(
+                        KnowledgeSnapshot, seeded_snapshot.id
+                    )
+                    assert published_snapshot is not None
+                    published_snapshot.status = SnapshotStatus.PUBLISHED
+                    await publish_session.commit()
+
+            return await super().ensure_draft_or_rebind(
+                session,
+                snapshot_id=snapshot_id,
+                agent_id=agent_id,
+                knowledge_base_id=knowledge_base_id,
+            )
+
+    worker_ctx = _worker_context(session_factory)
+    worker_ctx["snapshot_service"] = PublishingSnapshotService()
+
+    await ingestion.process_ingestion(worker_ctx, str(task_id))
+
+    async with session_factory() as session:
+        snapshots = (
+            await session.scalars(
+                select(KnowledgeSnapshot).order_by(KnowledgeSnapshot.created_at.asc())
+            )
+        ).all()
+        chunks = (
+            await session.scalars(select(Chunk).order_by(Chunk.created_at.asc()))
+        ).all()
+
+    assert len(snapshots) == 2
+    assert snapshots[0].id == seeded_snapshot.id
+    assert snapshots[0].status is SnapshotStatus.PUBLISHED
+    assert snapshots[0].chunk_count == 0
+    assert snapshots[1].status is SnapshotStatus.DRAFT
+    assert snapshots[1].chunk_count == 2
+    assert chunks
+    assert all(chunk.snapshot_id == snapshots[1].id for chunk in chunks)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
 async def test_worker_skips_non_pending_task(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
