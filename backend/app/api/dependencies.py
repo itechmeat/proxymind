@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_session
 from app.services.chat import ChatService
 from app.services.llm import LLMService
+from app.services.qdrant import QdrantService
 from app.services.retrieval import RetrievalService
 from app.services.snapshot import SnapshotService
 from app.services.source import SourceService, TaskEnqueuer
@@ -18,6 +19,10 @@ from app.services.storage import StorageService
 
 def get_storage_service(request: Request) -> StorageService:
     return request.app.state.storage_service
+
+
+def get_qdrant_service(request: Request) -> QdrantService:
+    return request.app.state.qdrant_service
 
 
 class ArqTaskEnqueuer(TaskEnqueuer):

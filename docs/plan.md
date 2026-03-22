@@ -71,7 +71,7 @@ Phase outcome: full-featured ingestion pipeline — all formats, hybrid search, 
   - **Verification:** upload PDF → chunks with page numbers; upload DOCX → chunks with headings
   - Tasks: Docling format configs, anchor extraction per format, tests for different formats
 
-- [ ] **S3-02: BM25 sparse vectors**
+- [x] **S3-02: BM25 sparse vectors**
       Qdrant BM25 sparse vectors (language from `.env`, Snowball stemmer) indexed alongside dense as named vectors.
   - **Outcome:** keyword search works alongside vector search
   - **Verification:** keyword search via Qdrant returns results; stemmer language matches `.env`

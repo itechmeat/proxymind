@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
 import httpx
+import structlog
 from qdrant_client import AsyncQdrantClient, models
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -20,6 +22,9 @@ PAYLOAD_INDEX_FIELDS = (
     "source_type",
     "language",
 )
+DENSE_VECTOR_NAME = "dense"
+BM25_VECTOR_NAME = "bm25"
+BM25_MODEL_NAME = "Qdrant/bm25"
 
 
 class CollectionSchemaMismatchError(RuntimeError):
@@ -67,26 +72,30 @@ class QdrantService:
         client: AsyncQdrantClient,
         collection_name: str,
         embedding_dimensions: int,
+        bm25_language: str,
     ) -> None:
         self._client = client
         self._collection_name = collection_name
         self._embedding_dimensions = embedding_dimensions
+        self._bm25_language = bm25_language
+        self._logger = structlog.get_logger(__name__)
+
+    @property
+    def bm25_language(self) -> str:
+        return self._bm25_language
 
     async def ensure_collection(self) -> None:
+        self._logger.info(
+            "qdrant.ensure_collection",
+            collection_name=self._collection_name,
+            bm25_language=self._bm25_language,
+        )
         collection_info: Any | None = None
         if await self._client.collection_exists(self._collection_name):
             collection_info = await self._client.get_collection(self._collection_name)
         else:
             try:
-                await self._client.create_collection(
-                    collection_name=self._collection_name,
-                    vectors_config={
-                        "dense": models.VectorParams(
-                            size=self._embedding_dimensions,
-                            distance=models.Distance.COSINE,
-                        )
-                    },
-                )
+                await self._create_collection()
             except UnexpectedResponse as error:
                 if not self._is_collection_exists_conflict(error):
                     raise
@@ -100,6 +109,18 @@ class QdrantService:
                     f"existing={existing_dimensions}, required={self._embedding_dimensions}. "
                     "Delete the collection and re-run ingestion to reindex."
                 )
+            if not self._has_bm25_sparse_vector(collection_info):
+                self._logger.warning(
+                    "qdrant.collection_missing_bm25_recreating",
+                    collection_name=self._collection_name,
+                    bm25_language=self._bm25_language,
+                    message=(
+                        "Qdrant collection is missing the required BM25 sparse vector and "
+                        "will be recreated. Existing vectors will be lost."
+                        " Re-ingestion is required."
+                    ),
+                )
+                await self._recreate_collection_with_bm25()
 
         for field_name in PAYLOAD_INDEX_FIELDS:
             await self._client.create_payload_index(
@@ -115,7 +136,10 @@ class QdrantService:
         points = [
             models.PointStruct(
                 id=str(chunk.chunk_id),
-                vector={"dense": chunk.vector},
+                vector={
+                    DENSE_VECTOR_NAME: chunk.vector,
+                    BM25_VECTOR_NAME: self._build_bm25_document(chunk.text_content),
+                },
                 payload={
                     "snapshot_id": str(chunk.snapshot_id),
                     "source_id": str(chunk.source_id),
@@ -184,6 +208,29 @@ class QdrantService:
         response = await self._search_points(**search_kwargs)
         return [self._to_retrieved_chunk(point) for point in response.points]
 
+    async def keyword_search(
+        self,
+        *,
+        text: str,
+        snapshot_id: UUID,
+        agent_id: UUID,
+        knowledge_base_id: UUID,
+        limit: int = 10,
+    ) -> list[RetrievedChunk]:
+        response = await self._search_points(
+            collection_name=self._collection_name,
+            query=self._build_bm25_document(text),
+            using=BM25_VECTOR_NAME,
+            query_filter=self._build_scope_filter(
+                snapshot_id=snapshot_id,
+                agent_id=agent_id,
+                knowledge_base_id=knowledge_base_id,
+            ),
+            limit=limit,
+            with_payload=True,
+        )
+        return [self._to_retrieved_chunk(point) for point in response.points]
+
     async def close(self) -> None:
         await self._client.close()
 
@@ -220,6 +267,78 @@ class QdrantService:
     )
     async def _search_points(self, **kwargs: Any) -> models.QueryResponse:
         return await self._client.query_points(**kwargs)
+
+    async def _create_collection(self) -> None:
+        await self._client.create_collection(
+            collection_name=self._collection_name,
+            vectors_config={
+                DENSE_VECTOR_NAME: models.VectorParams(
+                    size=self._embedding_dimensions,
+                    distance=models.Distance.COSINE,
+                )
+            },
+            sparse_vectors_config={
+                BM25_VECTOR_NAME: models.SparseVectorParams(modifier=models.Modifier.IDF)
+            },
+        )
+
+    async def _recreate_collection_with_bm25(self) -> None:
+        for _attempt in range(3):
+            if await self._client.collection_exists(self._collection_name):
+                collection_info = await self._client.get_collection(self._collection_name)
+                if self._has_bm25_sparse_vector(collection_info):
+                    return
+                try:
+                    await self._client.delete_collection(self._collection_name)
+                except UnexpectedResponse as error:
+                    if not self._is_collection_missing(error):
+                        raise
+
+            try:
+                await self._create_collection()
+            except UnexpectedResponse as error:
+                if not self._is_collection_exists_conflict(error):
+                    raise
+
+            if await self._client.collection_exists(self._collection_name):
+                collection_info = await self._client.get_collection(self._collection_name)
+                if self._has_bm25_sparse_vector(collection_info):
+                    return
+
+        raise CollectionSchemaMismatchError(
+            "Qdrant collection recreation did not converge to the required BM25 schema."
+        )
+
+    def _build_bm25_document(self, text: str) -> models.Document:
+        return models.Document(
+            text=text,
+            model=BM25_MODEL_NAME,
+            options=models.Bm25Config(language=self._bm25_language),
+        )
+
+    @staticmethod
+    def _build_scope_filter(
+        *,
+        snapshot_id: UUID,
+        agent_id: UUID,
+        knowledge_base_id: UUID,
+    ) -> models.Filter:
+        return models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="snapshot_id",
+                    match=models.MatchValue(value=str(snapshot_id)),
+                ),
+                models.FieldCondition(
+                    key="agent_id",
+                    match=models.MatchValue(value=str(agent_id)),
+                ),
+                models.FieldCondition(
+                    key="knowledge_base_id",
+                    match=models.MatchValue(value=str(knowledge_base_id)),
+                ),
+            ]
+        )
 
     @staticmethod
     def _to_retrieved_chunk(point: Any) -> RetrievedChunk:
@@ -270,17 +389,32 @@ class QdrantService:
         return error.status_code == 409
 
     @staticmethod
+    def _is_collection_missing(error: UnexpectedResponse) -> bool:
+        return error.status_code == 404
+
+    @staticmethod
     def _get_dense_vector_size(collection_info: Any) -> int:
         vectors_config = collection_info.config.params.vectors
-        if isinstance(vectors_config, dict):
-            dense_config = vectors_config.get("dense")
+        if isinstance(vectors_config, Mapping):
+            dense_config = vectors_config.get(DENSE_VECTOR_NAME)
             if dense_config is None:
                 raise CollectionSchemaMismatchError(
-                    "Qdrant collection is missing the required named vector 'dense'."
+                    f"Qdrant collection is missing the required named vector '{DENSE_VECTOR_NAME}'."
                 )
             return dense_config.size
 
         raise CollectionSchemaMismatchError(
             "Qdrant collection uses an anonymous vector configuration; "
-            "named vector 'dense' is required for reindex compatibility."
+            f"named vector '{DENSE_VECTOR_NAME}' is required for reindex compatibility."
         )
+
+    @staticmethod
+    def _has_bm25_sparse_vector(collection_info: Any) -> bool:
+        sparse_vectors_config = getattr(collection_info.config.params, "sparse_vectors", None)
+        if sparse_vectors_config is None:
+            return False
+        if isinstance(sparse_vectors_config, Mapping):
+            return sparse_vectors_config.get(BM25_VECTOR_NAME) is not None
+        if hasattr(sparse_vectors_config, "get"):
+            return sparse_vectors_config.get(BM25_VECTOR_NAME) is not None
+        return getattr(sparse_vectors_config, BM25_VECTOR_NAME, None) is not None

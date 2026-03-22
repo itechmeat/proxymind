@@ -6,7 +6,9 @@ from typing import Annotated, Any
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, UrlConstraints, field_validator
 
+from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
 from app.db.models.background_task import BackgroundTask
+from app.services.qdrant import RetrievedChunk
 
 
 class SourceUploadMetadata(BaseModel):
@@ -61,3 +63,56 @@ class TaskStatusResponse(BaseModel):
             started_at=task.started_at,
             completed_at=task.completed_at,
         )
+
+
+class KeywordSearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=2000)
+    snapshot_id: uuid.UUID | None = None
+    agent_id: uuid.UUID = Field(default=DEFAULT_AGENT_ID)
+    knowledge_base_id: uuid.UUID = Field(default=DEFAULT_KNOWLEDGE_BASE_ID)
+    limit: int = Field(default=10, ge=1, le=100)
+
+    @field_validator("query", mode="before")
+    @classmethod
+    def normalize_query(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized
+        return value
+
+
+class KeywordSearchAnchor(BaseModel):
+    page: int | None = None
+    chapter: str | None = None
+    section: str | None = None
+    timecode: str | None = None
+
+
+class KeywordSearchResult(BaseModel):
+    chunk_id: uuid.UUID
+    source_id: uuid.UUID
+    text_content: str
+    score: float
+    anchor: KeywordSearchAnchor
+
+    @classmethod
+    def from_retrieved_chunk(cls, chunk: RetrievedChunk) -> KeywordSearchResult:
+        return cls(
+            chunk_id=chunk.chunk_id,
+            source_id=chunk.source_id,
+            text_content=chunk.text_content,
+            score=chunk.score,
+            anchor=KeywordSearchAnchor(
+                page=chunk.anchor_metadata.get("anchor_page"),
+                chapter=chunk.anchor_metadata.get("anchor_chapter"),
+                section=chunk.anchor_metadata.get("anchor_section"),
+                timecode=chunk.anchor_metadata.get("anchor_timecode"),
+            ),
+        )
+
+
+class KeywordSearchResponse(BaseModel):
+    query: str
+    language: str
+    total: int
+    results: list[KeywordSearchResult]

@@ -19,6 +19,7 @@ def _settings() -> SimpleNamespace:
         gemini_api_key=None,
         qdrant_url="http://localhost:6333",
         qdrant_collection="proxymind_chunks",
+        bm25_language="english",
         retrieval_top_n=5,
         min_dense_similarity=None,
         llm_model="openai/gpt-4o",
@@ -32,6 +33,33 @@ def _settings() -> SimpleNamespace:
         redis_host="localhost",
         redis_port=6379,
     )
+
+
+def test_create_qdrant_service_passes_bm25_language(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _settings()
+    created_client: object = object()
+    captured_kwargs: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        app_main,
+        "AsyncQdrantClient",
+        lambda *, url: created_client if url == settings.qdrant_url else None,
+    )
+
+    def fake_qdrant_service(**kwargs: object) -> object:
+        captured_kwargs.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("app.services.qdrant.QdrantService", fake_qdrant_service)
+
+    app_main._create_qdrant_service(settings)
+
+    assert captured_kwargs == {
+        "client": created_client,
+        "collection_name": settings.qdrant_collection,
+        "embedding_dimensions": settings.embedding_dimensions,
+        "bm25_language": settings.bm25_language,
+    }
 
 
 @pytest.mark.asyncio
