@@ -76,6 +76,22 @@ class SnapshotService:
 
         return await db_session.scalar(select(KnowledgeSnapshot).where(*conditions))
 
+    async def get_active_snapshot(
+        self,
+        *,
+        agent_id: uuid.UUID,
+        knowledge_base_id: uuid.UUID,
+        session: AsyncSession | None = None,
+    ) -> KnowledgeSnapshot | None:
+        db_session = self._resolve_session(session)
+        return await db_session.scalar(
+            select(KnowledgeSnapshot).where(
+                KnowledgeSnapshot.agent_id == agent_id,
+                KnowledgeSnapshot.knowledge_base_id == knowledge_base_id,
+                KnowledgeSnapshot.status == SnapshotStatus.ACTIVE,
+            )
+        )
+
     async def get_or_create_draft(
         self,
         session: AsyncSession | None = None,

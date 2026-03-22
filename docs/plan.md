@@ -49,7 +49,7 @@ Phase outcome: minimal working product. Upload a Markdown file → get a snapsho
   - **Verification:** create draft → upload source → publish+activate → vector search against active snapshot works; chunks from draft are not visible
   - Tasks: snapshot list/detail API, publish/activate logic, active snapshot invariant, ingestion-side snapshot locking
 
-- [ ] **S2-04: Minimal chat**
+- [x] **S2-04: Minimal chat**
       `POST /api/chat/messages` — accept a question, find relevant chunks in Qdrant (dense vector search against active snapshot), assemble prompt (minimal: system + retrieval context + question), call LLM via LiteLLM, return response (JSON, no streaming).
   - **Outcome:** a question can be asked and answered based on uploaded knowledge
   - **Verification:** upload document → publish → `POST /api/chat/messages {"text": "..."}` → response based on document content

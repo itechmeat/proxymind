@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -19,10 +20,13 @@ from testcontainers.core.container import DockerContainer
 from testcontainers.postgres import PostgresContainer
 
 from app.api.admin import router as admin_router
+from app.api.chat import router as chat_router
 from app.core.config import get_settings
 from app.core.constants import DEFAULT_AGENT_ID
 from app.db.engine import create_database_engine, create_session_factory
 from app.db.models import Agent
+from app.services.llm import LLMResponse
+from app.services.qdrant import RetrievedChunk
 from app.services.storage import StorageService
 
 pytest_plugins = ("pytest_asyncio",)
@@ -167,6 +171,65 @@ def admin_app(
     app.state.storage_service = mock_storage_service
     app.state.arq_pool = mock_arq_pool
     return app
+
+
+@pytest.fixture
+def mock_retrieval_service() -> SimpleNamespace:
+    return SimpleNamespace(search=AsyncMock(return_value=[]))
+
+
+@pytest.fixture
+def mock_llm_service() -> SimpleNamespace:
+    return SimpleNamespace(
+        complete=AsyncMock(
+            return_value=LLMResponse(
+                content="Assistant answer",
+                model_name="openai/gpt-4o",
+                token_count_prompt=10,
+                token_count_completion=5,
+            )
+        )
+    )
+
+
+@pytest.fixture
+def sample_retrieved_chunk() -> RetrievedChunk:
+    return RetrievedChunk(
+        chunk_id=uuid.uuid7(),
+        source_id=uuid.uuid7(),
+        text_content="retrieved chunk",
+        score=0.9,
+        anchor_metadata={
+            "anchor_page": None,
+            "anchor_chapter": None,
+            "anchor_section": None,
+            "anchor_timecode": None,
+        },
+    )
+
+
+@pytest.fixture
+def chat_app(
+    session_factory: async_sessionmaker[AsyncSession],
+    mock_retrieval_service: SimpleNamespace,
+    mock_llm_service: SimpleNamespace,
+) -> FastAPI:
+    app = FastAPI()
+    app.include_router(chat_router)
+    app.state.settings = SimpleNamespace(
+        min_retrieved_chunks=1,
+    )
+    app.state.session_factory = session_factory
+    app.state.retrieval_service = mock_retrieval_service
+    app.state.llm_service = mock_llm_service
+    return app
+
+
+@pytest_asyncio.fixture
+async def chat_client(chat_app: FastAPI) -> httpx.AsyncClient:
+    transport = httpx.ASGITransport(app=chat_app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        yield client
 
 
 @pytest_asyncio.fixture

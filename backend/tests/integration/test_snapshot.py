@@ -111,3 +111,88 @@ async def test_partial_unique_index_allows_only_one_draft_per_scope(
             )
         )
         await session.commit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_get_active_snapshot_returns_active_for_scope(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    active_id = uuid.uuid7()
+    other_scope_id = uuid.uuid7()
+    other_agent_scope_id = uuid.uuid7()
+    service = SnapshotService()
+
+    async with session_factory() as session:
+        session.add_all(
+            [
+                KnowledgeSnapshot(
+                    id=uuid.uuid7(),
+                    agent_id=DEFAULT_AGENT_ID,
+                    knowledge_base_id=DEFAULT_KNOWLEDGE_BASE_ID,
+                    name="Draft",
+                    status=SnapshotStatus.DRAFT,
+                ),
+                KnowledgeSnapshot(
+                    id=active_id,
+                    agent_id=DEFAULT_AGENT_ID,
+                    knowledge_base_id=DEFAULT_KNOWLEDGE_BASE_ID,
+                    name="Active",
+                    status=SnapshotStatus.ACTIVE,
+                ),
+                KnowledgeSnapshot(
+                    id=other_scope_id,
+                    agent_id=DEFAULT_AGENT_ID,
+                    knowledge_base_id=uuid.uuid7(),
+                    name="Other Active",
+                    status=SnapshotStatus.ACTIVE,
+                ),
+                KnowledgeSnapshot(
+                    id=other_agent_scope_id,
+                    agent_id=uuid.uuid7(),
+                    knowledge_base_id=DEFAULT_KNOWLEDGE_BASE_ID,
+                    name="Other Agent Active",
+                    status=SnapshotStatus.ACTIVE,
+                ),
+            ]
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        snapshot = await service.get_active_snapshot(
+            agent_id=DEFAULT_AGENT_ID,
+            knowledge_base_id=DEFAULT_KNOWLEDGE_BASE_ID,
+            session=session,
+        )
+
+    assert snapshot is not None
+    assert snapshot.id == active_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_get_active_snapshot_returns_none_when_scope_has_no_active_snapshot(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    service = SnapshotService()
+
+    async with session_factory() as session:
+        session.add(
+            KnowledgeSnapshot(
+                id=uuid.uuid7(),
+                agent_id=DEFAULT_AGENT_ID,
+                knowledge_base_id=DEFAULT_KNOWLEDGE_BASE_ID,
+                name="Published",
+                status=SnapshotStatus.PUBLISHED,
+            )
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        snapshot = await service.get_active_snapshot(
+            agent_id=DEFAULT_AGENT_ID,
+            knowledge_base_id=DEFAULT_KNOWLEDGE_BASE_ID,
+            session=session,
+        )
+
+    assert snapshot is None

@@ -26,6 +26,10 @@ class CollectionSchemaMismatchError(RuntimeError):
     pass
 
 
+class InvalidRetrievedChunkError(RuntimeError):
+    pass
+
+
 @dataclass(slots=True, frozen=True)
 class QdrantChunkPoint:
     chunk_id: UUID
@@ -45,6 +49,15 @@ class QdrantChunkPoint:
     source_type: SourceType
     language: str | None
     status: ChunkStatus
+
+
+@dataclass(slots=True, frozen=True)
+class RetrievedChunk:
+    chunk_id: UUID
+    source_id: UUID
+    text_content: str
+    score: float
+    anchor_metadata: dict[str, int | str | None]
 
 
 class QdrantService:
@@ -132,6 +145,45 @@ class QdrantService:
 
         await self._delete_points([str(chunk_id) for chunk_id in chunk_ids])
 
+    async def search(
+        self,
+        *,
+        vector: list[float],
+        snapshot_id: UUID,
+        agent_id: UUID,
+        knowledge_base_id: UUID,
+        limit: int,
+        score_threshold: float | None = None,
+    ) -> list[RetrievedChunk]:
+        search_kwargs: dict[str, Any] = {
+            "collection_name": self._collection_name,
+            "query": vector,
+            "using": "dense",
+            "query_filter": models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="snapshot_id",
+                        match=models.MatchValue(value=str(snapshot_id)),
+                    ),
+                    models.FieldCondition(
+                        key="agent_id",
+                        match=models.MatchValue(value=str(agent_id)),
+                    ),
+                    models.FieldCondition(
+                        key="knowledge_base_id",
+                        match=models.MatchValue(value=str(knowledge_base_id)),
+                    ),
+                ]
+            ),
+            "limit": limit,
+            "with_payload": True,
+        }
+        if score_threshold is not None:
+            search_kwargs["score_threshold"] = score_threshold
+
+        response = await self._search_points(**search_kwargs)
+        return [self._to_retrieved_chunk(point) for point in response.points]
+
     async def close(self) -> None:
         await self._client.close()
 
@@ -158,6 +210,59 @@ class QdrantService:
             collection_name=self._collection_name,
             points_selector=models.PointIdsList(points=point_ids),
             wait=True,
+        )
+
+    @retry(
+        retry=retry_if_exception_type((httpx.TransportError, ResponseHandlingException)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=8),
+        reraise=True,
+    )
+    async def _search_points(self, **kwargs: Any) -> models.QueryResponse:
+        return await self._client.query_points(**kwargs)
+
+    @staticmethod
+    def _to_retrieved_chunk(point: Any) -> RetrievedChunk:
+        payload = point.payload or {}
+        raw_chunk_id = payload.get("chunk_id")
+        raw_source_id = payload.get("source_id")
+        raw_text_content = payload.get("text_content")
+        raw_score = getattr(point, "score", None)
+        missing_fields = [
+            field_name
+            for field_name, value in (
+                ("chunk_id", raw_chunk_id),
+                ("source_id", raw_source_id),
+                ("text_content", raw_text_content),
+                ("score", raw_score),
+            )
+            if value is None
+        ]
+        if missing_fields:
+            raise InvalidRetrievedChunkError(
+                "Qdrant point is missing retrieval fields: " + ", ".join(missing_fields)
+            )
+
+        try:
+            chunk_id = UUID(str(raw_chunk_id))
+            source_id = UUID(str(raw_source_id))
+            score = float(raw_score)
+        except (TypeError, ValueError) as error:
+            raise InvalidRetrievedChunkError(
+                "Qdrant point contains invalid retrieval metadata"
+            ) from error
+
+        return RetrievedChunk(
+            chunk_id=chunk_id,
+            source_id=source_id,
+            text_content=str(raw_text_content),
+            score=score,
+            anchor_metadata={
+                "anchor_page": payload.get("anchor_page"),
+                "anchor_chapter": payload.get("anchor_chapter"),
+                "anchor_section": payload.get("anchor_section"),
+                "anchor_timecode": payload.get("anchor_timecode"),
+            },
         )
 
     @staticmethod

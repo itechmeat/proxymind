@@ -3,27 +3,35 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from qdrant_client import AsyncQdrantClient, models
+from qdrant_client import AsyncQdrantClient
 
 from app.db.models.enums import ChunkStatus, SourceType
-from app.services.qdrant import CollectionSchemaMismatchError, QdrantChunkPoint, QdrantService
+from app.services.qdrant import (
+    CollectionSchemaMismatchError,
+    QdrantChunkPoint,
+    QdrantService,
+    RetrievedChunk,
+)
 
 
 def _point(
     *,
     chunk_id: uuid.UUID,
     snapshot_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    knowledge_base_id: uuid.UUID,
     vector: list[float],
     text_content: str,
+    source_id: uuid.UUID | None = None,
 ) -> QdrantChunkPoint:
     return QdrantChunkPoint(
         chunk_id=chunk_id,
         vector=vector,
         snapshot_id=snapshot_id,
-        source_id=uuid.uuid4(),
+        source_id=source_id or uuid.uuid4(),
         document_version_id=uuid.uuid4(),
-        agent_id=uuid.uuid4(),
-        knowledge_base_id=uuid.uuid4(),
+        agent_id=agent_id,
+        knowledge_base_id=knowledge_base_id,
         text_content=text_content,
         chunk_index=0,
         token_count=4,
@@ -48,45 +56,74 @@ async def test_qdrant_round_trip_filters_by_snapshot_id(qdrant_url: str) -> None
     )
     snapshot_id = uuid.uuid4()
     other_snapshot_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    other_agent_id = uuid.uuid4()
+    knowledge_base_id = uuid.uuid4()
+    other_knowledge_base_id = uuid.uuid4()
+    matched_chunk_id = uuid.uuid4()
+    matched_source_id = uuid.uuid4()
 
     try:
         await service.ensure_collection()
         await service.upsert_chunks(
             [
                 _point(
-                    chunk_id=uuid.uuid4(),
+                    chunk_id=matched_chunk_id,
                     snapshot_id=snapshot_id,
+                    agent_id=agent_id,
+                    knowledge_base_id=knowledge_base_id,
                     vector=[1.0, 0.0, 0.0],
                     text_content="matched chunk",
+                    source_id=matched_source_id,
                 ),
                 _point(
                     chunk_id=uuid.uuid4(),
                     snapshot_id=other_snapshot_id,
+                    agent_id=agent_id,
+                    knowledge_base_id=knowledge_base_id,
                     vector=[0.0, 1.0, 0.0],
                     text_content="other chunk",
+                ),
+                _point(
+                    chunk_id=uuid.uuid4(),
+                    snapshot_id=snapshot_id,
+                    agent_id=other_agent_id,
+                    knowledge_base_id=knowledge_base_id,
+                    vector=[1.0, 0.0, 0.0],
+                    text_content="other agent chunk",
+                ),
+                _point(
+                    chunk_id=uuid.uuid4(),
+                    snapshot_id=snapshot_id,
+                    agent_id=agent_id,
+                    knowledge_base_id=other_knowledge_base_id,
+                    vector=[1.0, 0.0, 0.0],
+                    text_content="other knowledge base chunk",
                 ),
             ]
         )
 
-        response = await client.query_points(
-            collection_name=collection_name,
-            query=[1.0, 0.0, 0.0],
-            using="dense",
-            query_filter=models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="snapshot_id",
-                        match=models.MatchValue(value=str(snapshot_id)),
-                    )
-                ]
-            ),
+        response = await service.search(
+            vector=[1.0, 0.0, 0.0],
+            snapshot_id=snapshot_id,
+            agent_id=agent_id,
+            knowledge_base_id=knowledge_base_id,
             limit=5,
-            with_payload=True,
         )
 
-        assert len(response.points) == 1
-        assert response.points[0].payload["snapshot_id"] == str(snapshot_id)
-        assert response.points[0].payload["text_content"] == "matched chunk"
+        assert len(response) == 1
+        assert response[0] == RetrievedChunk(
+            chunk_id=matched_chunk_id,
+            source_id=matched_source_id,
+            text_content="matched chunk",
+            score=response[0].score,
+            anchor_metadata={
+                "anchor_page": None,
+                "anchor_chapter": "Chapter",
+                "anchor_section": "Section",
+                "anchor_timecode": None,
+            },
+        )
     finally:
         await client.delete_collection(collection_name)
         await client.close()
