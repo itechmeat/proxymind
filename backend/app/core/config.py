@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     log_level: str = "info"
-    upload_max_file_size_mb: int = Field(default=50, ge=1)
+    upload_max_file_size_mb: int = Field(default=100, ge=1)
 
     model_config = SettingsConfigDict(
         env_file=(

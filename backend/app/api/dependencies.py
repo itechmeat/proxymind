@@ -1,22 +1,19 @@
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 from arq.connections import ArqRedis
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
-from app.services.source import TaskEnqueuer
-
-if TYPE_CHECKING:
-    from app.services.chat import ChatService
-    from app.services.llm import LLMService
-    from app.services.retrieval import RetrievalService
-    from app.services.snapshot import SnapshotService
-    from app.services.source import SourceService
-    from app.services.storage import StorageService
+from app.services.chat import ChatService
+from app.services.llm import LLMService
+from app.services.retrieval import RetrievalService
+from app.services.snapshot import SnapshotService
+from app.services.source import SourceService, TaskEnqueuer
+from app.services.storage import StorageService
 
 
 def get_storage_service(request: Request) -> StorageService:

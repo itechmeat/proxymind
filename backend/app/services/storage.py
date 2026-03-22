@@ -8,10 +8,14 @@ import httpx
 
 from app.db.models.enums import SourceType
 
-ALLOWED_SOURCE_EXTENSIONS = (".md", ".txt")
+ALLOWED_SOURCE_EXTENSIONS = (".md", ".txt", ".pdf", ".docx", ".html", ".htm")
 SOURCE_TYPE_BY_EXTENSION = {
     ".md": SourceType.MARKDOWN,
     ".txt": SourceType.TXT,
+    ".pdf": SourceType.PDF,
+    ".docx": SourceType.DOCX,
+    ".html": SourceType.HTML,
+    ".htm": SourceType.HTML,
 }
 _UNSAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 _MAX_FILENAME_LENGTH = 255

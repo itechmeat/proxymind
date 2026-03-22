@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -29,15 +30,26 @@ from app.db.models.enums import (
     SourceStatus,
     SourceType,
 )
-from app.services.docling_parser import ChunkData
+from app.services.docling_parser import ChunkData, DoclingParser
 from app.services.snapshot import SnapshotService
 from app.workers.tasks import ingestion
+
+FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
+
+
+def _fixture_bytes(name: str) -> bytes:
+    return (FIXTURES_DIR / name).read_bytes()
 
 
 async def _seed_task(
     session_factory: async_sessionmaker[AsyncSession],
     *,
     task_status: BackgroundTaskStatus = BackgroundTaskStatus.PENDING,
+    source_type: SourceType = SourceType.MARKDOWN,
+    filename: str = "doc.md",
+    file_size_bytes: int = 10,
+    mime_type: str = "text/markdown",
+    title: str = "Worker source",
 ) -> tuple[uuid.UUID, uuid.UUID]:
     source_id = uuid.uuid7()
     task_id = uuid.uuid7()
@@ -46,11 +58,11 @@ async def _seed_task(
             id=source_id,
             agent_id=DEFAULT_AGENT_ID,
             knowledge_base_id=DEFAULT_KNOWLEDGE_BASE_ID,
-            source_type=SourceType.MARKDOWN,
-            title="Worker source",
-            file_path=f"{DEFAULT_AGENT_ID}/{source_id}/doc.md",
-            file_size_bytes=10,
-            mime_type="text/markdown",
+            source_type=source_type,
+            title=title,
+            file_path=f"{DEFAULT_AGENT_ID}/{source_id}/{filename}",
+            file_size_bytes=file_size_bytes,
+            mime_type=mime_type,
             status=SourceStatus.PENDING,
         )
         task = BackgroundTask(
@@ -114,6 +126,32 @@ def _worker_context(
     }
 
 
+def _real_parser_worker_context(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    file_bytes: bytes,
+) -> dict[str, object]:
+    embedding_service = SimpleNamespace(
+        model="gemini-embedding-2-preview",
+        dimensions=3,
+        embed_texts=AsyncMock(
+            side_effect=lambda texts, **kwargs: [[0.1, 0.2, 0.3] for _ in texts]
+        ),
+    )
+    return {
+        "session_factory": session_factory,
+        "settings": SimpleNamespace(bm25_language="english"),
+        "storage_service": SimpleNamespace(download=AsyncMock(return_value=file_bytes)),
+        "docling_parser": DoclingParser(chunk_max_tokens=1024),
+        "embedding_service": embedding_service,
+        "qdrant_service": SimpleNamespace(
+            upsert_chunks=AsyncMock(),
+            delete_chunks=AsyncMock(),
+        ),
+        "snapshot_service": SnapshotService(),
+    }
+
+
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("committed_data_cleanup")
 async def test_worker_processes_task_full_lifecycle(
@@ -156,6 +194,88 @@ async def test_worker_processes_task_full_lifecycle(
     worker_ctx["qdrant_service"].upsert_chunks.assert_awaited_once()  # type: ignore[attr-defined]
     qdrant_points = worker_ctx["qdrant_service"].upsert_chunks.await_args.args[0]  # type: ignore[attr-defined]
     assert all(point.language == "english" for point in qdrant_points)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_worker_processes_html_with_real_docling_parser(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id, task_id = await _seed_task(
+        session_factory,
+        source_type=SourceType.HTML,
+        filename="sample.html",
+        file_size_bytes=len(_fixture_bytes("sample.html")),
+        mime_type="text/html",
+        title="HTML source",
+    )
+    worker_ctx = _real_parser_worker_context(
+        session_factory,
+        file_bytes=_fixture_bytes("sample.html"),
+    )
+
+    await ingestion.process_ingestion(worker_ctx, str(task_id))
+
+    async with session_factory() as session:
+        task = await session.get(BackgroundTask, task_id)
+        source = await session.get(Source, source_id)
+        chunks = (await session.scalars(select(Chunk).order_by(Chunk.chunk_index.asc()))).all()
+        document = await session.scalar(select(Document))
+        document_version = await session.scalar(select(DocumentVersion))
+
+    assert task is not None
+    assert source is not None
+    assert document is not None
+    assert document_version is not None
+    assert task.status is BackgroundTaskStatus.COMPLETE
+    assert task.result_metadata is not None
+    assert task.result_metadata["chunk_count"] > 0
+    assert source.status is SourceStatus.READY
+    assert document.status is DocumentStatus.READY
+    assert document_version.status is DocumentVersionStatus.READY
+    assert chunks
+    assert all(chunk.status is ChunkStatus.INDEXED for chunk in chunks)
+    worker_ctx["embedding_service"].embed_texts.assert_awaited_once()  # type: ignore[attr-defined]
+    worker_ctx["qdrant_service"].upsert_chunks.assert_awaited_once()  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_worker_marks_corrupt_pdf_failed_with_real_docling_parser(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id, task_id = await _seed_task(
+        session_factory,
+        source_type=SourceType.PDF,
+        filename="corrupt.pdf",
+        file_size_bytes=len(b"not-a-real-pdf"),
+        mime_type="application/pdf",
+        title="Corrupt PDF source",
+    )
+    worker_ctx = _real_parser_worker_context(
+        session_factory,
+        file_bytes=b"not-a-real-pdf",
+    )
+
+    await ingestion.process_ingestion(worker_ctx, str(task_id))
+
+    async with session_factory() as session:
+        task = await session.get(BackgroundTask, task_id)
+        source = await session.get(Source, source_id)
+        document = await session.scalar(select(Document))
+        document_version = await session.scalar(select(DocumentVersion))
+        chunks = (await session.scalars(select(Chunk))).all()
+
+    assert task is not None
+    assert source is not None
+    assert task.status is BackgroundTaskStatus.FAILED
+    assert task.error_message
+    assert source.status is SourceStatus.FAILED
+    assert document is None
+    assert document_version is None
+    assert chunks == []
+    worker_ctx["embedding_service"].embed_texts.assert_not_awaited()  # type: ignore[attr-defined]
+    worker_ctx["qdrant_service"].upsert_chunks.assert_not_awaited()  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio

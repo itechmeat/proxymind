@@ -4,21 +4,53 @@
 
 The API SHALL expose a `POST /api/admin/sources` endpoint that accepts a multipart/form-data request with two fields: `file` (UploadFile) and `metadata` (string containing JSON). The endpoint SHALL return `202 Accepted` on success. The endpoint SHALL NOT require authentication (explicit security exception — local-only deployment; `TODO(S7-01)` MUST be present in the codebase).
 
+> **MODIFIED by S3-01:** The unsupported file format scenario is updated to reflect the expanded set of allowed extensions.
+
 #### Scenario: Successful upload of a Markdown file
 
 - **WHEN** a POST request is sent with a valid `.md` file and valid metadata JSON containing at least a `title`
 - **THEN** the response status SHALL be 202
 - **AND** the response body SHALL contain `source_id` (UUID), `task_id` (UUID), `status` ("pending"), `file_path` (string), and `message` (string)
+- **AND** the created Source record SHALL have `source_type` set to MARKDOWN
 
 #### Scenario: Successful upload of a TXT file
 
 - **WHEN** a POST request is sent with a valid `.txt` file and valid metadata JSON containing at least a `title`
 - **THEN** the response status SHALL be 202
 - **AND** the response body SHALL contain `source_id`, `task_id`, `status`, `file_path`, and `message`
+- **AND** the created Source record SHALL have `source_type` set to TXT
+
+#### Scenario: Successful upload of a PDF file
+
+- **WHEN** a POST request is sent with a valid `.pdf` file and valid metadata JSON containing at least a `title`
+- **THEN** the response status SHALL be 202
+- **AND** the response body SHALL contain `source_id`, `task_id`, `status`, `file_path`, and `message`
+- **AND** the created Source record SHALL have `source_type` set to PDF
+
+#### Scenario: Successful upload of a DOCX file
+
+- **WHEN** a POST request is sent with a valid `.docx` file and valid metadata JSON containing at least a `title`
+- **THEN** the response status SHALL be 202
+- **AND** the response body SHALL contain `source_id`, `task_id`, `status`, `file_path`, and `message`
+- **AND** the created Source record SHALL have `source_type` set to DOCX
+
+#### Scenario: Successful upload of an HTML file
+
+- **WHEN** a POST request is sent with a valid `.html` file and valid metadata JSON containing at least a `title`
+- **THEN** the response status SHALL be 202
+- **AND** the response body SHALL contain `source_id`, `task_id`, `status`, `file_path`, and `message`
+- **AND** the created Source record SHALL have `source_type` set to HTML
+
+#### Scenario: Successful upload of an HTM file
+
+- **WHEN** a POST request is sent with a valid `.htm` file and valid metadata JSON containing at least a `title`
+- **THEN** the response status SHALL be 202
+- **AND** the response body SHALL contain `source_id`, `task_id`, `status`, `file_path`, and `message`
+- **AND** the created Source record SHALL have `source_type` set to HTML
 
 #### Scenario: Unsupported file format is rejected
 
-- **WHEN** a POST request is sent with a file having an extension other than `.md` or `.txt` (e.g., `.pdf`, `.docx`, `.html`)
+- **WHEN** a POST request is sent with a file having an extension other than `.md`, `.txt`, `.pdf`, `.docx`, `.html`, or `.htm` (e.g., `.xlsx`, `.pptx`, `.xml`)
 - **THEN** the response status SHALL be 422
 - **AND** the response body SHALL indicate the file format is unsupported and list the allowed extensions
 
@@ -34,14 +66,14 @@ The API SHALL expose a `POST /api/admin/sources` endpoint that accepts a multipa
 
 #### Scenario: File extension validation is case-insensitive
 
-- **WHEN** a POST request is sent with a file named `DOCUMENT.MD` or `notes.Txt`
+- **WHEN** a POST request is sent with a file named `DOCUMENT.PDF`, `report.Docx`, or `page.HTML`
 - **THEN** the endpoint SHALL accept the file as a valid format
 
 ---
 
 ### Requirement: Upload metadata validation
 
-The `metadata` field SHALL be validated as JSON conforming to a Pydantic schema with the following fields: `title` (string, required, 1-255 characters), `description` (string, optional, max 2000 characters), `public_url` (string, optional, valid HTTP/HTTPS URL, max 2048 characters), `catalog_item_id` (UUID, optional), `language` (string, optional, max 32 characters). The `source_type` SHALL be determined automatically from the file extension (`.md` -> MARKDOWN, `.txt` -> TXT) and SHALL NOT be part of the metadata input.
+The `metadata` field SHALL be validated as JSON conforming to a Pydantic schema with the following fields: `title` (string, required, 1-255 characters), `description` (string, optional, max 2000 characters), `public_url` (string, optional, valid HTTP/HTTPS URL, max 2048 characters), `catalog_item_id` (UUID, optional), `language` (string, optional, max 32 characters). The `source_type` SHALL be determined automatically from the file extension and SHALL NOT be part of the metadata input.
 
 The `language` field from `SourceUploadMetadata` SHALL be persisted on the `Source` record. The `source.py` service `create_source_and_task()` method MUST pass `language=metadata.language` to the Source constructor. Empty or whitespace-only `language` values SHALL be normalized to NULL before persistence. A nullable `language` column (VARCHAR(32)) exists on the `sources` table (added in S2-02 migration 004). Existing sources have NULL, which means "use system default."
 
@@ -90,14 +122,64 @@ The `language` field from `SourceUploadMetadata` SHALL be persisted on the `Sour
 
 ---
 
+### Requirement: File extension validation and source type mapping
+
+The upload validation SHALL accept the following file extensions: `.md`, `.txt`, `.pdf`, `.docx`, `.html`, `.htm`. Extension validation SHALL be case-insensitive. The `source_type` SHALL be determined automatically from the file extension using the following mapping:
+
+| Extension | SourceType |
+|-----------|------------|
+| `.md`     | MARKDOWN   |
+| `.txt`    | TXT        |
+| `.pdf`    | PDF        |
+| `.docx`   | DOCX       |
+| `.html`   | HTML       |
+| `.htm`    | HTML       |
+
+> **ADDED by S3-01:** Extended from `.md`/`.txt` to include `.pdf`, `.docx`, `.html`, `.htm`. Both `.html` and `.htm` map to `SourceType.HTML`.
+
+#### Scenario: PDF extension maps to PDF source type
+
+- **WHEN** a file with extension `.pdf` is uploaded
+- **THEN** the created Source record SHALL have `source_type` set to PDF
+
+#### Scenario: DOCX extension maps to DOCX source type
+
+- **WHEN** a file with extension `.docx` is uploaded
+- **THEN** the created Source record SHALL have `source_type` set to DOCX
+
+#### Scenario: HTML extension maps to HTML source type
+
+- **WHEN** a file with extension `.html` is uploaded
+- **THEN** the created Source record SHALL have `source_type` set to HTML
+
+#### Scenario: HTM extension maps to HTML source type
+
+- **WHEN** a file with extension `.htm` is uploaded
+- **THEN** the created Source record SHALL have `source_type` set to HTML
+
+#### Scenario: Case-insensitive new extensions
+
+- **WHEN** a file named `REPORT.PDF` or `Document.Docx` is uploaded
+- **THEN** the endpoint SHALL accept the file and determine the correct `source_type`
+
+#### Scenario: Unsupported extensions are still rejected
+
+- **WHEN** a file with extension `.xlsx`, `.pptx`, or `.xml` is uploaded
+- **THEN** the response status SHALL be 422
+- **AND** the response body SHALL list all allowed extensions
+
+---
+
 ### Requirement: Configurable file size limit
 
-The maximum upload file size SHALL be configurable via the `UPLOAD_MAX_FILE_SIZE_MB` setting in the application configuration, defaulting to 50 MB. The endpoint SHALL enforce the size limit while reading the upload and SHALL reject the request before uploading any oversized payload to SeaweedFS.
+The maximum upload file size SHALL be configurable via the `UPLOAD_MAX_FILE_SIZE_MB` setting in the application configuration, defaulting to 100 MB. The endpoint SHALL enforce the size limit while reading the upload and SHALL reject the request before uploading any oversized payload to SeaweedFS.
+
+> **MODIFIED by S3-01:** Default raised from 50 MB to 100 MB to accommodate PDF books with embedded images. Single limit for all formats.
 
 #### Scenario: Default file size limit
 
 - **WHEN** `UPLOAD_MAX_FILE_SIZE_MB` is not set in the environment
-- **THEN** the default limit SHALL be 50 MB
+- **THEN** the default limit SHALL be 100 MB
 
 #### Scenario: Custom file size limit
 

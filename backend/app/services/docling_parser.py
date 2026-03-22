@@ -14,6 +14,22 @@ from docling_core.types.doc import DoclingDocument
 
 from app.db.models.enums import SourceType
 
+# TXT is handled separately via convert_string() because Docling consumes
+# plain text most reliably as Markdown content rather than a binary stream.
+_SOURCE_TYPE_TO_INPUT_FORMAT = {
+    SourceType.MARKDOWN: InputFormat.MD,
+    SourceType.PDF: InputFormat.PDF,
+    SourceType.DOCX: InputFormat.DOCX,
+    SourceType.HTML: InputFormat.HTML,
+}
+
+_INPUT_FORMAT_SUFFIX = {
+    InputFormat.MD: ".md",
+    InputFormat.PDF: ".pdf",
+    InputFormat.DOCX: ".docx",
+    InputFormat.HTML: ".html",
+}
+
 
 @dataclass(slots=True, frozen=True)
 class ChunkData:
@@ -34,7 +50,14 @@ class DoclingParser:
         converter: DocumentConverter | None = None,
         chunker: HybridChunker | None = None,
     ) -> None:
-        self._converter = converter or DocumentConverter(allowed_formats=[InputFormat.MD])
+        self._converter = converter or DocumentConverter(
+            allowed_formats=[
+                InputFormat.MD,
+                InputFormat.PDF,
+                InputFormat.DOCX,
+                InputFormat.HTML,
+            ]
+        )
         self._chunker = chunker or HybridChunker(
             tokenizer=HuggingFaceTokenizer.from_pretrained(
                 model_name="sentence-transformers/all-MiniLM-L6-v2",
@@ -63,9 +86,11 @@ class DoclingParser:
         filename: str,
         source_type: SourceType,
     ) -> DoclingDocument | None:
-        if source_type is SourceType.MARKDOWN:
+        input_format = _SOURCE_TYPE_TO_INPUT_FORMAT.get(source_type)
+
+        if input_format is InputFormat.MD:
             stream = DocumentStream(
-                name=self._normalize_markdown_name(filename),
+                name=self._normalize_stream_name(filename, input_format),
                 stream=BytesIO(content),
             )
             return self._converter.convert(stream).document
@@ -80,6 +105,13 @@ class DoclingParser:
                 format=InputFormat.MD,
                 name=normalized_name,
             ).document
+
+        if input_format in {InputFormat.PDF, InputFormat.DOCX, InputFormat.HTML}:
+            stream = DocumentStream(
+                name=self._normalize_stream_name(filename, input_format),
+                stream=BytesIO(content),
+            )
+            return self._converter.convert(stream).document
 
         raise ValueError(f"Unsupported source type for DoclingParser: {source_type.value}")
 
@@ -106,11 +138,12 @@ class DoclingParser:
         return chunk_data
 
     @staticmethod
-    def _normalize_markdown_name(filename: str) -> str:
+    def _normalize_stream_name(filename: str, input_format: InputFormat) -> str:
         path = Path(filename)
-        if path.suffix.lower() == ".md":
+        expected_suffix = _INPUT_FORMAT_SUFFIX[input_format]
+        if path.suffix.lower() == expected_suffix:
             return path.name
-        return f"{path.stem or 'document'}.md"
+        return f"{path.stem or 'document'}{expected_suffix}"
 
     @staticmethod
     def _extract_anchor_page(chunk: Any) -> int | None:
