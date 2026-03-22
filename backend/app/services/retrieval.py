@@ -46,7 +46,8 @@ class RetrievalService:
             )
             if not embeddings:
                 return []
-            return await self._qdrant_service.search(
+            return await self._qdrant_service.hybrid_search(
+                text=query,
                 vector=embeddings[0],
                 snapshot_id=snapshot_id,
                 agent_id=self._agent_id,

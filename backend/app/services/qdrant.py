@@ -25,6 +25,8 @@ PAYLOAD_INDEX_FIELDS = (
 DENSE_VECTOR_NAME = "dense"
 BM25_VECTOR_NAME = "bm25"
 BM25_MODEL_NAME = "Qdrant/bm25"
+PREFETCH_MULTIPLIER = 2
+RRF_K = 60
 
 
 class CollectionSchemaMismatchError(RuntimeError):
@@ -170,7 +172,7 @@ class QdrantService:
 
         await self._delete_points([str(chunk_id) for chunk_id in chunk_ids])
 
-    async def search(
+    async def dense_search(
         self,
         *,
         vector: list[float],
@@ -183,22 +185,11 @@ class QdrantService:
         search_kwargs: dict[str, Any] = {
             "collection_name": self._collection_name,
             "query": vector,
-            "using": "dense",
-            "query_filter": models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="snapshot_id",
-                        match=models.MatchValue(value=str(snapshot_id)),
-                    ),
-                    models.FieldCondition(
-                        key="agent_id",
-                        match=models.MatchValue(value=str(agent_id)),
-                    ),
-                    models.FieldCondition(
-                        key="knowledge_base_id",
-                        match=models.MatchValue(value=str(knowledge_base_id)),
-                    ),
-                ]
+            "using": DENSE_VECTOR_NAME,
+            "query_filter": self._build_scope_filter(
+                snapshot_id=snapshot_id,
+                agent_id=agent_id,
+                knowledge_base_id=knowledge_base_id,
             ),
             "limit": limit,
             "with_payload": True,
@@ -207,6 +198,52 @@ class QdrantService:
             search_kwargs["score_threshold"] = score_threshold
 
         response = await self._search_points(**search_kwargs)
+        return [self._to_retrieved_chunk(point) for point in response.points]
+
+    async def hybrid_search(
+        self,
+        *,
+        text: str,
+        vector: list[float],
+        snapshot_id: UUID,
+        agent_id: UUID,
+        knowledge_base_id: UUID,
+        limit: int,
+        score_threshold: float | None = None,
+    ) -> list[RetrievedChunk]:
+        if limit <= 0:
+            return []
+
+        scope_filter = self._build_scope_filter(
+            snapshot_id=snapshot_id,
+            agent_id=agent_id,
+            knowledge_base_id=knowledge_base_id,
+        )
+        dense_prefetch_kwargs: dict[str, Any] = {
+            "query": vector,
+            "using": DENSE_VECTOR_NAME,
+            "filter": scope_filter,
+            "limit": limit * PREFETCH_MULTIPLIER,
+        }
+        if score_threshold is not None:
+            dense_prefetch_kwargs["score_threshold"] = score_threshold
+
+        response = await self._search_points(
+            collection_name=self._collection_name,
+            prefetch=[
+                models.Prefetch(**dense_prefetch_kwargs),
+                models.Prefetch(
+                    query=self._build_bm25_document(text),
+                    using=BM25_VECTOR_NAME,
+                    filter=scope_filter,
+                    limit=limit * PREFETCH_MULTIPLIER,
+                ),
+            ],
+            query=models.RrfQuery(rrf=models.Rrf(k=RRF_K)),
+            query_filter=scope_filter,
+            limit=limit,
+            with_payload=True,
+        )
         return [self._to_retrieved_chunk(point) for point in response.points]
 
     async def keyword_search(

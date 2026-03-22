@@ -15,6 +15,8 @@ from app.services.qdrant import (
     BM25_VECTOR_NAME,
     DENSE_VECTOR_NAME,
     PAYLOAD_INDEX_FIELDS,
+    PREFETCH_MULTIPLIER,
+    RRF_K,
     CollectionSchemaMismatchError,
     InvalidRetrievedChunkError,
     QdrantChunkPoint,
@@ -414,7 +416,7 @@ async def test_delete_chunks_sends_point_ids_to_qdrant(
 
 
 @pytest.mark.asyncio
-async def test_search_builds_dense_query_with_scope_filters(
+async def test_dense_search_builds_dense_query_with_scope_filters(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     snapshot_id = uuid.uuid4()
@@ -444,7 +446,7 @@ async def test_search_builds_dense_query_with_scope_filters(
     )
     service, _logger = _service(monkeypatch, client=client, embedding_dimensions=3)
 
-    results = await service.search(
+    results = await service.dense_search(
         vector=[0.1, 0.2, 0.3],
         snapshot_id=snapshot_id,
         agent_id=agent_id,
@@ -481,13 +483,13 @@ async def test_search_builds_dense_query_with_scope_filters(
 
 
 @pytest.mark.asyncio
-async def test_search_omits_score_threshold_when_disabled(
+async def test_dense_search_omits_score_threshold_when_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = SimpleNamespace(query_points=AsyncMock(return_value=SimpleNamespace(points=[])))
     service, _logger = _service(monkeypatch, client=client, embedding_dimensions=3)
 
-    results = await service.search(
+    results = await service.dense_search(
         vector=[0.3, 0.2, 0.1],
         snapshot_id=uuid.uuid4(),
         agent_id=uuid.uuid4(),
@@ -502,13 +504,13 @@ async def test_search_omits_score_threshold_when_disabled(
 
 
 @pytest.mark.asyncio
-async def test_search_preserves_zero_score_threshold(
+async def test_dense_search_preserves_zero_score_threshold(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = SimpleNamespace(query_points=AsyncMock(return_value=SimpleNamespace(points=[])))
     service, _logger = _service(monkeypatch, client=client, embedding_dimensions=3)
 
-    await service.search(
+    await service.dense_search(
         vector=[0.3, 0.2, 0.1],
         snapshot_id=uuid.uuid4(),
         agent_id=uuid.uuid4(),
@@ -522,13 +524,13 @@ async def test_search_preserves_zero_score_threshold(
 
 
 @pytest.mark.asyncio
-async def test_search_returns_empty_list_when_qdrant_finds_nothing(
+async def test_dense_search_returns_empty_list_when_qdrant_finds_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = SimpleNamespace(query_points=AsyncMock(return_value=SimpleNamespace(points=[])))
     service, _logger = _service(monkeypatch, client=client, embedding_dimensions=3)
 
-    results = await service.search(
+    results = await service.dense_search(
         vector=[0.9, 0.1, 0.0],
         snapshot_id=uuid.uuid4(),
         agent_id=uuid.uuid4(),
@@ -540,7 +542,7 @@ async def test_search_returns_empty_list_when_qdrant_finds_nothing(
 
 
 @pytest.mark.asyncio
-async def test_search_raises_typed_error_for_invalid_payload(
+async def test_dense_search_raises_typed_error_for_invalid_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = SimpleNamespace(
@@ -561,13 +563,253 @@ async def test_search_raises_typed_error_for_invalid_payload(
     service, _logger = _service(monkeypatch, client=client, embedding_dimensions=3)
 
     with pytest.raises(InvalidRetrievedChunkError, match="chunk_id"):
-        await service.search(
+        await service.dense_search(
             vector=[0.1, 0.2, 0.3],
             snapshot_id=uuid.uuid4(),
             agent_id=uuid.uuid4(),
             knowledge_base_id=uuid.uuid4(),
             limit=5,
         )
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_builds_correct_prefetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    knowledge_base_id = uuid.uuid4()
+    client = SimpleNamespace(query_points=AsyncMock(return_value=SimpleNamespace(points=[])))
+    service, _logger = _service(monkeypatch, client=client, embedding_dimensions=3)
+
+    results = await service.hybrid_search(
+        text="deployment",
+        vector=[0.1, 0.2, 0.3],
+        snapshot_id=snapshot_id,
+        agent_id=agent_id,
+        knowledge_base_id=knowledge_base_id,
+        limit=5,
+        score_threshold=0.4,
+    )
+
+    assert results == []
+    kwargs = client.query_points.await_args.kwargs
+    assert kwargs["collection_name"] == "proxymind_chunks"
+    assert kwargs["limit"] == 5
+    assert kwargs["with_payload"] is True
+    prefetch = kwargs["prefetch"]
+    assert len(prefetch) == 2
+
+    dense_prefetch, sparse_prefetch = prefetch
+    assert dense_prefetch.query == [0.1, 0.2, 0.3]
+    assert dense_prefetch.using == DENSE_VECTOR_NAME
+    assert dense_prefetch.limit == 5 * PREFETCH_MULTIPLIER
+    assert dense_prefetch.score_threshold == 0.4
+    assert dense_prefetch.filter is not None
+    _assert_scope_filters(
+        dense_prefetch.filter.must,
+        snapshot_id=snapshot_id,
+        agent_id=agent_id,
+        knowledge_base_id=knowledge_base_id,
+    )
+
+    assert sparse_prefetch.using == BM25_VECTOR_NAME
+    assert sparse_prefetch.limit == 5 * PREFETCH_MULTIPLIER
+    assert sparse_prefetch.score_threshold is None
+    assert isinstance(sparse_prefetch.query, models.Document)
+    assert sparse_prefetch.query.text == "deployment"
+    assert sparse_prefetch.query.model == BM25_MODEL_NAME
+    assert _language_value(sparse_prefetch.query.options.language) == "english"
+    assert sparse_prefetch.filter is not None
+    _assert_scope_filters(
+        sparse_prefetch.filter.must,
+        snapshot_id=snapshot_id,
+        agent_id=agent_id,
+        knowledge_base_id=knowledge_base_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_uses_rrf_query_with_explicit_k(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = SimpleNamespace(query_points=AsyncMock(return_value=SimpleNamespace(points=[])))
+    service, _logger = _service(monkeypatch, client=client, embedding_dimensions=3)
+
+    await service.hybrid_search(
+        text="deployment",
+        vector=[0.1, 0.2, 0.3],
+        snapshot_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        knowledge_base_id=uuid.uuid4(),
+        limit=5,
+    )
+
+    query = client.query_points.await_args.kwargs["query"]
+    assert isinstance(query, models.RrfQuery)
+    assert query.rrf.k == RRF_K
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_applies_score_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = SimpleNamespace(query_points=AsyncMock(return_value=SimpleNamespace(points=[])))
+    service, _logger = _service(monkeypatch, client=client, embedding_dimensions=3)
+
+    await service.hybrid_search(
+        text="deployment",
+        vector=[0.1, 0.2, 0.3],
+        snapshot_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        knowledge_base_id=uuid.uuid4(),
+        limit=5,
+        score_threshold=None,
+    )
+
+    dense_prefetch = client.query_points.await_args.kwargs["prefetch"][0]
+    assert dense_prefetch.score_threshold is None
+
+    await service.hybrid_search(
+        text="deployment",
+        vector=[0.1, 0.2, 0.3],
+        snapshot_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        knowledge_base_id=uuid.uuid4(),
+        limit=5,
+        score_threshold=0.0,
+    )
+
+    dense_prefetch = client.query_points.await_args.kwargs["prefetch"][0]
+    assert dense_prefetch.score_threshold == 0.0
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_respects_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = SimpleNamespace(query_points=AsyncMock(return_value=SimpleNamespace(points=[])))
+    service, _logger = _service(monkeypatch, client=client, embedding_dimensions=3)
+
+    await service.hybrid_search(
+        text="deployment",
+        vector=[0.1, 0.2, 0.3],
+        snapshot_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        knowledge_base_id=uuid.uuid4(),
+        limit=7,
+    )
+
+    kwargs = client.query_points.await_args.kwargs
+    assert kwargs["limit"] == 7
+    dense_prefetch, sparse_prefetch = kwargs["prefetch"]
+    assert dense_prefetch.limit == 7 * PREFETCH_MULTIPLIER
+    assert sparse_prefetch.limit == 7 * PREFETCH_MULTIPLIER
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_applies_scope_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    knowledge_base_id = uuid.uuid4()
+    client = SimpleNamespace(query_points=AsyncMock(return_value=SimpleNamespace(points=[])))
+    service, _logger = _service(monkeypatch, client=client, embedding_dimensions=3)
+
+    await service.hybrid_search(
+        text="deployment",
+        vector=[0.1, 0.2, 0.3],
+        snapshot_id=snapshot_id,
+        agent_id=agent_id,
+        knowledge_base_id=knowledge_base_id,
+        limit=5,
+    )
+
+    kwargs = client.query_points.await_args.kwargs
+    _assert_scope_filters(
+        kwargs["query_filter"].must,
+        snapshot_id=snapshot_id,
+        agent_id=agent_id,
+        knowledge_base_id=knowledge_base_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_retries_on_transient_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chunk_id = uuid.uuid4()
+    source_id = uuid.uuid4()
+    client = SimpleNamespace(
+        query_points=AsyncMock(
+            side_effect=[
+                ResponseHandlingException(httpx.ConnectError("boom")),
+                SimpleNamespace(
+                    points=[
+                        SimpleNamespace(
+                            score=0.25,
+                            payload={
+                                "chunk_id": str(chunk_id),
+                                "source_id": str(source_id),
+                                "text_content": "deployment guide",
+                                "anchor_page": None,
+                                "anchor_chapter": None,
+                                "anchor_section": None,
+                                "anchor_timecode": None,
+                            },
+                        )
+                    ]
+                ),
+            ]
+        )
+    )
+    service, _logger = _service(monkeypatch, client=client, embedding_dimensions=3)
+
+    results = await service.hybrid_search(
+        text="deployment",
+        vector=[0.1, 0.2, 0.3],
+        snapshot_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        knowledge_base_id=uuid.uuid4(),
+        limit=5,
+    )
+
+    assert client.query_points.await_count == 2
+    assert results == [
+        RetrievedChunk(
+            chunk_id=chunk_id,
+            source_id=source_id,
+            text_content="deployment guide",
+            score=0.25,
+            anchor_metadata={
+                "anchor_page": None,
+                "anchor_chapter": None,
+                "anchor_section": None,
+                "anchor_timecode": None,
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_zero_limit_short_circuits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = SimpleNamespace(query_points=AsyncMock())
+    service, _logger = _service(monkeypatch, client=client, embedding_dimensions=3)
+
+    results = await service.hybrid_search(
+        text="deployment",
+        vector=[0.1, 0.2, 0.3],
+        snapshot_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        knowledge_base_id=uuid.uuid4(),
+        limit=0,
+    )
+
+    assert results == []
+    client.query_points.assert_not_awaited()
 
 
 @pytest.mark.asyncio

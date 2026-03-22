@@ -52,7 +52,7 @@ async def _cleanup_collection(client: AsyncQdrantClient, collection_name: str) -
 
 
 @pytest.mark.asyncio
-async def test_qdrant_round_trip_filters_by_snapshot_id(qdrant_url: str) -> None:
+async def test_qdrant_dense_search_filters_by_snapshot_id(qdrant_url: str) -> None:
     client = AsyncQdrantClient(url=qdrant_url)
     collection_name = f"test_chunks_{uuid.uuid4().hex}"
     service = QdrantService(
@@ -110,7 +110,7 @@ async def test_qdrant_round_trip_filters_by_snapshot_id(qdrant_url: str) -> None
             ]
         )
 
-        response = await service.search(
+        response = await service.dense_search(
             vector=[1.0, 0.0, 0.0],
             snapshot_id=snapshot_id,
             agent_id=agent_id,
@@ -131,6 +131,349 @@ async def test_qdrant_round_trip_filters_by_snapshot_id(qdrant_url: str) -> None
                 "anchor_timecode": None,
             },
         )
+    finally:
+        await _cleanup_collection(client, collection_name)
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_hybrid_search_returns_results(qdrant_url: str) -> None:
+    client = AsyncQdrantClient(url=qdrant_url)
+    collection_name = f"test_chunks_{uuid.uuid4().hex}"
+    service = QdrantService(
+        client=client,
+        collection_name=collection_name,
+        embedding_dimensions=3,
+        bm25_language="english",
+    )
+    snapshot_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    knowledge_base_id = uuid.uuid4()
+    matched_chunk_id = uuid.uuid4()
+    matched_source_id = uuid.uuid4()
+
+    try:
+        await service.ensure_collection()
+        await service.upsert_chunks(
+            [
+                _point(
+                    chunk_id=matched_chunk_id,
+                    snapshot_id=snapshot_id,
+                    agent_id=agent_id,
+                    knowledge_base_id=knowledge_base_id,
+                    vector=[1.0, 0.0, 0.0],
+                    text_content="deployment guide",
+                    source_id=matched_source_id,
+                )
+            ]
+        )
+
+        response = await service.hybrid_search(
+            text="deployment",
+            vector=[1.0, 0.0, 0.0],
+            snapshot_id=snapshot_id,
+            agent_id=agent_id,
+            knowledge_base_id=knowledge_base_id,
+            limit=5,
+        )
+
+        assert response == [
+            RetrievedChunk(
+                chunk_id=matched_chunk_id,
+                source_id=matched_source_id,
+                text_content="deployment guide",
+                score=response[0].score,
+                anchor_metadata={
+                    "anchor_page": None,
+                    "anchor_chapter": "Chapter",
+                    "anchor_section": "Section",
+                    "anchor_timecode": None,
+                },
+            )
+        ]
+    finally:
+        await _cleanup_collection(client, collection_name)
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_hybrid_search_filters_by_snapshot_id(qdrant_url: str) -> None:
+    client = AsyncQdrantClient(url=qdrant_url)
+    collection_name = f"test_chunks_{uuid.uuid4().hex}"
+    service = QdrantService(
+        client=client,
+        collection_name=collection_name,
+        embedding_dimensions=3,
+        bm25_language="english",
+    )
+    snapshot_id = uuid.uuid4()
+    other_snapshot_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    knowledge_base_id = uuid.uuid4()
+    matched_chunk_id = uuid.uuid4()
+
+    try:
+        await service.ensure_collection()
+        await service.upsert_chunks(
+            [
+                _point(
+                    chunk_id=matched_chunk_id,
+                    snapshot_id=snapshot_id,
+                    agent_id=agent_id,
+                    knowledge_base_id=knowledge_base_id,
+                    vector=[0.4, 0.9, 0.0],
+                    text_content="deployment guide",
+                ),
+                _point(
+                    chunk_id=uuid.uuid4(),
+                    snapshot_id=other_snapshot_id,
+                    agent_id=agent_id,
+                    knowledge_base_id=knowledge_base_id,
+                    vector=[1.0, 0.0, 0.0],
+                    text_content="deployment guide",
+                ),
+                _point(
+                    chunk_id=uuid.uuid4(),
+                    snapshot_id=other_snapshot_id,
+                    agent_id=agent_id,
+                    knowledge_base_id=knowledge_base_id,
+                    vector=[1.0, 0.0, 0.0],
+                    text_content="deployment guide",
+                ),
+                _point(
+                    chunk_id=uuid.uuid4(),
+                    snapshot_id=other_snapshot_id,
+                    agent_id=agent_id,
+                    knowledge_base_id=knowledge_base_id,
+                    vector=[1.0, 0.0, 0.0],
+                    text_content="deployment guide",
+                ),
+            ]
+        )
+
+        response = await service.hybrid_search(
+            text="deployment",
+            vector=[1.0, 0.0, 0.0],
+            snapshot_id=snapshot_id,
+            agent_id=agent_id,
+            knowledge_base_id=knowledge_base_id,
+            limit=1,
+        )
+
+        assert [chunk.chunk_id for chunk in response] == [matched_chunk_id]
+    finally:
+        await _cleanup_collection(client, collection_name)
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_hybrid_search_keyword_boost(qdrant_url: str) -> None:
+    client = AsyncQdrantClient(url=qdrant_url)
+    collection_name = f"test_chunks_{uuid.uuid4().hex}"
+    service = QdrantService(
+        client=client,
+        collection_name=collection_name,
+        embedding_dimensions=3,
+        bm25_language="english",
+    )
+    snapshot_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    knowledge_base_id = uuid.uuid4()
+    semantic_chunk_id = uuid.uuid4()
+    keyword_chunk_id = uuid.uuid4()
+
+    try:
+        await service.ensure_collection()
+        await service.upsert_chunks(
+            [
+                _point(
+                    chunk_id=semantic_chunk_id,
+                    snapshot_id=snapshot_id,
+                    agent_id=agent_id,
+                    knowledge_base_id=knowledge_base_id,
+                    vector=[1.0, 0.0, 0.0],
+                    text_content="general platform architecture",
+                ),
+                _point(
+                    chunk_id=keyword_chunk_id,
+                    snapshot_id=snapshot_id,
+                    agent_id=agent_id,
+                    knowledge_base_id=knowledge_base_id,
+                    vector=[0.4, 0.9, 0.0],
+                    text_content="deployment guide",
+                ),
+            ]
+        )
+
+        dense_response = await service.dense_search(
+            vector=[1.0, 0.0, 0.0],
+            snapshot_id=snapshot_id,
+            agent_id=agent_id,
+            knowledge_base_id=knowledge_base_id,
+            limit=2,
+        )
+        hybrid_response = await service.hybrid_search(
+            text="deployment",
+            vector=[1.0, 0.0, 0.0],
+            snapshot_id=snapshot_id,
+            agent_id=agent_id,
+            knowledge_base_id=knowledge_base_id,
+            limit=2,
+        )
+
+        assert [chunk.chunk_id for chunk in dense_response] == [
+            semantic_chunk_id,
+            keyword_chunk_id,
+        ]
+        assert [chunk.chunk_id for chunk in hybrid_response] == [
+            keyword_chunk_id,
+            semantic_chunk_id,
+        ]
+    finally:
+        await _cleanup_collection(client, collection_name)
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_hybrid_search_sparse_only_results(qdrant_url: str) -> None:
+    client = AsyncQdrantClient(url=qdrant_url)
+    collection_name = f"test_chunks_{uuid.uuid4().hex}"
+    service = QdrantService(
+        client=client,
+        collection_name=collection_name,
+        embedding_dimensions=3,
+        bm25_language="english",
+    )
+    snapshot_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    knowledge_base_id = uuid.uuid4()
+    chunk_id = uuid.uuid4()
+
+    try:
+        await service.ensure_collection()
+        await service.upsert_chunks(
+            [
+                _point(
+                    chunk_id=chunk_id,
+                    snapshot_id=snapshot_id,
+                    agent_id=agent_id,
+                    knowledge_base_id=knowledge_base_id,
+                    vector=[0.0, 1.0, 0.0],
+                    text_content="deployment guide",
+                )
+            ]
+        )
+
+        response = await service.hybrid_search(
+            text="deployment",
+            vector=[1.0, 0.0, 0.0],
+            snapshot_id=snapshot_id,
+            agent_id=agent_id,
+            knowledge_base_id=knowledge_base_id,
+            limit=5,
+            score_threshold=0.95,
+        )
+
+        assert [chunk.chunk_id for chunk in response] == [chunk_id]
+    finally:
+        await _cleanup_collection(client, collection_name)
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_hybrid_search_dense_only_results(qdrant_url: str) -> None:
+    client = AsyncQdrantClient(url=qdrant_url)
+    collection_name = f"test_chunks_{uuid.uuid4().hex}"
+    service = QdrantService(
+        client=client,
+        collection_name=collection_name,
+        embedding_dimensions=3,
+        bm25_language="english",
+    )
+    snapshot_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    knowledge_base_id = uuid.uuid4()
+    chunk_id = uuid.uuid4()
+
+    try:
+        await service.ensure_collection()
+        await service.upsert_chunks(
+            [
+                _point(
+                    chunk_id=chunk_id,
+                    snapshot_id=snapshot_id,
+                    agent_id=agent_id,
+                    knowledge_base_id=knowledge_base_id,
+                    vector=[1.0, 0.0, 0.0],
+                    text_content="general platform architecture",
+                )
+            ]
+        )
+
+        response = await service.hybrid_search(
+            text="deployment",
+            vector=[1.0, 0.0, 0.0],
+            snapshot_id=snapshot_id,
+            agent_id=agent_id,
+            knowledge_base_id=knowledge_base_id,
+            limit=5,
+        )
+
+        assert [chunk.chunk_id for chunk in response] == [chunk_id]
+    finally:
+        await _cleanup_collection(client, collection_name)
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_hybrid_search_dedup_same_chunk_both_legs(qdrant_url: str) -> None:
+    client = AsyncQdrantClient(url=qdrant_url)
+    collection_name = f"test_chunks_{uuid.uuid4().hex}"
+    service = QdrantService(
+        client=client,
+        collection_name=collection_name,
+        embedding_dimensions=3,
+        bm25_language="english",
+    )
+    snapshot_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    knowledge_base_id = uuid.uuid4()
+    chunk_id = uuid.uuid4()
+
+    try:
+        await service.ensure_collection()
+        await service.upsert_chunks(
+            [
+                _point(
+                    chunk_id=chunk_id,
+                    snapshot_id=snapshot_id,
+                    agent_id=agent_id,
+                    knowledge_base_id=knowledge_base_id,
+                    vector=[1.0, 0.0, 0.0],
+                    text_content="deployment guide",
+                ),
+                _point(
+                    chunk_id=uuid.uuid4(),
+                    snapshot_id=snapshot_id,
+                    agent_id=agent_id,
+                    knowledge_base_id=knowledge_base_id,
+                    vector=[0.0, 1.0, 0.0],
+                    text_content="operations handbook",
+                ),
+            ]
+        )
+
+        response = await service.hybrid_search(
+            text="deployment",
+            vector=[1.0, 0.0, 0.0],
+            snapshot_id=snapshot_id,
+            agent_id=agent_id,
+            knowledge_base_id=knowledge_base_id,
+            limit=5,
+        )
+
+        chunk_ids = [chunk.chunk_id for chunk in response]
+        assert chunk_ids.count(chunk_id) == 1
     finally:
         await _cleanup_collection(client, collection_name)
         await client.close()
