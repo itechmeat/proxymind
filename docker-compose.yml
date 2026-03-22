@@ -34,21 +34,19 @@ services:
       retries: 10
       start_period: 20s
 
-  minio:
-    image: quay.io/minio/minio:latest
-    env_file:
-      - .env
-    command: server /data --console-address ":9001"
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    command: server -filer -dir=/data -master.port=9333 -filer.port=8888 -volume.port=9340
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "8888:8888"
+      - "9333:9333"
     volumes:
-      - minio-data:/data
+      - seaweedfs-data:/data
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "curl -fsS http://localhost:9000/minio/health/live >/dev/null",
+          "wget -qO- http://localhost:9333/cluster/healthz || exit 1",
         ]
       interval: 15s
       timeout: 10s
@@ -83,7 +81,7 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_healthy
-      minio:
+      seaweedfs:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -113,7 +111,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      minio:
+      seaweedfs:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -121,5 +119,5 @@ services:
 volumes:
   postgres-data:
   qdrant-data:
-  minio-data:
+  seaweedfs-data:
   redis-data:

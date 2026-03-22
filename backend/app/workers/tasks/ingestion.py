@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from sqlalchemy import select, update
@@ -27,16 +27,15 @@ from app.db.models.enums import (
     SourceStatus,
     TaskType,
 )
-from app.services import (
-    DoclingParser,
-    EmbeddingService,
-    QdrantChunkPoint,
-    QdrantService,
-    SnapshotService,
-    StorageService,
-)
 
 logger = structlog.get_logger(__name__)
+
+if TYPE_CHECKING:
+    from app.services.docling_parser import DoclingParser
+    from app.services.embedding import EmbeddingService
+    from app.services.qdrant import QdrantService
+    from app.services.snapshot import SnapshotService
+    from app.services.storage import StorageService
 
 
 @dataclass(slots=True)
@@ -257,6 +256,8 @@ async def _run_ingestion_pipeline(
         )
         task.progress = 85
         await session.commit()
+
+        from app.services.qdrant import QdrantChunkPoint
 
         qdrant_points = [
             QdrantChunkPoint(

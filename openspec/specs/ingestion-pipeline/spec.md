@@ -117,23 +117,23 @@ Each batch embedding API call SHALL be wrapped with tenacity retry. The retry SH
 
 ### Requirement: StorageService.download method
 
-The existing `StorageService` SHALL be extended with a `download(object_key: str) -> bytes` method that retrieves file content from MinIO. The download SHALL be wrapped in `asyncio.to_thread()` since the MinIO SDK is synchronous.
+The existing `StorageService` SHALL provide a `download(object_key: str) -> bytes` method that retrieves file content from SeaweedFS via the Filer HTTP API. The download SHALL be a native async `httpx` GET request to `{base_path}/{object_key}` — no `asyncio.to_thread()` wrapper is needed.
 
 #### Scenario: Download returns file bytes
 
 - **WHEN** `download()` is called with a valid object key
-- **THEN** the method SHALL return the file content as bytes
+- **THEN** the method SHALL return the file content as bytes via a GET request to the SeaweedFS Filer
 
 #### Scenario: Download of non-existent key raises exception
 
-- **WHEN** `download()` is called with an object key that does not exist in MinIO
-- **THEN** the method SHALL raise an exception
+- **WHEN** `download()` is called with an object key that does not exist in SeaweedFS
+- **THEN** the method SHALL raise an `httpx.HTTPStatusError` (non-2xx response from Filer)
 
 ---
 
 ### Requirement: Pipeline orchestration in the worker task
 
-The ingestion worker task (`app/workers/tasks/ingestion.py`) SHALL replace the noop handler with a real pipeline that executes these stages in sequence: (1) Download source file from MinIO, (2) Parse and chunk via DoclingParser, (3) Persist draft snapshot + Document + DocumentVersion + Chunk records in PostgreSQL (Tx 1), (4) Generate embeddings via EmbeddingService, (5) Upsert vectors to Qdrant via QdrantService, (6) Finalize statuses and create EmbeddingProfile (Tx 2). The worker task IS the orchestrator; there SHALL NOT be a separate Pipeline abstraction class.
+The ingestion worker task (`app/workers/tasks/ingestion.py`) SHALL replace the noop handler with a real pipeline that executes these stages in sequence: (1) Download source file from SeaweedFS, (2) Parse and chunk via DoclingParser, (3) Persist draft snapshot + Document + DocumentVersion + Chunk records in PostgreSQL (Tx 1), (4) Generate embeddings via EmbeddingService, (5) Upsert vectors to Qdrant via QdrantService, (6) Finalize statuses and create EmbeddingProfile (Tx 2). The worker task IS the orchestrator; there SHALL NOT be a separate Pipeline abstraction class.
 
 **[Modified by S2-03]** Stage 3 (Persist) SHALL use `ensure_draft_or_rebind` to acquire a FOR UPDATE lock on the snapshot row before persisting any chunks. The lock SHALL be held through the chunk insert and transaction commit. If the snapshot is no longer DRAFT (published concurrently), the worker SHALL rebind to a new draft via the same method.
 
@@ -250,7 +250,7 @@ On any failure after Tx 1 has committed, the pipeline SHALL execute a recovery t
 
 #### Scenario: Failure before Tx 1 leaves no orphaned records
 
-- **WHEN** the pipeline fails during Stage 1 (Download) or Stage 2 (Parse)
+- **WHEN** the pipeline fails during Stage 1 (Download from SeaweedFS) or Stage 2 (Parse)
 - **THEN** no Document, DocumentVersion, or Chunk records SHALL exist in PostgreSQL
 - **AND** the Source and BackgroundTask SHALL be marked FAILED
 
@@ -293,22 +293,34 @@ The pipeline SHALL create one `EmbeddingProfile` record per successful ingestion
 
 ### Requirement: Worker service initialization
 
-The arq worker `on_startup` hook SHALL initialize and store in the worker context: `StorageService` (MinIO client), `DoclingParser`, `QdrantService` (async Qdrant client), `EmbeddingService` (GenAI client), `SnapshotService`, and `settings`. The `on_startup` hook SHALL call `qdrant_service.ensure_collection()` (idempotent). The `on_shutdown` hook SHALL close the Qdrant client connection.
+The arq worker `on_startup` hook SHALL initialize and store in the worker context: a dedicated `storage_http_client` (`httpx.AsyncClient` with `base_url=settings.seaweedfs_filer_url` and `timeout=30.0`), `StorageService` (wrapping the storage HTTP client with `base_path=settings.seaweedfs_sources_path`), `DoclingParser`, `QdrantService` (async Qdrant client), `EmbeddingService` (GenAI client), `SnapshotService`, and `settings`. The `on_startup` hook SHALL call `qdrant_service.ensure_collection()` (idempotent) and `storage_service.ensure_storage_root()` (idempotent). The `on_shutdown` hook SHALL close the Qdrant client connection AND call `await ctx["storage_http_client"].aclose()` to properly clean up the storage HTTP client.
+
+The `storage_http_client` is a **new lifecycle responsibility** for the worker. The previous MinIO SDK was synchronous and did not require async cleanup. The worker now MUST manage the async httpx client lifecycle: create in `on_startup`, close in `on_shutdown`.
 
 #### Scenario: All services available in worker context after startup
 
 - **WHEN** the arq worker completes startup
-- **THEN** `ctx["storage_service"]`, `ctx["docling_parser"]`, `ctx["qdrant_service"]`, `ctx["embedding_service"]`, `ctx["snapshot_service"]`, and `ctx["settings"]` SHALL all be present and initialized
+- **THEN** `ctx["storage_http_client"]`, `ctx["storage_service"]`, `ctx["docling_parser"]`, `ctx["qdrant_service"]`, `ctx["embedding_service"]`, `ctx["snapshot_service"]`, and `ctx["settings"]` SHALL all be present and initialized
 
 #### Scenario: Qdrant collection ensured on startup
 
 - **WHEN** the arq worker starts
 - **THEN** `ensure_collection()` SHALL be called during startup to verify collection readiness
 
+#### Scenario: Storage root ensured on startup
+
+- **WHEN** the arq worker starts
+- **THEN** `ensure_storage_root()` SHALL be called during startup to verify SeaweedFS Filer availability
+
 #### Scenario: Qdrant client closed on shutdown
 
 - **WHEN** the arq worker shuts down
 - **THEN** the Qdrant client connection SHALL be closed
+
+#### Scenario: Storage HTTP client closed on shutdown
+
+- **WHEN** the arq worker shuts down
+- **THEN** `await ctx["storage_http_client"].aclose()` SHALL be called to release the httpx connection pool
 
 ---
 
@@ -336,9 +348,11 @@ The following stable behavior MUST be covered by CI tests before archive:
 
 - **DoclingParser unit tests**: mock Docling DocumentConverter and HybridChunker. Verify chunk extraction, anchor metadata mapping, token counting. Cover edge cases: empty document, single-paragraph document, document with heading hierarchy.
 - **EmbeddingService unit tests**: mock GenAI SDK. Verify batching logic (texts split into groups of `embedding_batch_size`), retry behavior on 429/5xx, dimension validation.
+- **StorageService unit tests** (`test_storage.py`): use `httpx.MockTransport` to mock HTTP responses. Verify correct HTTP methods (POST for upload/ensure, GET for download, DELETE for delete), URL path construction, path normalization edge cases, content_type forwarding, response body handling, error propagation (non-2xx raises `httpx.HTTPStatusError`).
 - **Pipeline orchestration unit tests**: mock all services (DoclingParser, EmbeddingService, QdrantService, StorageService, SnapshotService). Verify correct call sequence, progress updates, status transitions for Source/Document/DocumentVersion/Chunk, error propagation and failure cleanup, draft snapshot auto-creation, result_metadata population.
 - **Integration tests with real PG**: run the pipeline with mocked GenAI and real Docling (local library for MD/TXT). Verify all PG records are created with correct statuses, relationships, and field values.
 - **Snapshot locking integration tests with real PG** [Added by S2-03]: verify that the ingestion worker calls `ensure_draft_or_rebind` before chunk persistence. Verify that chunks are inserted under the FOR UPDATE lock. Verify the rebind scenario: when the snapshot has been published between `get_or_create_draft` and chunk insert, the worker rebinds to a new draft and the published snapshot receives no new chunks.
+- **Worker shutdown test**: verify that the worker `on_shutdown` properly closes both the Qdrant client AND the `storage_http_client` via `aclose()`.
 
 ### Evals (non-CI, real providers)
 

@@ -21,16 +21,14 @@ from app.api.schemas import SourceUploadMetadata, SourceUploadResponse, TaskStat
 from app.api.snapshot_schemas import SnapshotResponse
 from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
 from app.db.models.enums import SnapshotStatus
-from app.services import (
+from app.services.snapshot import (
     SnapshotConflictError,
     SnapshotNotFoundError,
     SnapshotService,
     SnapshotValidationError,
-    StorageService,
-    determine_source_type,
-    validate_file_extension,
 )
 from app.services.source import SourcePersistenceError, SourceService, TaskEnqueueError
+from app.services.storage import StorageService, determine_source_type, validate_file_extension
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 UPLOAD_READ_CHUNK_SIZE = 64 * 1024

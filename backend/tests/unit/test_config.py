@@ -17,10 +17,8 @@ def _base_settings() -> dict[str, object]:
         "redis_port": 6379,
         "qdrant_host": "localhost",
         "qdrant_port": 6333,
-        "minio_host": "localhost",
-        "minio_port": 9000,
-        "minio_root_user": "proxymind",
-        "minio_root_password": "proxymind",
+        "seaweedfs_host": "localhost",
+        "seaweedfs_filer_port": 8888,
     }
 
 

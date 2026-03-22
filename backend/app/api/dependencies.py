@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from arq.connections import ArqRedis
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
-from app.services import (
-    ChatService,
-    LLMService,
-    RetrievalService,
-    SnapshotService,
-    SourceService,
-    StorageService,
-)
 from app.services.source import TaskEnqueuer
+
+if TYPE_CHECKING:
+    from app.services.chat import ChatService
+    from app.services.llm import LLMService
+    from app.services.retrieval import RetrievalService
+    from app.services.snapshot import SnapshotService
+    from app.services.source import SourceService
+    from app.services.storage import StorageService
 
 
 def get_storage_service(request: Request) -> StorageService:
@@ -42,12 +42,16 @@ def get_source_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     task_enqueuer: Annotated[TaskEnqueuer, Depends(get_task_enqueuer)],
 ) -> SourceService:
+    from app.services.source import SourceService
+
     return SourceService(session=session, task_enqueuer=task_enqueuer)
 
 
 def get_snapshot_service(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SnapshotService:
+    from app.services.snapshot import SnapshotService
+
     return SnapshotService(session=session)
 
 
@@ -66,6 +70,8 @@ def get_chat_service(
     retrieval_service: Annotated[RetrievalService, Depends(get_retrieval_service)],
     llm_service: Annotated[LLMService, Depends(get_llm_service)],
 ) -> ChatService:
+    from app.services.chat import ChatService
+
     return ChatService(
         session=session,
         snapshot_service=snapshot_service,

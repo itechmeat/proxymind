@@ -19,14 +19,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from testcontainers.core.container import DockerContainer
 from testcontainers.postgres import PostgresContainer
 
-from app.api.admin import router as admin_router
-from app.api.chat import router as chat_router
 from app.core.config import get_settings
 from app.core.constants import DEFAULT_AGENT_ID
 from app.db.engine import create_database_engine, create_session_factory
 from app.db.models import Agent
-from app.services.llm import LLMResponse
-from app.services.qdrant import RetrievedChunk
 from app.services.storage import StorageService
 
 pytest_plugins = ("pytest_asyncio",)
@@ -64,8 +60,34 @@ def _connection_url_to_env(url: str) -> dict[str, str]:
     }
 
 
+def _existing_postgres_env() -> dict[str, str]:
+    return {
+        "POSTGRES_HOST": os.environ["POSTGRES_HOST"],
+        "POSTGRES_PORT": os.environ["POSTGRES_PORT"],
+        "POSTGRES_USER": os.environ["POSTGRES_USER"],
+        "POSTGRES_PASSWORD": os.environ["POSTGRES_PASSWORD"],
+        "POSTGRES_DB": os.environ["POSTGRES_DB"],
+    }
+
+
 @pytest.fixture(scope="session")
 def postgres_env() -> dict[str, str]:
+    if os.environ.get("PYTEST_USE_EXISTING_POSTGRES") == "1":
+        env = _existing_postgres_env()
+        previous_values = {key: os.environ.get(key) for key in env}
+        os.environ.update(env)
+        get_settings.cache_clear()
+        try:
+            yield env
+        finally:
+            for key, value in previous_values.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            get_settings.cache_clear()
+        return
+
     with PostgresContainer("postgres:18") as postgres:
         env = _connection_url_to_env(postgres.get_connection_url())
         previous_values = {key: os.environ.get(key) for key in env}
@@ -141,7 +163,7 @@ async def seeded_agent(db_session: AsyncSession) -> Agent:
 def mock_storage_service() -> SimpleNamespace:
     return SimpleNamespace(
         generate_object_key=StorageService.generate_object_key,
-        ensure_bucket=AsyncMock(),
+        ensure_storage_root=AsyncMock(),
         upload=AsyncMock(),
         delete=AsyncMock(),
     )
@@ -161,11 +183,13 @@ def admin_app(
     mock_storage_service: SimpleNamespace,
     mock_arq_pool: SimpleNamespace,
 ) -> FastAPI:
+    from app.api.admin import router as admin_router
+
     app = FastAPI()
     app.include_router(admin_router)
     app.state.settings = SimpleNamespace(
         upload_max_file_size_mb=50,
-        minio_bucket_sources="sources",
+        seaweedfs_sources_path="/sources",
     )
     app.state.session_factory = session_factory
     app.state.storage_service = mock_storage_service
@@ -180,6 +204,8 @@ def mock_retrieval_service() -> SimpleNamespace:
 
 @pytest.fixture
 def mock_llm_service() -> SimpleNamespace:
+    from app.services.llm import LLMResponse
+
     return SimpleNamespace(
         complete=AsyncMock(
             return_value=LLMResponse(
@@ -193,7 +219,9 @@ def mock_llm_service() -> SimpleNamespace:
 
 
 @pytest.fixture
-def sample_retrieved_chunk() -> RetrievedChunk:
+def sample_retrieved_chunk() -> object:
+    from app.services.qdrant import RetrievedChunk
+
     return RetrievedChunk(
         chunk_id=uuid.uuid7(),
         source_id=uuid.uuid7(),
@@ -214,6 +242,8 @@ def chat_app(
     mock_retrieval_service: SimpleNamespace,
     mock_llm_service: SimpleNamespace,
 ) -> FastAPI:
+    from app.api.chat import router as chat_router
+
     app = FastAPI()
     app.include_router(chat_router)
     app.state.settings = SimpleNamespace(

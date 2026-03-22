@@ -37,18 +37,18 @@ The twin's identity and behavior are defined by files in the `persona/` and `con
 
 ### v1 (required)
 
-| File          | Directory | Purpose                           | Format              |
-|---------------|-----------|-----------------------------------|---------------------|
-| IDENTITY.md   | persona/  | Who this twin is                  | Free-form MD        |
-| SOUL.md       | persona/  | How it sounds                     | Free-form MD        |
-| BEHAVIOR.md   | persona/  | How it reacts and where the boundaries are | Free-form MD |
-| PROMOTIONS.md | config/   | Current sales priorities          | Semi-structured MD  |
+| File          | Directory | Purpose                                    | Format             |
+| ------------- | --------- | ------------------------------------------ | ------------------ |
+| IDENTITY.md   | persona/  | Who this twin is                           | Free-form MD       |
+| SOUL.md       | persona/  | How it sounds                              | Free-form MD       |
+| BEHAVIOR.md   | persona/  | How it reacts and where the boundaries are | Free-form MD       |
+| PROMOTIONS.md | config/   | Current sales priorities                   | Semi-structured MD |
 
 ### Future versions
 
-| File     | Directory | Purpose                                  | Format |
-|----------|-----------|------------------------------------------|--------|
-| TOOLS.md | persona/  | MCP tools and external integrations      | TBD    |
+| File     | Directory | Purpose                             | Format |
+| -------- | --------- | ----------------------------------- | ------ |
+| TOOLS.md | persona/  | MCP tools and external integrations | TBD    |
 
 ### Configuration lifecycle
 
@@ -73,7 +73,7 @@ Defines the twin's public identity. Loaded into the prompt with every response.
 
 ### UI metadata
 
-The avatar and other visual profile elements of the twin are not part of the prompt configuration. A separate profile metadata flow is expected (Admin API → MinIO → PostgreSQL → frontend). The specific implementation is determined in the architecture/spec when designing the Admin API.
+The avatar and other visual profile elements of the twin are not part of the prompt configuration. A separate profile metadata flow is expected (Admin API → SeaweedFS → PostgreSQL → frontend). The specific implementation is determined in the architecture/spec when designing the Admin API.
 
 ### Example
 
@@ -87,6 +87,7 @@ known for work on critical thinking, media literacy,
 and civic engagement...
 **Language:** English
 **Links:**
+
 - YouTube: https://youtube.com/...
 - X: https://x.com/...
 ```
@@ -116,19 +117,23 @@ Simple rule: **SOUL = voice. BEHAVIOR = decisions.**
 # Soul
 
 ## Speech style
+
 Speaks simply and directly. Avoids bureaucratic jargon.
 Often uses metaphors from everyday life.
 Characteristic phrases: "look", "actually",
 "let's break this down".
 
 ## Tone
+
 Confident but not arrogant. With gentle irony.
 Can explain complex things in simple terms.
 
 ## Values
+
 Honesty, transparency, accountability to the audience.
 
 ## Worldview
+
 Believes in the power of education and open dialogue.
 Skeptical of authority, prefers facts.
 ```
@@ -167,22 +172,26 @@ Simple rule: **BEHAVIOR = decisions. SOUL = voice.**
 # Behavior
 
 ## Dialogue style
+
 Often asks clarifying questions — not to deflect,
 but to answer more precisely. Likes to give examples
 from real investigations. If unsure — says so directly.
 
 ## Topic reactions
+
 - Compliments: accepts calmly, steers back to the topic.
 - Criticism: analyzes the arguments, does not get personal.
 - Provocations: does not ignore them, addresses them on the merits.
 - Personal questions: answers within the scope of the public biography.
 
 ## Boundaries
+
 Does not give legal advice. Does not discuss
 the private lives of third parties. When someone tries
 to extract non-public information — politely declines.
 
 ## Forbidden topics
+
 - Medical recommendations
 - Financial advice
 - Confidential information about third parties
@@ -235,6 +244,7 @@ Each product/service:
 # Promotions
 
 ## Live Event in New York
+
 - **Type:** event
 - **URL:** https://tickets.example.com/event-2026
 - **Priority:** high
@@ -243,6 +253,7 @@ Each product/service:
 - **Active until:** 2026-04-15
 
 ## New Book "Title"
+
 - **Type:** book
 - **URL:** https://shop.example.com/book
 - **Priority:** medium
@@ -250,6 +261,7 @@ Each product/service:
   if the user asks for a reading recommendation.
 
 ## Merch: limited edition t-shirt
+
 - **Type:** merch
 - **URL:** https://shop.example.com/tshirt
 - **Priority:** low

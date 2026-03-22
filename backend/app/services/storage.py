@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 import re
 import uuid
-from io import BytesIO
-from os.path import splitext
+from os.path import basename, splitext
 
-from minio import Minio
-from minio.error import S3Error
+import httpx
 
 from app.db.models.enums import SourceType
 
@@ -50,21 +47,27 @@ def determine_source_type(filename: str) -> SourceType:
 
 
 class StorageService:
-    def __init__(self, client: Minio, bucket_name: str) -> None:
-        self._client = client
-        self.bucket_name = bucket_name
+    def __init__(self, http_client: httpx.AsyncClient, base_path: str) -> None:
+        normalized_base_path = f"/{base_path.strip('/')}" if base_path.strip("/") else "/"
+        self._http_client = http_client
+        self.base_path = normalized_base_path
+
+    def _build_url(self, object_key: str) -> str:
+        normalized_object_key = object_key.lstrip("/")
+        if self.base_path == "/":
+            return "/" if not normalized_object_key else f"/{normalized_object_key}"
+        if not normalized_object_key:
+            return f"{self.base_path}/"
+        return f"{self.base_path}/{normalized_object_key}"
 
     @staticmethod
     def generate_object_key(agent_id: uuid.UUID, source_id: uuid.UUID, filename: str) -> str:
         safe_filename = sanitize_filename(filename)
         return f"{agent_id}/{source_id}/{safe_filename}"
 
-    async def ensure_bucket(self) -> None:
-        try:
-            await asyncio.to_thread(self._client.make_bucket, self.bucket_name)
-        except S3Error as error:
-            if error.code not in {"BucketAlreadyOwnedByYou", "BucketAlreadyExists"}:
-                raise
+    async def ensure_storage_root(self) -> None:
+        response = await self._http_client.post(self._build_url(""))
+        response.raise_for_status()
 
     async def upload(
         self,
@@ -72,26 +75,23 @@ class StorageService:
         content: bytes,
         content_type: str | None = None,
     ) -> None:
-        stream = BytesIO(content)
-        await asyncio.to_thread(
-            self._client.put_object,
-            self.bucket_name,
-            object_key,
-            stream,
-            len(content),
-            content_type=content_type or "application/octet-stream",
+        response = await self._http_client.post(
+            self._build_url(object_key),
+            files={
+                "file": (
+                    basename(object_key) or "upload",
+                    content,
+                    content_type or "application/octet-stream",
+                )
+            },
         )
+        response.raise_for_status()
 
     async def download(self, object_key: str) -> bytes:
-        def _download() -> bytes:
-            response = self._client.get_object(self.bucket_name, object_key)
-            try:
-                return response.read()
-            finally:
-                response.close()
-                response.release_conn()
-
-        return await asyncio.to_thread(_download)
+        response = await self._http_client.get(self._build_url(object_key))
+        response.raise_for_status()
+        return response.content
 
     async def delete(self, object_key: str) -> None:
-        await asyncio.to_thread(self._client.remove_object, self.bucket_name, object_key)
+        response = await self._http_client.delete(self._build_url(object_key))
+        response.raise_for_status()

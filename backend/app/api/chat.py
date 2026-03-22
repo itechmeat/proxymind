@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 
@@ -13,12 +13,16 @@ from app.api.chat_schemas import (
     SessionWithMessagesResponse,
 )
 from app.api.dependencies import get_chat_service
-from app.services import ChatService, NoActiveSnapshotError, SessionNotFoundError
+
+if TYPE_CHECKING:
+    from app.services.chat import ChatService
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
 def _raise_chat_http_error(error: Exception) -> None:
+    from app.services.chat import NoActiveSnapshotError, SessionNotFoundError
+
     if isinstance(error, SessionNotFoundError):
         raise HTTPException(status_code=404, detail=str(error)) from error
     if isinstance(error, NoActiveSnapshotError):

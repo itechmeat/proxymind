@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-from minio.error import S3Error
 from pydantic import ValidationError
 
 from app.api.schemas import SourceUploadMetadata
@@ -74,18 +73,21 @@ def test_source_upload_metadata_rejects_invalid_public_url() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ensure_bucket_ignores_already_existing_bucket_error() -> None:
+async def test_ensure_storage_root_posts_root_directory() -> None:
+    captured: list[str] = []
+
     class FakeClient:
-        def make_bucket(self, bucket_name: str) -> None:
-            raise S3Error(
-                response=object(),  # type: ignore[arg-type]
-                code="BucketAlreadyOwnedByYou",
-                message="bucket exists",
-                resource=f"/{bucket_name}",
-                request_id="req",
-                host_id="host",
-                bucket_name=bucket_name,
-            )
+        async def post(self, url: str):
+            captured.append(url)
+
+            class FakeResponse:
+                def raise_for_status(self) -> None:
+                    return None
+
+            return FakeResponse()
 
     service = StorageService(FakeClient(), "sources")  # type: ignore[arg-type]
-    await service.ensure_bucket()
+
+    await service.ensure_storage_root()
+
+    assert captured == ["/sources/"]

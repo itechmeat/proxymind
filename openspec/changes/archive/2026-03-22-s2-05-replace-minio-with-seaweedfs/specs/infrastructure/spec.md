@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Docker Compose services
 
@@ -131,51 +131,7 @@ The project SHALL use three separate `.env` files with distinct responsibilities
 - **WHEN** inspecting the `api` service definition in docker-compose.yml
 - **THEN** it SHALL declare `env_file` that includes both the root `.env` and `backend/.env`
 
-### Requirement: .env.example files committed to git
-
-Each of the three `.env` files SHALL have a corresponding `.env.example` file committed to the repository with safe development defaults. The actual `.env` files SHALL be listed in `.gitignore`.
-
-#### Scenario: Example files exist with safe defaults
-
-- **WHEN** cloning the repository
-- **THEN** `.env.example`, `backend/.env.example`, and `frontend/.env.example` SHALL exist and contain working default values for local development
-
-#### Scenario: Actual .env files are gitignored
-
-- **WHEN** inspecting `.gitignore`
-- **THEN** `.env` files SHALL be excluded from version control
-
-### Requirement: Caddyfile scaffold
-
-The repository SHALL contain a `Caddyfile` at the project root that is a syntactically valid Caddy configuration. Caddy SHALL NOT be run as a service at this stage.
-
-#### Scenario: Caddyfile is valid Caddy syntax
-
-- **WHEN** inspecting the Caddyfile
-- **THEN** it SHALL contain a valid configuration that reverse-proxies `/api/*` to the backend and serves the frontend as a file server with SPA fallback
-
-#### Scenario: Caddy is not a runtime service
-
-- **WHEN** inspecting docker-compose.yml
-- **THEN** there SHALL be no Caddy service defined
-
-### Requirement: .editorconfig
-
-The repository SHALL contain an `.editorconfig` file at the project root that defines consistent coding styles across editors.
-
-#### Scenario: EditorConfig defines baseline formatting
-
-- **WHEN** inspecting `.editorconfig`
-- **THEN** it SHALL define at minimum: charset, end-of-line style, indent style, indent size, and trailing whitespace rules
-
-### Requirement: .gitignore
-
-The repository SHALL contain a `.gitignore` file that excludes generated files, dependencies, environment files, and IDE-specific files from version control.
-
-#### Scenario: Common artifacts are excluded
-
-- **WHEN** inspecting `.gitignore`
-- **THEN** it SHALL exclude at minimum: `.env` files, `node_modules/`, `__pycache__/`, `.venv/`, `dist/`, and IDE directories
+---
 
 ### Requirement: FastAPI lifespan startup additions
 
@@ -214,3 +170,12 @@ The `storage_http_client` is a **separate** client from the generic `app.state.h
 
 - **WHEN** the application starts
 - **THEN** the admin router SHALL be included with routes for `POST /api/admin/sources` and `GET /api/admin/tasks/{task_id}`
+
+---
+
+## REMOVED Requirements
+
+### Requirement: MinIO client initialization in lifespan
+
+- **Reason:** MinIO Python SDK (`minio`) is fully removed. The `Minio` client constructor, `secure=False` parameter, and `asyncio.to_thread()` wrappers are replaced by a dedicated `httpx.AsyncClient` with `base_url` and native async calls.
+- **Migration:** Replaced by `storage_http_client` creation in the modified "FastAPI lifespan startup additions" requirement above.

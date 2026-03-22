@@ -86,7 +86,7 @@ ProxyMind is planned as a monorepo with separate backend and frontend parts.
 Target stack:
 
 - Backend: Python, FastAPI, SQLAlchemy, Alembic, asyncpg, arq, LiteLLM, structlog
-- Data: PostgreSQL, Qdrant, MinIO, Redis
+- Data: PostgreSQL, Qdrant, SeaweedFS, Redis
 - AI and processing: Gemini Embedding 2, Docling, Gemini Batch API
 - Frontend: Bun, React, Vite, Biome
 - Infra: Docker, Caddy, Prometheus, Grafana, OpenTelemetry

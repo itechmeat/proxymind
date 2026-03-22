@@ -16,7 +16,7 @@ Tests are split into two tracks:
 Phase outcome: the project starts, all services run, API responds.
 
 - [x] **S1-01: Project bootstrap**
-      Monorepo structure (`backend/` + `frontend/` + `persona/` + `config/` + `docs/`), `docker-compose.yml` (PostgreSQL, Qdrant, MinIO, Redis), Dockerfile for backend, Caddyfile, `.editorconfig`, `.gitignore`, separate `.env` files. Backend: `pyproject.toml`, FastAPI app skeleton, structlog, `/health` and `/ready` endpoints. Frontend: Bun + Vite + React + Biome init.
+      Monorepo structure (`backend/` + `frontend/` + `persona/` + `config/` + `docs/`), `docker-compose.yml` (PostgreSQL, Qdrant, SeaweedFS, Redis), Dockerfile for backend, Caddyfile, `.editorconfig`, `.gitignore`, separate `.env` files. Backend: `pyproject.toml`, FastAPI app skeleton, structlog, `/health` and `/ready` endpoints. Frontend: Bun + Vite + React + Biome init.
   - **Outcome:** infrastructure starts with a single command, API is accessible
   - **Verification:** `docker-compose up` → all services start; `curl /health` → 200; `cd frontend && bun dev` → dev server starts
   - Tasks: directory structure, Docker, FastAPI app, frontend init, CI lint (Biome + Ruff)
@@ -54,6 +54,12 @@ Phase outcome: minimal working product. Upload a Markdown file → get a snapsho
   - **Outcome:** a question can be asked and answered based on uploaded knowledge
   - **Verification:** upload document → publish → `POST /api/chat/messages {"text": "..."}` → response based on document content
   - Tasks: LiteLLM integration, retrieval service (dense only), prompt assembly (minimal), chat endpoint, session creation
+
+- [x] **S2-05: Replace Legacy Object Storage with SeaweedFS**
+      Legacy object storage is deprecated and MUST be fully removed. Replace it with SeaweedFS (`weed server -filer`, all-in-one). Rewrite `StorageService` to use `httpx` + SeaweedFS Filer HTTP API (POST/GET/DELETE). Replace the Docker Compose service, migrate configuration (`SEAWEEDFS_*`), and update all documentation.
+  - **Outcome:** object storage works on SeaweedFS, zero legacy object-storage references remain in runtime code and canonical docs
+  - **Verification:** `docker-compose up` → SeaweedFS healthy; upload source → file in SeaweedFS; existing tests pass; scoped case-insensitive search for the removed provider name returns zero matches in runtime code and canonical docs
+  - Tasks: Docker Compose swap, StorageService rewrite (httpx + Filer API), config migration, test updates, documentation updates (spec.md, architecture.md, plan.md, rag.md, CLAUDE.md, AGENTS.md, README.md), remove the obsolete object-storage SDK from `pyproject.toml`
 
 ### Phase 3: Knowledge Expansion
 
@@ -176,7 +182,7 @@ Phase outcome: full-featured web interface for visitors and the owner.
   - Tasks: catalog form, source-catalog linking UI
 
 - [ ] **S5-06: Admin UI — twin profile**
-      Avatar (upload → MinIO), name, public links.
+      Avatar (upload → SeaweedFS), name, public links.
   - **Outcome:** twin profile is configured and displayed in the chat
   - **Verification:** upload avatar → visible in chat interface
   - Tasks: avatar upload, profile metadata form, display in chat header
