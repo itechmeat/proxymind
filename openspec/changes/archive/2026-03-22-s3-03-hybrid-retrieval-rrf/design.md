@@ -90,7 +90,7 @@ Use `RrfQuery(rrf=Rrf(k=60))` with explicit k parameter instead of `FusionQuery(
 
 ### QdrantService — new `hybrid_search()` method
 
-```
+```python
 async def hybrid_search(
     self,
     *,
@@ -119,7 +119,7 @@ Internal flow:
 
 ### RetrievalService — updated `search()` method
 
-```
+```python
 async def search(
     self,
     query: str,

@@ -6,7 +6,7 @@ The `QdrantService` SHALL provide an `async hybrid_search()` method that perform
 
 The dense prefetch leg SHALL query the `"dense"` named vector with `filter=scope_filter`, `limit=limit * PREFETCH_MULTIPLIER`, and `score_threshold=score_threshold` (when not None). The sparse prefetch leg SHALL query the `"bm25"` named sparse vector using `_build_bm25_document(text)` with `filter=scope_filter`, `limit=limit * PREFETCH_MULTIPLIER`, and no score threshold. The final query SHALL use `RrfQuery(rrf=Rrf(k=RRF_K))` with `limit=limit` and `query_filter=scope_filter`. Results SHALL be mapped via the existing `_to_retrieved_chunk()` helper.
 
-When `limit` is 0, the method SHALL short-circuit and return an empty list without querying Qdrant.
+When `limit` is less than or equal to 0, the method SHALL short-circuit and return an empty list without querying Qdrant.
 
 #### Scenario: Hybrid search returns results combining dense and sparse
 
@@ -84,7 +84,7 @@ When `limit` is 0, the method SHALL short-circuit and return an empty list witho
 
 #### Scenario: Zero limit short-circuits to empty list
 
-- **WHEN** `hybrid_search()` is called with `limit=0`
+- **WHEN** `hybrid_search()` is called with `limit<=0`
 - **THEN** the method SHALL return an empty list
 - **AND** no Qdrant query SHALL be executed
 
@@ -92,7 +92,7 @@ When `limit` is 0, the method SHALL short-circuit and return an empty list witho
 
 ### Requirement: RetrievalService uses hybrid search
 
-The `RetrievalService.search()` method SHALL call `qdrant_service.hybrid_search()` instead of the former `search()` method. It SHALL pass both the raw query text and the dense embedding vector. It SHALL map `top_n` to `hybrid_search(limit=...)`: when `top_n is None`, it SHALL pass the configured retrieval default; otherwise it SHALL pass the explicit `top_n` value. It SHALL map `min_dense_similarity` to `hybrid_search(score_threshold=...)`. The method signature of `RetrievalService.search()` SHALL remain unchanged — `ChatService` is not affected.
+The `RetrievalService.search()` method SHALL call `qdrant_service.hybrid_search()` instead of the former `search()` method, passing both the raw query text and the dense embedding vector. It SHALL map `top_n` to `hybrid_search(limit=...)`: when `top_n is None`, it SHALL pass the configured retrieval default; otherwise it SHALL pass the explicit `top_n` value. It SHALL map `min_dense_similarity` to `hybrid_search(score_threshold=...)`. The method signature of `RetrievalService.search()` SHALL remain unchanged — `ChatService` is not affected.
 
 #### Scenario: search() passes both text and vector to hybrid_search
 

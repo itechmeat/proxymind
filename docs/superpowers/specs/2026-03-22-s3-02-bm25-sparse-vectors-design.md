@@ -86,7 +86,7 @@ From `docs/plan.md`:
 - **Qdrant RRF compatibility.** Qdrant native Prefetch + Query supports fusion of dense and BM25 sparse vectors in a single request. This is exactly what S3-03 needs. Both vector types live in the same collection as named vectors.
 - **Language support.** `Bm25Config` accepts `language` parameter for Snowball stemmer configuration. Supported languages match `spec.md`: EN, RU, DE, FR, ES, IT, PT, NL, SV, NO, DA, FI, HU, RO, TR.
 - **Aligned with spec.** `docs/spec.md:117` states "Obtain a sparse embedding via Qdrant BM25" — the specification explicitly points to Qdrant-native BM25, not client-side sparse vector generation.
-- **Dependency:** Requires `qdrant-client>=1.17.1`. BM25 Document API support starts in `1.16.0`, but the repository now pins `1.17.1` so S3-02 BM25 support and S3-03 RRF query support use the same floor. Current pinned version is `>=1.14.1` — MUST be bumped.
+- **Dependency:** Requires `qdrant-client>=1.17.1`. BM25 Document API support starts in `1.16.0`, but the repository now pins `1.17.1` so S3-02 BM25 support and S3-03 RRF query support use the same floor. This story is the point where the repository minimum moved from `>=1.14.1` to `>=1.17.1`.
 
 **Rejected alternatives:**
 
