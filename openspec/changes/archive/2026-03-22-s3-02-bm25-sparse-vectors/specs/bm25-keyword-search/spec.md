@@ -86,10 +86,10 @@ The `bm25_language` setting (already present in `config.py`) SHALL be passed to 
 - **WHEN** a chunk containing "runs" is upserted with `bm25_language="english"` and a keyword search for "running" is performed
 - **THEN** the search SHALL return the chunk as a match (Snowball stemmer reduces both "runs" and "running" to the same stem)
 
-#### Scenario: BM25 language is logged at startup
+#### Scenario: BM25 language is logged during startup collection checks
 
-- **WHEN** `QdrantService` is initialized
-- **THEN** the configured `bm25_language` SHALL be logged
+- **WHEN** `ensure_collection()` runs during startup
+- **THEN** the configured `bm25_language` SHALL be logged as part of collection validation
 
 ---
 

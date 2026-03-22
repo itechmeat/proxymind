@@ -109,13 +109,14 @@ class QdrantService:
                     f"existing={existing_dimensions}, required={self._embedding_dimensions}. "
                     "Delete the collection and re-run ingestion to reindex."
                 )
-            if not self._has_bm25_sparse_vector(collection_info):
+            if not self._has_required_bm25_sparse_vector(collection_info):
                 self._logger.warning(
-                    "qdrant.collection_missing_bm25_recreating",
+                    "qdrant.collection_bm25_schema_mismatch_recreating",
                     collection_name=self._collection_name,
                     bm25_language=self._bm25_language,
                     message=(
-                        "Qdrant collection is missing the required BM25 sparse vector and "
+                        "Qdrant collection is missing the required BM25 sparse vector "
+                        "configuration and "
                         "will be recreated. Existing vectors will be lost."
                         " Re-ingestion is required."
                     ),
@@ -286,7 +287,7 @@ class QdrantService:
         for _attempt in range(3):
             if await self._client.collection_exists(self._collection_name):
                 collection_info = await self._client.get_collection(self._collection_name)
-                if self._has_bm25_sparse_vector(collection_info):
+                if self._has_required_bm25_sparse_vector(collection_info):
                     return
                 try:
                     await self._client.delete_collection(self._collection_name)
@@ -302,7 +303,7 @@ class QdrantService:
 
             if await self._client.collection_exists(self._collection_name):
                 collection_info = await self._client.get_collection(self._collection_name)
-                if self._has_bm25_sparse_vector(collection_info):
+                if self._has_required_bm25_sparse_vector(collection_info):
                     return
 
         raise CollectionSchemaMismatchError(
@@ -409,12 +410,26 @@ class QdrantService:
         )
 
     @staticmethod
-    def _has_bm25_sparse_vector(collection_info: Any) -> bool:
+    def _has_required_bm25_sparse_vector(collection_info: Any) -> bool:
         sparse_vectors_config = getattr(collection_info.config.params, "sparse_vectors", None)
         if sparse_vectors_config is None:
             return False
+
+        bm25_config: Any = None
         if isinstance(sparse_vectors_config, Mapping):
-            return sparse_vectors_config.get(BM25_VECTOR_NAME) is not None
-        if hasattr(sparse_vectors_config, "get"):
-            return sparse_vectors_config.get(BM25_VECTOR_NAME) is not None
-        return getattr(sparse_vectors_config, BM25_VECTOR_NAME, None) is not None
+            bm25_config = sparse_vectors_config.get(BM25_VECTOR_NAME)
+        elif hasattr(sparse_vectors_config, "get"):
+            bm25_config = sparse_vectors_config.get(BM25_VECTOR_NAME)
+        else:
+            bm25_config = getattr(sparse_vectors_config, BM25_VECTOR_NAME, None)
+
+        if bm25_config is None:
+            return False
+
+        if isinstance(bm25_config, Mapping):
+            modifier = bm25_config.get("modifier")
+        else:
+            modifier = getattr(bm25_config, "modifier", None)
+        return getattr(modifier, "value", modifier) == getattr(
+            models.Modifier.IDF, "value", models.Modifier.IDF
+        )

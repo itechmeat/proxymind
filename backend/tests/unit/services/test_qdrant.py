@@ -23,14 +23,16 @@ from app.services.qdrant import (
 )
 
 
-def _collection_info(size: int, *, has_bm25: bool = True) -> SimpleNamespace:
+def _collection_info(
+    size: int, *, bm25_modifier: models.Modifier | None = models.Modifier.IDF
+) -> SimpleNamespace:
     return SimpleNamespace(
         config=SimpleNamespace(
             params=SimpleNamespace(
                 vectors={DENSE_VECTOR_NAME: SimpleNamespace(size=size)},
                 sparse_vectors=(
-                    {BM25_VECTOR_NAME: SimpleNamespace(modifier=models.Modifier.IDF)}
-                    if has_bm25
+                    {BM25_VECTOR_NAME: SimpleNamespace(modifier=bm25_modifier)}
+                    if bm25_modifier is not None
                     else None
                 ),
             )
@@ -126,7 +128,7 @@ async def test_ensure_collection_is_idempotent_for_matching_schema(
 ) -> None:
     client = SimpleNamespace(
         collection_exists=AsyncMock(return_value=True),
-        get_collection=AsyncMock(return_value=_collection_info(3072, has_bm25=True)),
+        get_collection=AsyncMock(return_value=_collection_info(3072)),
         create_collection=AsyncMock(),
         create_payload_index=AsyncMock(),
     )
@@ -149,7 +151,7 @@ async def test_ensure_collection_handles_duplicate_create_race(
         create_collection=AsyncMock(
             side_effect=_unexpected_response(409, "Collection already exists")
         ),
-        get_collection=AsyncMock(return_value=_collection_info(3072, has_bm25=True)),
+        get_collection=AsyncMock(return_value=_collection_info(3072)),
         create_payload_index=AsyncMock(),
     )
     service, _logger = _service(monkeypatch, client=client)
@@ -169,9 +171,9 @@ async def test_ensure_collection_recreates_collection_when_bm25_missing(
         collection_exists=AsyncMock(side_effect=[True, True, True]),
         get_collection=AsyncMock(
             side_effect=[
-                _collection_info(3072, has_bm25=False),
-                _collection_info(3072, has_bm25=False),
-                _collection_info(3072, has_bm25=True),
+                _collection_info(3072, bm25_modifier=None),
+                _collection_info(3072, bm25_modifier=None),
+                _collection_info(3072),
             ]
         ),
         delete_collection=AsyncMock(),
@@ -191,6 +193,33 @@ async def test_ensure_collection_recreates_collection_when_bm25_missing(
 
 
 @pytest.mark.asyncio
+async def test_ensure_collection_recreates_collection_when_bm25_modifier_is_not_idf(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = SimpleNamespace(
+        collection_exists=AsyncMock(side_effect=[True, True, True]),
+        get_collection=AsyncMock(
+            side_effect=[
+                _collection_info(3072, bm25_modifier=models.Modifier.NONE),
+                _collection_info(3072, bm25_modifier=models.Modifier.NONE),
+                _collection_info(3072),
+            ]
+        ),
+        delete_collection=AsyncMock(),
+        create_collection=AsyncMock(),
+        create_payload_index=AsyncMock(),
+    )
+    service, logger = _service(monkeypatch, client=client)
+
+    await service.ensure_collection()
+
+    logger.warning.assert_called_once()
+    client.delete_collection.assert_awaited_once_with("proxymind_chunks")
+    client.create_collection.assert_awaited_once()
+    assert client.create_payload_index.await_count == len(PAYLOAD_INDEX_FIELDS)
+
+
+@pytest.mark.asyncio
 async def test_ensure_collection_handles_delete_404_during_recreate_race(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -198,9 +227,9 @@ async def test_ensure_collection_handles_delete_404_during_recreate_race(
         collection_exists=AsyncMock(side_effect=[True, True, True]),
         get_collection=AsyncMock(
             side_effect=[
-                _collection_info(3072, has_bm25=False),
-                _collection_info(3072, has_bm25=False),
-                _collection_info(3072, has_bm25=True),
+                _collection_info(3072, bm25_modifier=None),
+                _collection_info(3072, bm25_modifier=None),
+                _collection_info(3072),
             ]
         ),
         delete_collection=AsyncMock(
@@ -228,9 +257,9 @@ async def test_ensure_collection_handles_create_409_during_recreate_race(
         collection_exists=AsyncMock(side_effect=[True, True, True]),
         get_collection=AsyncMock(
             side_effect=[
-                _collection_info(3072, has_bm25=False),
-                _collection_info(3072, has_bm25=False),
-                _collection_info(3072, has_bm25=True),
+                _collection_info(3072, bm25_modifier=None),
+                _collection_info(3072, bm25_modifier=None),
+                _collection_info(3072),
             ]
         ),
         delete_collection=AsyncMock(),
@@ -249,12 +278,37 @@ async def test_ensure_collection_handles_create_409_during_recreate_race(
 
 
 @pytest.mark.asyncio
+async def test_ensure_collection_fails_when_bm25_never_appears(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = SimpleNamespace(
+        collection_exists=AsyncMock(return_value=True),
+        get_collection=AsyncMock(
+            return_value=_collection_info(3072, bm25_modifier=None),
+        ),
+        delete_collection=AsyncMock(),
+        create_collection=AsyncMock(),
+        create_payload_index=AsyncMock(),
+    )
+    service, _logger = _service(monkeypatch, client=client)
+
+    with pytest.raises(
+        CollectionSchemaMismatchError,
+        match="did not converge",
+    ):
+        await service.ensure_collection()
+
+    assert client.delete_collection.await_count == 3
+    assert client.create_collection.await_count == 3
+
+
+@pytest.mark.asyncio
 async def test_ensure_collection_raises_on_dimension_mismatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = SimpleNamespace(
         collection_exists=AsyncMock(return_value=True),
-        get_collection=AsyncMock(return_value=_collection_info(3072, has_bm25=True)),
+        get_collection=AsyncMock(return_value=_collection_info(3072)),
         create_payload_index=AsyncMock(),
     )
     service, _logger = _service(monkeypatch, client=client, embedding_dimensions=1024)

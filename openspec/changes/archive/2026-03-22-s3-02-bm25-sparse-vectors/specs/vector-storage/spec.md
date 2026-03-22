@@ -49,15 +49,21 @@ The collection schema uses named vectors (`"dense"`) for forward-compatibility. 
 
 ## ADDED Requirements
 
-### Requirement: ensure_collection auto-recreates on missing BM25 sparse vector
+### Requirement: ensure_collection auto-recreates on missing or invalid BM25 sparse vector config
 
-When `ensure_collection()` detects that an existing collection lacks the `"bm25"` sparse vector, it SHALL log a WARNING message stating that the collection is missing the BM25 sparse vector and will be recreated, and that all existing vectors will be lost requiring re-ingestion. The method SHALL then perform a race-safe delete and recreate of the collection with both `"dense"` and `"bm25"` vectors. Race safety SHALL be achieved by catching 404 on delete of a non-existent collection and 409 on create of an already-existing collection, retrying validation in both cases. The validation loop SHALL be bounded to a maximum of 3 attempts before raising `CollectionSchemaMismatchError`. Dense dimension mismatch SHALL remain a hard error raising `CollectionSchemaMismatchError` (unchanged).
+When `ensure_collection()` detects that an existing collection lacks the required `"bm25"` sparse vector configuration, it SHALL log a WARNING message stating that the collection is missing the required BM25 sparse vector configuration and will be recreated, and that all existing vectors will be lost requiring re-ingestion. The method SHALL then perform a race-safe delete and recreate of the collection with both `"dense"` and `"bm25"` vectors. The required configuration includes presence of the `"bm25"` sparse vector and `SparseVectorParams(modifier=Modifier.IDF)`. Race safety SHALL be achieved by catching 404 on delete of a non-existent collection and 409 on create of an already-existing collection, retrying validation in both cases. The validation loop SHALL be bounded to a maximum of 3 attempts before raising `CollectionSchemaMismatchError`. Dense dimension mismatch SHALL remain a hard error raising `CollectionSchemaMismatchError` (unchanged).
 
 #### Scenario: Missing BM25 sparse vector triggers recreation
 
 - **WHEN** `ensure_collection()` is called and the collection exists with `"dense"` vector but no `"bm25"` sparse vector
 - **THEN** the method SHALL log a WARNING about collection recreation
 - **AND** the method SHALL delete and recreate the collection with both `"dense"` and `"bm25"` vectors
+
+#### Scenario: Incorrect BM25 modifier triggers recreation
+
+- **WHEN** `ensure_collection()` is called and the collection exists with `"bm25"` sparse vector configured without `Modifier.IDF`
+- **THEN** the method SHALL log a WARNING about collection recreation
+- **AND** the method SHALL delete and recreate the collection with `SparseVectorParams(modifier=Modifier.IDF)`
 
 #### Scenario: Dense dimension mismatch remains a hard error
 
@@ -67,7 +73,7 @@ When `ensure_collection()` detects that an existing collection lacks the `"bm25"
 
 #### Scenario: Race-safe recreation handles concurrent startup
 
-- **WHEN** two processes (API and worker) call `ensure_collection()` simultaneously and both detect the missing BM25 sparse vector
+- **WHEN** two processes (API and worker) call `ensure_collection()` simultaneously and both detect invalid BM25 sparse vector configuration
 - **THEN** one process SHALL succeed in delete + recreate
 - **AND** the other process SHALL handle the 404 (delete of already-deleted collection) or 409 (create of already-created collection) gracefully without raising an unhandled exception
 
@@ -94,7 +100,7 @@ When the application starts and `ensure_collection()` runs as part of startup in
 ### CI tests (deterministic, mocked external services)
 
 - **Collection creation with sparse vector** (`backend/tests/unit/services/test_qdrant.py`): verify `ensure_collection` creates collection with `sparse_vectors_config` containing `"bm25"` with `Modifier.IDF`.
-- **Missing sparse vector triggers recreation** (`backend/tests/unit/services/test_qdrant.py`): mock existing collection without `"bm25"` sparse vector; verify WARNING log and delete + recreate sequence.
+- **Sparse vector schema mismatch triggers recreation** (`backend/tests/unit/services/test_qdrant.py`): mock existing collection without `"bm25"` sparse vector or with wrong modifier; verify WARNING log and delete + recreate sequence.
 - **Dense dimension mismatch still raises error** (`backend/tests/unit/services/test_qdrant.py`): verify `CollectionSchemaMismatchError` is raised on dimension mismatch (unchanged behavior).
 - **Upsert includes BM25 Document** (`backend/tests/unit/services/test_qdrant.py`): verify `_upsert_points` vector dict includes both `"dense"` vector and `"bm25"` `Document` with correct `model`, `text`, and `options.language`.
 - **bm25_language logged during startup collection checks** (`backend/tests/unit/services/test_qdrant.py`): verify log output includes configured language.
