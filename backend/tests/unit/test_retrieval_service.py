@@ -26,11 +26,11 @@ def _chunk() -> RetrievedChunk:
 
 
 @pytest.mark.asyncio
-async def test_search_embeds_query_and_searches_qdrant() -> None:
+async def test_search_calls_hybrid_search_with_text_and_vector() -> None:
     embedding_service = AsyncMock()
     embedding_service.embed_texts.return_value = [[0.1, 0.2, 0.3]]
     qdrant_service = AsyncMock()
-    qdrant_service.search.return_value = [_chunk()]
+    qdrant_service.hybrid_search.return_value = [_chunk()]
     service = RetrievalService(
         embedding_service=embedding_service,
         qdrant_service=qdrant_service,
@@ -41,12 +41,13 @@ async def test_search_embeds_query_and_searches_qdrant() -> None:
 
     results = await service.search("Where is the answer?", snapshot_id=snapshot_id)
 
-    assert results == qdrant_service.search.return_value
+    assert results == qdrant_service.hybrid_search.return_value
     embedding_service.embed_texts.assert_awaited_once_with(
         ["Where is the answer?"],
         task_type="RETRIEVAL_QUERY",
     )
-    qdrant_service.search.assert_awaited_once_with(
+    qdrant_service.hybrid_search.assert_awaited_once_with(
+        text="Where is the answer?",
         vector=[0.1, 0.2, 0.3],
         snapshot_id=snapshot_id,
         agent_id=DEFAULT_AGENT_ID,
@@ -61,7 +62,7 @@ async def test_search_supports_empty_results() -> None:
     embedding_service = AsyncMock()
     embedding_service.embed_texts.return_value = [[0.1, 0.2, 0.3]]
     qdrant_service = AsyncMock()
-    qdrant_service.search.return_value = []
+    qdrant_service.hybrid_search.return_value = []
     service = RetrievalService(
         embedding_service=embedding_service,
         qdrant_service=qdrant_service,
@@ -79,7 +80,7 @@ async def test_search_respects_explicit_zero_top_n() -> None:
     embedding_service = AsyncMock()
     embedding_service.embed_texts.return_value = [[0.1, 0.2, 0.3]]
     qdrant_service = AsyncMock()
-    qdrant_service.search.return_value = []
+    qdrant_service.hybrid_search.return_value = []
     service = RetrievalService(
         embedding_service=embedding_service,
         qdrant_service=qdrant_service,
@@ -90,7 +91,8 @@ async def test_search_respects_explicit_zero_top_n() -> None:
 
     await service.search("No hits", snapshot_id=snapshot_id, top_n=0)
 
-    qdrant_service.search.assert_awaited_once_with(
+    qdrant_service.hybrid_search.assert_awaited_once_with(
+        text="No hits",
         vector=[0.1, 0.2, 0.3],
         snapshot_id=snapshot_id,
         agent_id=DEFAULT_AGENT_ID,

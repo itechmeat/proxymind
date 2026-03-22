@@ -12,7 +12,7 @@ Add Qdrant BM25 sparse vector indexing alongside existing dense vectors, enablin
 - Collection schema update (recreate with sparse vector)
 - `keyword_search` method in QdrantService
 - Admin API keyword search endpoint
-- `qdrant-client` dependency bump to `>=1.16.0` (BM25 Document API support)
+- `qdrant-client` dependency bump to `>=1.17.1` (BM25 Document API support; keeps S3-03 RRF API support aligned)
 - Unit and integration tests
 
 **Out of scope:**
@@ -32,7 +32,7 @@ From `docs/plan.md`:
 
 ### Decision 1: Collection Upgrade Strategy — Recreate in `ensure_collection`
 
-**Chosen:** When `ensure_collection` detects that the existing collection lacks the `bm25` sparse vector (or has a BM25 language mismatch), it deletes the collection and recreates it with both `dense` and `bm25` vectors.
+**Chosen:** When `ensure_collection` detects that the existing collection lacks the `bm25` sparse vector or has an incompatible BM25 modifier (not `Modifier.IDF`), it deletes the collection and recreates it with both `dense` and `bm25` vectors. BM25 language changes are **not** auto-detected — changing `BM25_LANGUAGE` requires manual collection deletion and re-ingestion.
 
 **Why:**
 
@@ -86,7 +86,7 @@ From `docs/plan.md`:
 - **Qdrant RRF compatibility.** Qdrant native Prefetch + Query supports fusion of dense and BM25 sparse vectors in a single request. This is exactly what S3-03 needs. Both vector types live in the same collection as named vectors.
 - **Language support.** `Bm25Config` accepts `language` parameter for Snowball stemmer configuration. Supported languages match `spec.md`: EN, RU, DE, FR, ES, IT, PT, NL, SV, NO, DA, FI, HU, RO, TR.
 - **Aligned with spec.** `docs/spec.md:117` states "Obtain a sparse embedding via Qdrant BM25" — the specification explicitly points to Qdrant-native BM25, not client-side sparse vector generation.
-- **Dependency:** Requires `qdrant-client>=1.16.0` (BM25 Document API with `Bm25Config` support). Current pinned version is `>=1.14.1` — MUST be bumped.
+- **Dependency:** Requires `qdrant-client>=1.17.1`. BM25 Document API support starts in `1.16.0`, but the repository now pins `1.17.1` so S3-02 BM25 support and S3-03 RRF query support use the same floor. Current pinned version is `>=1.14.1` — MUST be bumped.
 
 **Rejected alternatives:**
 
@@ -126,7 +126,7 @@ From `docs/plan.md`:
 
 ### Dependency Bump
 
-`qdrant-client` MUST be bumped from `>=1.14.1` to `>=1.16.0` in `backend/pyproject.toml`. The BM25 Document API (`models.Document`, `models.Bm25Config`) was introduced in `qdrant-client` v1.16.0. Without this bump, the implementation will fail on import or at runtime.
+`qdrant-client` MUST be bumped from `>=1.14.1` to `>=1.17.1` in `backend/pyproject.toml`. The BM25 Document API (`models.Document`, `models.Bm25Config`) was introduced in `qdrant-client` v1.16.0, and the repository now standardizes on `1.17.1` so BM25 support and later hybrid RRF support share one dependency floor. Without this bump, the implementation will fail on import or at runtime.
 
 ### Qdrant API Mechanism
 
@@ -157,12 +157,13 @@ Payload indexes remain unchanged (7 keyword indexes: `snapshot_id`, `agent_id`, 
 2. If exists — verify:
    a. `dense` vector dimensions match (existing check — **raises `CollectionSchemaMismatchError`** on mismatch, unchanged from before).
    b. `bm25` sparse vector is present.
-3. If `bm25` sparse vector is missing — log at **WARNING** level: `"Collection missing 'bm25' sparse vector. Recreating — all existing vectors will be lost. Re-ingest sources after restart."`. Race-safe delete + recreate with both vectors.
+   c. The existing `bm25` sparse vector uses `SparseVectorParams(modifier=Modifier.IDF)`.
+3. If `bm25` sparse vector is missing or its modifier is not `Modifier.IDF` — log at **WARNING** level that the BM25 schema is incompatible and the collection will be recreated. Use the same race-safe delete + recreate path with both vectors.
 4. If collection does not exist — create with both vectors.
 5. Log configured `bm25_language` at startup.
 6. Create payload indexes (unchanged).
 
-**Dense dimension mismatch remains a hard error.** Auto-recreate applies ONLY to "missing bm25 sparse vector". Silently deleting data on dimension change is too aggressive and out of scope for a BM25 story.
+**Dense dimension mismatch remains a hard error.** Auto-recreate applies ONLY to BM25 schema incompatibility (`bm25` missing or configured with a non-`Modifier.IDF` modifier). Silently deleting data on dimension change is too aggressive and out of scope for a BM25 story.
 
 **Race safety:** Both API (`main.py:108`) and worker (`workers/main.py:55`) call `ensure_collection()` on startup. The delete-then-create sequence MUST be guarded:
 - Wrap the delete + create in a try/except that handles the case where another process already deleted/recreated the collection (Qdrant returns 404 on delete of non-existent collection, 409 on create of existing collection — both are safe to catch and retry the validation).
@@ -204,7 +205,7 @@ The `QdrantChunkPoint` dataclass already contains `text_content` — no changes 
 **`ensure_collection`** — extended:
 
 - Collection creation includes `sparse_vectors_config={"bm25": SparseVectorParams(modifier=Modifier.IDF)}`.
-- Validation of existing collection: dense dimension mismatch raises `CollectionSchemaMismatchError` (unchanged); missing `bm25` sparse vector triggers race-safe delete + recreate.
+- Validation of existing collection: dense dimension mismatch raises `CollectionSchemaMismatchError` (unchanged); missing `bm25` sparse vector or a non-`Modifier.IDF` BM25 modifier triggers race-safe delete + recreate.
 - Logs configured `bm25_language` at startup.
 
 **`_upsert_points`** — modified:
@@ -287,7 +288,7 @@ The behavioral change: `bm25_language` is now actively used for BM25 tokenizatio
 
 | File | Change |
 |---|---|
-| `backend/pyproject.toml` | Bump `qdrant-client>=1.14.1` to `>=1.16.0` |
+| `backend/pyproject.toml` | Bump `qdrant-client>=1.14.1` to `>=1.17.1` |
 | `backend/app/services/qdrant.py` | Add `bm25_language` param, update `ensure_collection` (sparse vector + language fingerprint + race safety), modify `_upsert_points` to include BM25 Document, add `keyword_search` method |
 | `backend/app/workers/main.py` | Pass `bm25_language` to QdrantService constructor |
 | `backend/app/main.py` | Pass `bm25_language` to QdrantService in API startup |

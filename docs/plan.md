@@ -77,7 +77,7 @@ Phase outcome: full-featured ingestion pipeline — all formats, hybrid search, 
   - **Verification:** keyword search via Qdrant returns results; stemmer language matches `.env`
   - Tasks: Bm25Config with language, sparse vector upsert, keyword search endpoint for tests
 
-- [ ] **S3-03: Hybrid retrieval + RRF**
+- [x] **S3-03: Hybrid retrieval + RRF**
       Dense (query-oriented) + sparse (BM25) search, Reciprocal Rank Fusion, `min_dense_similarity` filtering before fusion. Scoped by `snapshot_id` + tenant-ready fields.
   - **Outcome:** retrieval combines semantic and keyword search
   - **Verification:** query → results better than dense-only; filtering by snapshot works

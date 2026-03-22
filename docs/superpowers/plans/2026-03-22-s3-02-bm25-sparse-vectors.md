@@ -6,7 +6,7 @@
 
 **Architecture:** Extend the existing Qdrant collection with a named sparse vector `"bm25"`. At upsert time, pass chunk text as `models.Document(model="Qdrant/bm25")` alongside the dense vector. Add `keyword_search` method to QdrantService and expose it via `POST /api/admin/search/keyword`. Configured BM25 language is logged at startup; changing it requires manual collection deletion + re-ingest.
 
-**Tech Stack:** qdrant-client >=1.16.0, Qdrant Document API, Bm25Config, FastAPI, pytest
+**Tech Stack:** qdrant-client >=1.17.1, Qdrant Document API, Bm25Config, FastAPI, pytest
 
 **Spec:** `docs/superpowers/specs/2026-03-22-s3-02-bm25-sparse-vectors-design.md`
 
@@ -38,14 +38,14 @@
 
 In `backend/pyproject.toml`, change line 17:
 
-```
+```toml
   "qdrant-client>=1.14.1",
 ```
 
 to:
 
-```
-  "qdrant-client>=1.16.0",
+```toml
+  "qdrant-client>=1.17.1",
 ```
 
 - [ ] **Step 2: Lock and verify import**
@@ -58,7 +58,7 @@ Expected: no ImportError, prints class references.
 
 - [ ] **Step 3: Propose commit**
 
-Proposed message: `build: bump qdrant-client to >=1.16.0 for BM25 Document API`
+Proposed message: `build: bump qdrant-client to >=1.17.1 for BM25 Document API and RRF query support`
 Files: `backend/pyproject.toml`, `backend/uv.lock`
 
 ---

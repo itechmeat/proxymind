@@ -221,8 +221,8 @@ However, the `Bm25Config.language` field is a plain `str`, not constrained to th
 
 ## Sources
 
-1. [qdrant-client SDK source `models.py`](local: backend/.venv/lib/python3.14/site-packages/qdrant_client/http/models/models.py) -- `Bm25Config`, `SparseVectorParams`, `Modifier`, `Document`, `Language` enum definitions. Primary source for all API surface findings.
-2. [qdrant-client SDK source `embedder.py`](local: backend/.venv/lib/python3.14/site-packages/qdrant_client/embed/embedder.py) -- Confirmed server-side BM25 routing logic for `Qdrant/bm25` model.
+1. [qdrant-client SDK source `models.py`](https://github.com/qdrant/qdrant-client/blob/cd5eb259dd7a8448fd4ebea209f742a6eb16b4a3/qdrant_client/http/models/models.py) -- `Bm25Config`, `SparseVectorParams`, `Modifier`, `Document`, `Language` enum definitions. Primary source for all API surface findings.
+2. [qdrant-client SDK source `embedder.py`](https://github.com/qdrant/qdrant-client/blob/cd5eb259dd7a8448fd4ebea209f742a6eb16b4a3/qdrant_client/embed/embedder.py) -- Confirmed server-side BM25 routing logic for `Qdrant/bm25` model.
 3. [Qdrant Sparse Retrieval Demo](https://qdrant.tech/course/essentials/day-3/sparse-retrieval-demo/) -- Official code examples for collection creation, upsert with `Document`, and query.
 4. [Qdrant Hybrid Search Demo](https://qdrant.tech/course/essentials/day-3/hybrid-search-demo/) -- Official Prefetch + RRF fusion pattern with both dense and BM25 sparse.
 5. [Cloud Inference Hybrid Search Tutorial](https://qdrant.tech/documentation/tutorials-and-examples/cloud-inference-hybrid-search/) -- Full hybrid search example with `Document` model for both dense and sparse.

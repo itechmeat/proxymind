@@ -2,39 +2,39 @@
 
 ### Requirement: QdrantService for collection management, point upsert, and dense search
 
-The system SHALL provide a `QdrantService` at `app/services/qdrant.py` that wraps the async Qdrant client. The service SHALL receive the `AsyncQdrantClient` instance and collection configuration via constructor injection. The service SHALL provide three methods: `ensure_collection()` for idempotent collection creation, `upsert_chunks()` for point upsert, and `search()` for dense vector retrieval with payload filtering.
+The system SHALL provide a `QdrantService` at `app/services/qdrant.py` that wraps the async Qdrant client. The service SHALL receive the `AsyncQdrantClient` instance and collection configuration via constructor injection. The service SHALL provide three methods: `ensure_collection()` for idempotent collection creation, `upsert_chunks()` for point upsert, and `dense_search()` for dense vector retrieval with payload filtering.
 
 #### Scenario: QdrantService is instantiable with injected client
 
 - **WHEN** a `QdrantService` is created with an `AsyncQdrantClient` and settings
-- **THEN** the instance SHALL be ready to call `ensure_collection()`, `upsert_chunks()`, and `search()`
+- **THEN** the instance SHALL be ready to call `ensure_collection()`, `upsert_chunks()`, and `dense_search()`
 
 #### Scenario: Dense search returns matching chunks filtered by snapshot
 
-- **WHEN** `search()` is called with a query vector, snapshot_id, agent_id, knowledge_base_id, and limit=5
+- **WHEN** `dense_search()` is called with a query vector, snapshot_id, agent_id, knowledge_base_id, and limit=5
 - **THEN** the method SHALL query Qdrant using the `"dense"` named vector
 - **AND** the payload filter SHALL include conditions for `snapshot_id`, `agent_id`, and `knowledge_base_id`
 - **AND** the method SHALL return up to 5 `RetrievedChunk` results ordered by similarity score descending
 
 #### Scenario: Search with score_threshold filters low-scoring results
 
-- **WHEN** `search()` is called with `score_threshold=0.5`
+- **WHEN** `dense_search()` is called with `score_threshold=0.5`
 - **THEN** only points with cosine similarity >= 0.5 SHALL be returned
 - **AND** points with similarity below 0.5 SHALL be excluded by Qdrant before returning
 
 #### Scenario: Search with score_threshold=None returns all top-N results
 
-- **WHEN** `search()` is called with `score_threshold=None`
+- **WHEN** `dense_search()` is called with `score_threshold=None`
 - **THEN** all top-N results SHALL be returned regardless of their similarity score
 
 #### Scenario: Search returns empty list when no chunks match
 
-- **WHEN** `search()` is called with a snapshot_id that has no indexed chunks in Qdrant
+- **WHEN** `dense_search()` is called with a snapshot_id that has no indexed chunks in Qdrant
 - **THEN** the method SHALL return an empty list
 
 #### Scenario: Search result contains correct payload fields
 
-- **WHEN** `search()` returns results
+- **WHEN** `dense_search()` returns results
 - **THEN** each `RetrievedChunk` SHALL contain `chunk_id`, `source_id`, `text_content`, `score`, and `anchor_metadata`
 - **AND** `anchor_metadata` SHALL include `anchor_page`, `anchor_chapter`, `anchor_section`, and `anchor_timecode` fields from the point payload
 
@@ -192,6 +192,30 @@ When the application starts and `ensure_collection()` runs as part of startup in
 
 ---
 
+### Requirement: Score semantics are method-specific
+
+After the introduction of hybrid search, `RetrievedChunk.score` returned by `hybrid_search()` SHALL represent an RRF rank score rather than a cosine similarity value. The field SHALL remain available to downstream consumers as retrieval metadata, but its interpretation is method-specific. The field name `score` SHALL NOT be renamed.
+The `score` field returned by `dense_search()` SHALL continue to represent cosine similarity. The `score` field returned by `keyword_search()` SHALL continue to represent BM25 relevance. The semantic difference is method-specific and documented, not encoded in the type. Downstream consumers SHALL treat `RetrievedChunk.score` as method-specific metadata and SHALL NOT compare values across retrieval methods unless they already know the producing method.
+
+#### Scenario: hybrid_search score is RRF rank score
+
+- **WHEN** `hybrid_search()` returns results
+- **THEN** each `RetrievedChunk.score` SHALL contain the RRF rank score from Qdrant fusion
+- **AND** the score SHALL NOT be interpreted as cosine similarity
+
+#### Scenario: dense_search score remains cosine similarity
+
+- **WHEN** `dense_search()` returns results
+- **THEN** each `RetrievedChunk.score` SHALL contain the cosine similarity value (unchanged from previous behavior)
+
+#### Scenario: score is opaque metadata to downstream consumers
+
+- **WHEN** `RetrievedChunk.score` is consumed outside `QdrantService`
+- **THEN** callers SHALL treat it as method-specific metadata
+- **AND** callers SHALL NOT assume that hybrid, dense, and keyword scores share the same scale or interpretation
+
+---
+
 ## Test Coverage
 
 ### CI tests (deterministic, mocked external services)
@@ -199,7 +223,7 @@ When the application starts and `ensure_collection()` runs as part of startup in
 The following stable behavior MUST be covered by CI tests before archive:
 
 - **QdrantService unit tests**: mock `AsyncQdrantClient`. Verify collection creation parameters (named vector "dense", sparse vector "bm25" with Modifier.IDF, correct size, Cosine distance), payload index creation for all 7 fields (snapshot_id, agent_id, knowledge_base_id, source_id, status, source_type, language), idempotent `ensure_collection`, point upsert structure (named vector with both dense and BM25 Document, payload shape), retry on connection errors.
-- **QdrantService.search unit tests**: mock `AsyncQdrantClient`. Verify search constructs correct named vector query (`"dense"`). Verify payload filter includes all three fields (snapshot_id, agent_id, knowledge_base_id). Verify score_threshold is passed to Qdrant when set. Verify score_threshold=None omits score filtering. Verify results are mapped to `RetrievedChunk` with correct fields. Verify empty result returns empty list.
+- **QdrantService.dense_search unit tests**: mock `AsyncQdrantClient`. Verify dense_search constructs correct named vector query (`"dense"`). Verify payload filter includes all three fields (snapshot_id, agent_id, knowledge_base_id). Verify score_threshold is passed to Qdrant when set. Verify score_threshold=None omits score filtering. Verify results are mapped to `RetrievedChunk` with correct fields. Verify empty result returns empty list.
 - **Dimension mismatch unit test**: mock an existing collection with size 3072, change settings to 1024, verify `CollectionSchemaMismatchError` is raised with correct message.
 - **BM25 sparse vector schema unit tests**: mock existing collection without `"bm25"` sparse vector or with wrong modifier; verify WARNING log and race-safe delete + recreate sequence. Verify 404 on delete and 409 on create are handled gracefully.
 - **bm25_language logging unit test**: verify configured language is logged during `ensure_collection()`.
