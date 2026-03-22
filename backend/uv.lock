@@ -1724,7 +1724,7 @@ requires-dist = [
     { name = "litellm", specifier = ">=1.82.3" },
     { name = "pydantic-settings", specifier = ">=2.12.5" },
     { name = "python-multipart", specifier = ">=0.0.20" },
-    { name = "qdrant-client", specifier = ">=1.14.1" },
+    { name = "qdrant-client", specifier = ">=1.16.0" },
     { name = "redis", extras = ["hiredis"], specifier = ">=5.3.0,<6" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.48" },
     { name = "structlog", specifier = ">=25.5.0" },

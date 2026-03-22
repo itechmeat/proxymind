@@ -197,10 +197,15 @@ def admin_app(
     app.state.settings = SimpleNamespace(
         upload_max_file_size_mb=100,
         seaweedfs_sources_path="/sources",
+        bm25_language="english",
     )
     app.state.session_factory = session_factory
     app.state.storage_service = mock_storage_service
     app.state.arq_pool = mock_arq_pool
+    app.state.qdrant_service = SimpleNamespace(
+        keyword_search=AsyncMock(return_value=[]),
+        bm25_language="english",
+    )
     return app
 
 

@@ -36,6 +36,7 @@ async def on_startup(ctx: dict[str, Any]) -> None:
         client=AsyncQdrantClient(url=settings.qdrant_url),
         collection_name=settings.qdrant_collection,
         embedding_dimensions=settings.embedding_dimensions,
+        bm25_language=settings.bm25_language,
     )
     embedding_service = EmbeddingService(
         model=settings.embedding_model,

@@ -16,11 +16,24 @@ from fastapi import (
 )
 from pydantic import ValidationError
 
-from app.api.dependencies import get_snapshot_service, get_source_service, get_storage_service
-from app.api.schemas import SourceUploadMetadata, SourceUploadResponse, TaskStatusResponse
+from app.api.dependencies import (
+    get_qdrant_service,
+    get_snapshot_service,
+    get_source_service,
+    get_storage_service,
+)
+from app.api.schemas import (
+    KeywordSearchRequest,
+    KeywordSearchResponse,
+    KeywordSearchResult,
+    SourceUploadMetadata,
+    SourceUploadResponse,
+    TaskStatusResponse,
+)
 from app.api.snapshot_schemas import SnapshotResponse
 from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
 from app.db.models.enums import SnapshotStatus
+from app.services.qdrant import QdrantService
 from app.services.snapshot import (
     SnapshotConflictError,
     SnapshotNotFoundError,
@@ -219,3 +232,37 @@ async def activate_snapshot(
         _raise_snapshot_http_error(error)
 
     return SnapshotResponse.model_validate(snapshot)
+
+
+@router.post("/search/keyword", response_model=KeywordSearchResponse)
+async def keyword_search(
+    payload: KeywordSearchRequest,
+    snapshot_service: Annotated[SnapshotService, Depends(get_snapshot_service)],
+    qdrant_service: Annotated[QdrantService, Depends(get_qdrant_service)],
+) -> KeywordSearchResponse:
+    snapshot_id = payload.snapshot_id
+    if snapshot_id is None:
+        active_snapshot = await snapshot_service.get_active_snapshot(
+            agent_id=payload.agent_id,
+            knowledge_base_id=payload.knowledge_base_id,
+        )
+        if active_snapshot is None:
+            raise HTTPException(
+                status_code=422,
+                detail="No active snapshot found for the requested scope",
+            )
+        snapshot_id = active_snapshot.id
+
+    results = await qdrant_service.keyword_search(
+        text=payload.query,
+        snapshot_id=snapshot_id,
+        agent_id=payload.agent_id,
+        knowledge_base_id=payload.knowledge_base_id,
+        limit=payload.limit,
+    )
+    return KeywordSearchResponse(
+        query=payload.query,
+        language=qdrant_service.bm25_language,
+        total=len(results),
+        results=[KeywordSearchResult.from_retrieved_chunk(chunk) for chunk in results],
+    )
