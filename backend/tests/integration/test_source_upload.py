@@ -253,7 +253,7 @@ async def test_upload_endpoint_deletes_uploaded_object_when_persistence_fails(
                 files={"file": ("doc.md", b"hello", "text/markdown")},
             )
     finally:
-        admin_app.dependency_overrides.clear()
+        admin_app.dependency_overrides.pop(get_source_service, None)
 
     assert response.status_code == 500
     mock_storage_service.upload.assert_awaited_once()

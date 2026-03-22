@@ -74,6 +74,13 @@ def _existing_postgres_env() -> dict[str, str]:
 def postgres_env() -> dict[str, str]:
     if os.environ.get("PYTEST_USE_EXISTING_POSTGRES") == "1":
         env = _existing_postgres_env()
+        db_name = env["POSTGRES_DB"].lower()
+        if not (db_name.endswith("_test") or db_name.startswith("test_")):
+            raise RuntimeError(
+                f"Refusing to run tests against database '{env['POSTGRES_DB']}'. "
+                "POSTGRES_DB must start with 'test_' or end with '_test' when "
+                "using PYTEST_USE_EXISTING_POSTGRES=1."
+            )
         previous_values = {key: os.environ.get(key) for key in env}
         os.environ.update(env)
         get_settings.cache_clear()
