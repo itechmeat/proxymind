@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 
@@ -13,9 +13,7 @@ from app.api.chat_schemas import (
     SessionWithMessagesResponse,
 )
 from app.api.dependencies import get_chat_service
-
-if TYPE_CHECKING:
-    from app.services.chat import ChatService
+from app.services.chat import ChatService
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 

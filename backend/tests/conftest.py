@@ -195,7 +195,7 @@ def admin_app(
     app = FastAPI()
     app.include_router(admin_router)
     app.state.settings = SimpleNamespace(
-        upload_max_file_size_mb=50,
+        upload_max_file_size_mb=100,
         seaweedfs_sources_path="/sources",
     )
     app.state.session_factory = session_factory

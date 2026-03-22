@@ -43,9 +43,16 @@ async def _load_source_and_task(
 @pytest.mark.usefixtures("committed_data_cleanup")
 @pytest.mark.parametrize(
     ("filename", "expected_type"),
-    [("doc.md", SourceType.MARKDOWN), ("notes.TXT", SourceType.TXT)],
+    [
+        ("doc.md", SourceType.MARKDOWN),
+        ("notes.TXT", SourceType.TXT),
+        ("report.pdf", SourceType.PDF),
+        ("document.docx", SourceType.DOCX),
+        ("page.html", SourceType.HTML),
+        ("page.htm", SourceType.HTML),
+    ],
 )
-async def test_upload_endpoint_accepts_markdown_and_txt(
+async def test_upload_endpoint_accepts_supported_formats(
     api_client,
     session_factory: async_sessionmaker[AsyncSession],
     mock_storage_service: SimpleNamespace,
@@ -148,7 +155,7 @@ async def test_upload_endpoint_rejects_unsupported_extension(api_client) -> None
     response = await api_client.post(
         "/api/admin/sources",
         data={"metadata": '{"title":"Bad document"}'},
-        files={"file": ("doc.pdf", b"fake-pdf", "application/pdf")},
+        files={"file": ("sheet.xlsx", b"fake-xlsx", "application/octet-stream")},
     )
 
     assert response.status_code == 422

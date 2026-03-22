@@ -32,21 +32,52 @@ def test_generate_object_key_truncates_long_filenames() -> None:
     assert filename.endswith(".md")
 
 
-@pytest.mark.parametrize("filename", ["notes.md", "DOCUMENT.MD", "note.Txt"])
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "notes.md",
+        "DOCUMENT.MD",
+        "note.Txt",
+        "report.pdf",
+        "report.PDF",
+        "doc.docx",
+        "doc.DOCX",
+        "page.html",
+        "page.htm",
+        "page.HTML",
+    ],
+)
 def test_validate_file_extension_accepts_supported_types_case_insensitively(
     filename: str,
 ) -> None:
-    assert validate_file_extension(filename) in {".md", ".txt"}
+    assert validate_file_extension(filename) in {
+        ".md",
+        ".txt",
+        ".pdf",
+        ".docx",
+        ".html",
+        ".htm",
+    }
 
 
-def test_validate_file_extension_rejects_unsupported_types() -> None:
+@pytest.mark.parametrize("filename", ["notes.xlsx", "photo.png", "data.csv", "archive.zip"])
+def test_validate_file_extension_rejects_unsupported_types(filename: str) -> None:
     with pytest.raises(ValueError, match="Unsupported file format"):
-        validate_file_extension("notes.pdf")
+        validate_file_extension(filename)
 
 
 @pytest.mark.parametrize(
     ("filename", "expected"),
-    [("notes.md", SourceType.MARKDOWN), ("notes.TXT", SourceType.TXT)],
+    [
+        ("notes.md", SourceType.MARKDOWN),
+        ("notes.TXT", SourceType.TXT),
+        ("report.pdf", SourceType.PDF),
+        ("report.PDF", SourceType.PDF),
+        ("doc.docx", SourceType.DOCX),
+        ("page.html", SourceType.HTML),
+        ("page.htm", SourceType.HTML),
+        ("page.HTML", SourceType.HTML),
+    ],
 )
 def test_determine_source_type_maps_extension(filename: str, expected: SourceType) -> None:
     assert determine_source_type(filename) is expected

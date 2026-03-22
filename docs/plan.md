@@ -65,7 +65,7 @@ Phase outcome: minimal working product. Upload a Markdown file → get a snapsho
 
 Phase outcome: full-featured ingestion pipeline — all formats, hybrid search, batch, snapshots with rollback.
 
-- [ ] **S3-01: More formats (PDF, DOCX, HTML)**
+- [x] **S3-01: More formats (PDF, DOCX, HTML)**
       Extend Docling parsing: PDF with tables and structure, DOCX, HTML. Anchor metadata for each format (page, chapter, section).
   - **Outcome:** PDF/DOCX/HTML can be uploaded and parsed correctly
   - **Verification:** upload PDF → chunks with page numbers; upload DOCX → chunks with headings
