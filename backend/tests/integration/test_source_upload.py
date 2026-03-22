@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -9,12 +10,24 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.api.dependencies import get_source_service
 from app.core.constants import DEFAULT_AGENT_ID
 from app.db.models import BackgroundTask, Source
 from app.db.models.enums import BackgroundTaskStatus, BackgroundTaskType, SourceStatus, SourceType
-from app.services.docling_parser import ChunkData
 from app.services.snapshot import SnapshotService
+from app.services.source import SourcePersistenceError
 from app.workers.tasks.ingestion import process_ingestion
+
+
+@dataclass(slots=True)
+class FakeChunkData:
+    text_content: str
+    token_count: int
+    chunk_index: int
+    anchor_page: int | None
+    anchor_chapter: str | None
+    anchor_section: str | None
+    anchor_timecode: str | None = None
 
 
 async def _load_source_and_task(
@@ -221,6 +234,33 @@ async def test_upload_endpoint_marks_records_failed_when_enqueue_fails(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_upload_endpoint_deletes_uploaded_object_when_persistence_fails(
+    admin_app,
+    mock_storage_service: SimpleNamespace,
+) -> None:
+    fake_source_service = SimpleNamespace(
+        create_source_and_task=AsyncMock(side_effect=SourcePersistenceError("db unavailable"))
+    )
+    admin_app.dependency_overrides[get_source_service] = lambda: fake_source_service
+
+    try:
+        transport = httpx.ASGITransport(app=admin_app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            response = await client.post(
+                "/api/admin/sources",
+                data={"metadata": '{"title":"Persistence failure"}'},
+                files={"file": ("doc.md", b"hello", "text/markdown")},
+            )
+    finally:
+        admin_app.dependency_overrides.pop(get_source_service, None)
+
+    assert response.status_code == 500
+    mock_storage_service.upload.assert_awaited_once()
+    mock_storage_service.delete.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_get_task_returns_404_for_missing_task(api_client) -> None:
     response = await api_client.get(f"/api/admin/tasks/{uuid.uuid4()}")
     assert response.status_code == 404
@@ -248,7 +288,7 @@ async def test_upload_worker_and_task_status_round_trip(
             "docling_parser": SimpleNamespace(
                 parse_and_chunk=AsyncMock(
                     return_value=[
-                        ChunkData(
+                        FakeChunkData(
                             text_content="hello world",
                             token_count=2,
                             chunk_index=0,

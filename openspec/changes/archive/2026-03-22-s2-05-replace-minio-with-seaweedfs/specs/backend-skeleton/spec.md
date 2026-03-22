@@ -1,37 +1,4 @@
-## ADDED Requirements
-
-### Requirement: Python version and package manager
-
-The backend SHALL use Python at or above the minimum version specified in `docs/spec.md`. Dependency management SHALL use `uv` with `pyproject.toml` for declaration and `uv.lock` committed to git for reproducibility.
-
-#### Scenario: pyproject.toml declares Python requirement
-
-- **WHEN** inspecting `backend/pyproject.toml`
-- **THEN** the `requires-python` field SHALL specify the minimum Python version from `docs/spec.md`
-
-#### Scenario: Lock file is committed
-
-- **WHEN** cloning the repository
-- **THEN** `backend/uv.lock` SHALL exist and be tracked in git
-
-### Requirement: FastAPI application structure
-
-The backend SHALL follow the structure: `backend/app/main.py` as the application entry point, `backend/app/core/` for configuration and logging, and `backend/app/api/` for route handlers. The `main.py` file SHALL create the FastAPI app, configure lifespan hooks, and mount routers. Endpoint handlers SHALL NOT be defined in `main.py`.
-
-#### Scenario: Application entry point exists
-
-- **WHEN** inspecting `backend/app/main.py`
-- **THEN** it SHALL create a FastAPI application instance and include routers from `api/`
-
-#### Scenario: Lifespan responsibilities are explicit
-
-- **WHEN** inspecting `backend/app/main.py`
-- **THEN** its FastAPI lifespan hooks SHALL load configuration, initialize logging, create shared store clients needed by mounted routes, and close those resources gracefully during shutdown without aborting the remaining cleanup steps if one close operation fails
-
-#### Scenario: Directory structure follows convention
-
-- **WHEN** inspecting the backend directory tree
-- **THEN** `backend/app/core/config.py`, `backend/app/core/logging.py`, and `backend/app/api/health.py` SHALL exist as Python modules
+## MODIFIED Requirements
 
 ### Requirement: /health liveness endpoint
 
@@ -89,24 +56,7 @@ The API SHALL expose a `GET /ready` endpoint that checks connectivity to all fou
 - **THEN** the check SHALL use `GET {seaweedfs_filer_url}/` (Filer root directory listing) via the generic `app.state.http_client`, not the storage-dedicated client
 - **AND** the result SHALL be reported under the key `"seaweedfs"` in the readiness response
 
-### Requirement: structlog JSON logging
-
-The backend SHALL configure structlog for structured JSON logging. Log output SHALL be in JSON format suitable for machine parsing.
-
-#### Scenario: Logging produces JSON output
-
-- **WHEN** the application emits a log entry
-- **THEN** the output SHALL be a valid JSON object containing at minimum: timestamp, log level, and event message
-
-#### Scenario: structlog is configured at startup
-
-- **WHEN** inspecting `backend/app/core/logging.py`
-- **THEN** it SHALL configure structlog with JSON rendering and standard processors
-
-#### Scenario: Sensitive fields are redacted
-
-- **WHEN** structured log events contain sensitive keys such as `password`, `token`, `authorization`, `secret`, `cookie`, or `api_key`
-- **THEN** the logging pipeline SHALL redact those values before JSON rendering so they are not emitted in plaintext
+---
 
 ### Requirement: pydantic-settings configuration
 
@@ -140,33 +90,7 @@ SeaweedFS configuration SHALL use the following fields: `seaweedfs_host` (str, r
 - **THEN** it SHALL define `seaweedfs_host`, `seaweedfs_filer_port` (default 8888), `seaweedfs_sources_path` (default "/sources"), and computed `seaweedfs_filer_url`
 - **AND** it SHALL NOT define `minio_host`, `minio_port`, `minio_root_user`, `minio_root_password`, `minio_bucket_sources`, or `minio_url`
 
-### Requirement: Multi-stage Dockerfile
-
-The backend SHALL include a `Dockerfile` using a multi-stage build. The builder stage SHALL use the official uv image with Python to install dependencies. The runtime stage SHALL use a slim Python image. Layer ordering SHALL optimize for Docker cache efficiency.
-
-#### Scenario: Dockerfile uses multi-stage build
-
-- **WHEN** inspecting `backend/Dockerfile`
-- **THEN** it SHALL contain at least two stages: a builder stage using a `uv` base image and a runtime stage using a slim Python base image
-
-#### Scenario: Dependencies cached before app code
-
-- **WHEN** inspecting the Dockerfile layer order
-- **THEN** `pyproject.toml` and `uv.lock` SHALL be copied and dependencies installed before copying the application source code
-
-#### Scenario: Runtime does not execute as root
-
-- **WHEN** inspecting `backend/Dockerfile`
-- **THEN** the runtime stage SHALL create a dedicated non-root user, grant that user ownership of the app directory, and switch to that user before starting the process
-
-### Requirement: Test directory with conftest
-
-The backend SHALL include a `backend/tests/` directory with a `conftest.py` file. The conftest SHALL configure pytest-asyncio for async test support. No functional tests are required at this stage.
-
-#### Scenario: Test directory exists with conftest
-
-- **WHEN** inspecting the backend directory
-- **THEN** `backend/tests/conftest.py` SHALL exist and configure pytest-asyncio
+---
 
 ### Requirement: Backend dependencies in pyproject.toml
 
@@ -177,3 +101,12 @@ The `pyproject.toml` SHALL declare all runtime dependencies needed for the backe
 - **WHEN** inspecting `backend/pyproject.toml` dependencies
 - **THEN** FastAPI, uvicorn, pydantic-settings, structlog, asyncpg, redis, and httpx SHALL be listed as dependencies
 - **AND** `minio` SHALL NOT be listed as a dependency
+
+---
+
+## REMOVED Requirements
+
+### Requirement: MinIO health check via /minio/health/live
+
+- **Reason:** MinIO is fully removed. The MinIO HTTP health endpoint (`/minio/health/live`) no longer exists.
+- **Migration:** Replaced by SeaweedFS Filer-level probe (`GET {seaweedfs_filer_url}/`) in the modified "/ready readiness endpoint" requirement. The readiness response key changes from `"minio"` to `"seaweedfs"`.

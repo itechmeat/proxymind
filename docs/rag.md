@@ -62,17 +62,18 @@ ProxyMind borrows this principle through **Docling HybridChunker** — a structu
 
 For formats that Gemini Embedding 2 accepts directly and within limits:
 
-| Format | Limit |
-|--------|-------|
-| PDF | ≤ 6 pages |
+| Format             | Limit                     |
+| ------------------ | ------------------------- |
+| PDF                | ≤ 6 pages                 |
 | Images (PNG, JPEG) | up to 6 files per request |
-| Audio (MP3, WAV) | ≤ 80 sec |
-| Video (MP4) | ≤ 120 sec |
+| Audio (MP3, WAV)   | ≤ 80 sec                  |
+| Video (MP4)        | ≤ 120 sec                 |
 
 Pipeline Path A:
+
 1. **Gemini LLM (GenerateContent)** — generates the required `text_content` (text representation for LLM during retrieval).
 2. **Gemini Embedding 2** — generates embedding directly from the file (retrieval-oriented task type).
-3. One chunk-record for the entire file with `text_content`, anchor metadata, and a reference to the file in MinIO.
+3. One chunk-record for the entire file with `text_content`, anchor metadata, and a reference to the file in SeaweedFS.
 
 **Trade-off:** Path A creates one chunk per file. This simplifies the pipeline but reduces retrieval and citation granularity to the file level (instead of page/section/timecode). For short single-topic files this is acceptable. For topically dense documents (even short ones) — it is not.
 
@@ -87,6 +88,7 @@ For everything that does not fit Path A limits:
 - Audio > 80 sec
 
 Pipeline Path B:
+
 1. **Docling** — document parsing.
 2. **Docling HybridChunker** — splitting into chunks with anchor metadata.
 3. **Gemini Embedding 2** — generating embeddings from chunk text.
@@ -227,11 +229,11 @@ Enriched data is indexed in the Qdrant payload. Retrieval can search not only by
 
 ### Enrichment cost (approximate)
 
-| Knowledge base size | Without enrichment | With enrichment (Batch API) |
-|-----------|----------------|--------------------------|
-| 100 chunks (articles) | ~$0.01–0.05 | ~$0.20–1.00 |
-| 1,000 chunks (book) | ~$0.10–0.50 | ~$2–10 |
-| 10,000 chunks (library) | ~$1–5 | ~$20–100 |
+| Knowledge base size     | Without enrichment | With enrichment (Batch API) |
+| ----------------------- | ------------------ | --------------------------- |
+| 100 chunks (articles)   | ~$0.01–0.05        | ~$0.20–1.00                 |
+| 1,000 chunks (book)     | ~$0.10–0.50        | ~$2–10                      |
+| 10,000 chunks (library) | ~$1–5              | ~$20–100                    |
 
 ## Parent-child chunking (future)
 
@@ -256,12 +258,12 @@ Deferred. Implementation after evals, once it is clear whether flat chunking is 
 
 ProxyMind defaults to English, but all language-dependent components are configurable:
 
-| Component | Configuration | Languages |
-|-----------|-----------|-------|
-| Gemini Embedding 2 | Automatic | 100+ languages |
-| Qdrant BM25 | `language` in `Bm25Config` | EN, RU, DE, FR, ES, IT, PT, NL, SV, NO, DA, FI, HU, RO, TR, and others (Snowball stemmers) |
-| Query rewriting | Automatic (LLM) | Any language supported by the LLM |
-| Docling | Automatic | Multilingual parsing |
+| Component          | Configuration              | Languages                                                                                  |
+| ------------------ | -------------------------- | ------------------------------------------------------------------------------------------ |
+| Gemini Embedding 2 | Automatic                  | 100+ languages                                                                             |
+| Qdrant BM25        | `language` in `Bm25Config` | EN, RU, DE, FR, ES, IT, PT, NL, SV, NO, DA, FI, HU, RO, TR, and others (Snowball stemmers) |
+| Query rewriting    | Automatic (LLM)            | Any language supported by the LLM                                                          |
+| Docling            | Automatic                  | Multilingual parsing                                                                       |
 
 The BM25 language is set at deploy time via `.env` and applies system-wide.
 
@@ -271,20 +273,20 @@ The BM25 language is set at deploy time via `.env` and applies system-wide.
 
 Starting values for v1. All configurable. Refined based on eval results.
 
-| Parameter | Default | Description |
-|----------|---------|----------|
-| `retrieval_top_n` | 5 | Number of chunks passed to the LLM |
-| `retrieval_context_budget` | 4096 tokens | Maximum retrieval context budget in the prompt |
-| `min_dense_similarity` | to be determined via evals | Minimum cosine similarity for dense vector. Applied **before** RRF fusion. The RRF score is not used as a threshold — it depends on the fusion formula and ranking depth and is not a stable metric for an absolute threshold |
-| `min_retrieved_chunks` | 1 | Minimum chunks required for an answer. If retrieval returns fewer — the digital twin responds "no answer found in the knowledge base" |
-| `rewrite_timeout_ms` | 3000 | Query rewriting timeout (fail-open on exceed) |
-| `rewrite_token_budget` | 2048 tokens | Maximum prompt budget for query rewriting (history + query). If history is longer — truncated to the most recent messages that fit within the budget |
-| `max_citations_per_response` | 5 | Maximum citations per response |
-| `max_promotions_per_response` | 1 | Maximum commercial recommendations per response |
-| `path_a_text_threshold_pdf` | 2000 tokens | text_content threshold for PDF: Path A → Path B |
-| `path_a_text_threshold_media` | 500 tokens | text_content threshold for audio/video/images: Path A → Path B. Lower than for PDF since media descriptions are typically shorter |
-| `conversation_history_messages` | 10 | Maximum recent messages for query rewriting (additionally limited by `rewrite_token_budget`) |
-| `bm25_language` | english | Qdrant BM25 language (Snowball stemmer) |
+| Parameter                       | Default                    | Description                                                                                                                                                                                                                   |
+| ------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `retrieval_top_n`               | 5                          | Number of chunks passed to the LLM                                                                                                                                                                                            |
+| `retrieval_context_budget`      | 4096 tokens                | Maximum retrieval context budget in the prompt                                                                                                                                                                                |
+| `min_dense_similarity`          | to be determined via evals | Minimum cosine similarity for dense vector. Applied **before** RRF fusion. The RRF score is not used as a threshold — it depends on the fusion formula and ranking depth and is not a stable metric for an absolute threshold |
+| `min_retrieved_chunks`          | 1                          | Minimum chunks required for an answer. If retrieval returns fewer — the digital twin responds "no answer found in the knowledge base"                                                                                         |
+| `rewrite_timeout_ms`            | 3000                       | Query rewriting timeout (fail-open on exceed)                                                                                                                                                                                 |
+| `rewrite_token_budget`          | 2048 tokens                | Maximum prompt budget for query rewriting (history + query). If history is longer — truncated to the most recent messages that fit within the budget                                                                          |
+| `max_citations_per_response`    | 5                          | Maximum citations per response                                                                                                                                                                                                |
+| `max_promotions_per_response`   | 1                          | Maximum commercial recommendations per response                                                                                                                                                                               |
+| `path_a_text_threshold_pdf`     | 2000 tokens                | text_content threshold for PDF: Path A → Path B                                                                                                                                                                               |
+| `path_a_text_threshold_media`   | 500 tokens                 | text_content threshold for audio/video/images: Path A → Path B. Lower than for PDF since media descriptions are typically shorter                                                                                             |
+| `conversation_history_messages` | 10                         | Maximum recent messages for query rewriting (additionally limited by `rewrite_token_budget`)                                                                                                                                  |
+| `bm25_language`                 | english                    | Qdrant BM25 language (Snowball stemmer)                                                                                                                                                                                       |
 
 ## Quality metrics
 

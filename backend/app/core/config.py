@@ -21,11 +21,9 @@ class Settings(BaseSettings):
     qdrant_host: str = Field(min_length=1)
     qdrant_port: int = Field(default=6333, ge=1, le=65535)
 
-    minio_host: str = Field(min_length=1)
-    minio_port: int = Field(default=9000, ge=1, le=65535)
-    minio_root_user: str = Field(min_length=1)
-    minio_root_password: str = Field(min_length=1)
-    minio_bucket_sources: str = Field(default="sources", min_length=1)
+    seaweedfs_host: str = Field(min_length=1)
+    seaweedfs_filer_port: int = Field(default=8888, ge=1, le=65535)
+    seaweedfs_sources_path: str = Field(default="/sources", min_length=1)
 
     gemini_api_key: str | None = Field(default=None)
     embedding_model: str = Field(default="gemini-embedding-2-preview", min_length=1)
@@ -86,8 +84,8 @@ class Settings(BaseSettings):
 
     @computed_field
     @property
-    def minio_url(self) -> str:
-        return f"http://{self.minio_host}:{self.minio_port}"
+    def seaweedfs_filer_url(self) -> str:
+        return f"http://{self.seaweedfs_host}:{self.seaweedfs_filer_port}"
 
 
 @lru_cache

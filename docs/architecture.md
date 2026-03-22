@@ -18,11 +18,11 @@ graph TB
 
     API --> PG[(PostgreSQL)]
     API --> Qdrant[(Qdrant)]
-    API --> MinIO[(MinIO)]
+    API --> SeaweedFS[(SeaweedFS)]
 
     Worker --> PG
     Worker --> Qdrant
-    Worker --> MinIO
+    Worker --> SeaweedFS
     Worker -->|embeddings| GeminiEmb[Gemini Embedding 2]
     Worker -->|batch ops| GeminiBatch[Gemini Batch API]
     Worker -->|parsing| Docling[Docling]
@@ -85,7 +85,7 @@ This has one important architectural consequence: **admin authentication and vis
 Runs asynchronously, does not block chat. Two-tier parsing:
 
 1. Owner uploads a source via Admin API.
-2. File is saved to MinIO, metadata to PostgreSQL.
+2. File is saved to SeaweedFS, metadata to PostgreSQL.
 3. arq Worker picks up the task from Redis.
 4. Worker determines the processing path:
    - **Path A (Gemini direct)** — for native formats within limits: PDF ≤ 6 pages, images, audio ≤ 80 sec, video ≤ 120 sec. Worker creates a single chunk record for the entire file. Two separate Gemini calls:
@@ -95,7 +95,7 @@ Runs asynchronously, does not block chat. Two-tier parsing:
         - **Audio** — transcript via Gemini LLM (transcribe audio).
         - **Video** — transcript + visual description via Gemini LLM.
      2. **Gemini Embedding 2** — generates an embedding directly from the file (multimodal input).
-        Worker saves: `text_content` (required textual context for LLM during retrieval), anchor metadata (filename, format, duration/page count), link to the file in MinIO. During retrieval, `text_content` is passed to the LLM; citations are formed from anchor metadata.
+        Worker saves: `text_content` (required textual context for LLM during retrieval), anchor metadata (filename, format, duration/page count), link to the file in SeaweedFS. During retrieval, `text_content` is passed to the LLM; citations are formed from anchor metadata.
    - **Path B (Docling)** — for everything else: long PDFs, DOCX, HTML, Markdown, TXT. Docling parses, HybridChunker splits into chunks with anchor metadata (page, chapter, section). Gemini Embedding 2 generates embeddings from chunk text.
 5. For bulk operations (book uploads, reindex) worker uses **Gemini Batch API** (−50% cost, SLO ≤24h). For individual files — interactive API.
 
@@ -206,7 +206,7 @@ sequenceDiagram
     participant C as Caddy
     participant A as FastAPI
     participant PG as PostgreSQL
-    participant M as MinIO
+    participant M as SeaweedFS
     participant R as Redis
     participant W as arq Worker
     participant D as Docling
@@ -251,7 +251,7 @@ Five stores, each with its own purpose. Nothing is duplicated between them.
 graph TB
     PG[(PostgreSQL)]
     Q[(Qdrant)]
-    M[(MinIO)]
+    M[(SeaweedFS)]
     R[(Redis)]
     FS[File System]
 
@@ -293,7 +293,7 @@ All business entities and their lifecycle. OAuth built-in. Tables contain tenant
 
 Chunks with embeddings and payload metadata. Payload indexes on frequently filtered fields. Collection organization (single or separate) — decision deferred until first evals.
 
-### MinIO — object storage
+### SeaweedFS — object storage
 
 Source files and ingestion pipeline artifacts. No binary data in PostgreSQL.
 
@@ -350,7 +350,7 @@ proxymind/
 ├── config/                   # Operational configs
 │   └── PROMOTIONS.md
 ├── .env                      # Store hosts, ports, and credentials
-├── docker-compose.yml        # PostgreSQL, Qdrant, MinIO, Redis, backend
+├── docker-compose.yml        # PostgreSQL, Qdrant, SeaweedFS, Redis, backend
 ├── Caddyfile
 ├── docs/
 │   ├── about.md
@@ -374,7 +374,7 @@ graph TB
         Worker[worker<br/>arq]
         PG[postgres<br/>PostgreSQL]
         Q[qdrant<br/>Qdrant]
-        M[minio<br/>MinIO]
+        M[seaweedfs<br/>SeaweedFS]
         R[redis<br/>Redis]
     end
 
@@ -396,14 +396,14 @@ graph TB
 
 > For minimum tool/image versions, see [docs/spec.md](spec.md#tools-and-versions).
 
-| Service  | Image / Build | Port | Dependencies                   |
-| -------- | ------------- | ---- | ------------------------------ |
-| api      | ./backend     | 8000 | postgres, qdrant, minio, redis |
-| worker   | ./backend     | —    | postgres, qdrant, minio, redis |
-| postgres | postgres:18   | 5432 | —                              |
-| qdrant   | qdrant/qdrant | 6333 | —                              |
-| minio    | minio/minio   | 9000 | —                              |
-| redis    | redis:8       | 6379 | —                              |
+| Service   | Image / Build       | Port       | Dependencies                       |
+| --------- | ------------------- | ---------- | ---------------------------------- |
+| api       | ./backend           | 8000       | postgres, qdrant, seaweedfs, redis |
+| worker    | ./backend           | —          | postgres, qdrant, seaweedfs, redis |
+| postgres  | postgres:18         | 5432       | —                                  |
+| qdrant    | qdrant/qdrant       | 6333       | —                                  |
+| seaweedfs | chrislusf/seaweedfs | 8888, 9333 | —                                  |
+| redis     | redis:8             | 6379       | —                                  |
 
 `api` and `worker` use the same Docker image (`backend/`), but with different entrypoints:
 
@@ -479,24 +479,24 @@ Chunks from a deleted source are excluded from **future** snapshots but remain i
 
 ### What to back up
 
-| Store      | What                                 | Method                         | Frequency           |
-| ---------- | ------------------------------------ | ------------------------------ | ------------------- |
-| PostgreSQL | All business data                    | pg_dump / pg_basebackup        | Daily               |
-| Qdrant     | Collections with vectors and payload | Qdrant snapshots API           | On snapshot publish |
-| MinIO      | Source files and artifacts           | mc mirror / bucket replication | Daily               |
-| Redis      | Not backed up                        | —                              | —                   |
-| Files      | persona/, config/                    | git                            | On change           |
+| Store      | What                                 | Method                                | Frequency           |
+| ---------- | ------------------------------------ | ------------------------------------- | ------------------- |
+| PostgreSQL | All business data                    | pg_dump / pg_basebackup               | Daily               |
+| Qdrant     | Collections with vectors and payload | Qdrant snapshots API                  | On snapshot publish |
+| SeaweedFS  | Source files and artifacts           | volume backup + filer metadata backup | Daily               |
+| Redis      | Not backed up                        | —                                     | —                   |
+| Files      | persona/, config/                    | git                                   | On change           |
 
 Redis is not backed up — all its data is recoverable (tasks are re-enqueued, cache warms up, counters reset).
 
-**Consistency on recovery:** PostgreSQL is the source of truth. If stores diverge: Qdrant can be fully reindexed from PostgreSQL + MinIO. Qdrant snapshots API backup is taken on each snapshot publish — this guarantees the Qdrant backup corresponds to a specific `snapshot_id` in PostgreSQL.
+**Consistency on recovery:** PostgreSQL is the source of truth. If stores diverge: Qdrant can be fully reindexed from PostgreSQL + SeaweedFS. Qdrant snapshots API backup is taken on each snapshot publish — this guarantees the Qdrant backup corresponds to a specific `snapshot_id` in PostgreSQL.
 
 ### Recovery
 
 1. Bring up Docker Compose with empty volumes.
 2. Restore PostgreSQL from dump.
-3. Restore MinIO from backup.
-4. Restore Qdrant from snapshot or reindex (data for reindex exists in PostgreSQL + MinIO).
+3. Restore SeaweedFS filer metadata and volume data from backup.
+4. Restore Qdrant from snapshot or reindex (data for reindex exists in PostgreSQL + SeaweedFS).
 5. Persona and promo files — checkout the specific git commit. The required `config_commit_hash` is taken from the audit log of the last response or from the active snapshot record in PostgreSQL.
 
 **Reproducing a specific historical response:** audit log contains `snapshot_id` + `config_commit_hash` + `config_content_hash`. `config_content_hash` (SHA256 of `persona/` + `config/` contents) distinguishes configuration changes from code changes. To reproduce: activate the required snapshot, checkout the required commit for persona/config.

@@ -41,9 +41,9 @@ async def readiness(request: Request) -> JSONResponse | dict[str, str]:
         "postgres": _check_postgres(request.app.state.session_factory),
         "redis": _check_redis(request.app.state.redis_client),
         "qdrant": _check_http(request.app.state.http_client, f"{settings.qdrant_url}/readyz"),
-        "minio": _check_http(
+        "seaweedfs": _check_http(
             request.app.state.http_client,
-            f"{settings.minio_url}/minio/health/live",
+            f"{settings.seaweedfs_filer_url}/",
         ),
     }
     try:

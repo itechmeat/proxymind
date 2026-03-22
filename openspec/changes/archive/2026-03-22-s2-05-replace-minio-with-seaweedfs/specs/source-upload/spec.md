@@ -1,94 +1,4 @@
-## ADDED Requirements
-
-### Requirement: POST /api/admin/sources endpoint
-
-The API SHALL expose a `POST /api/admin/sources` endpoint that accepts a multipart/form-data request with two fields: `file` (UploadFile) and `metadata` (string containing JSON). The endpoint SHALL return `202 Accepted` on success. The endpoint SHALL NOT require authentication (explicit security exception — local-only deployment; `TODO(S7-01)` MUST be present in the codebase).
-
-#### Scenario: Successful upload of a Markdown file
-
-- **WHEN** a POST request is sent with a valid `.md` file and valid metadata JSON containing at least a `title`
-- **THEN** the response status SHALL be 202
-- **AND** the response body SHALL contain `source_id` (UUID), `task_id` (UUID), `status` ("pending"), `file_path` (string), and `message` (string)
-
-#### Scenario: Successful upload of a TXT file
-
-- **WHEN** a POST request is sent with a valid `.txt` file and valid metadata JSON containing at least a `title`
-- **THEN** the response status SHALL be 202
-- **AND** the response body SHALL contain `source_id`, `task_id`, `status`, `file_path`, and `message`
-
-#### Scenario: Unsupported file format is rejected
-
-- **WHEN** a POST request is sent with a file having an extension other than `.md` or `.txt` (e.g., `.pdf`, `.docx`, `.html`)
-- **THEN** the response status SHALL be 422
-- **AND** the response body SHALL indicate the file format is unsupported and list the allowed extensions
-
-#### Scenario: Empty file is rejected
-
-- **WHEN** a POST request is sent with a zero-byte file
-- **THEN** the response status SHALL be 422
-
-#### Scenario: Oversized file is rejected
-
-- **WHEN** a POST request is sent with a file exceeding the configured `UPLOAD_MAX_FILE_SIZE_MB` limit
-- **THEN** the response status SHALL be 413
-
-#### Scenario: File extension validation is case-insensitive
-
-- **WHEN** a POST request is sent with a file named `DOCUMENT.MD` or `notes.Txt`
-- **THEN** the endpoint SHALL accept the file as a valid format
-
----
-
-### Requirement: Upload metadata validation
-
-The `metadata` field SHALL be validated as JSON conforming to a Pydantic schema with the following fields: `title` (string, required, 1-255 characters), `description` (string, optional, max 2000 characters), `public_url` (string, optional, valid HTTP/HTTPS URL, max 2048 characters), `catalog_item_id` (UUID, optional), `language` (string, optional, max 32 characters). The `source_type` SHALL be determined automatically from the file extension (`.md` -> MARKDOWN, `.txt` -> TXT) and SHALL NOT be part of the metadata input.
-
-The `language` field from `SourceUploadMetadata` SHALL be persisted on the `Source` record. The `source.py` service `create_source_and_task()` method MUST pass `language=metadata.language` to the Source constructor. Empty or whitespace-only `language` values SHALL be normalized to NULL before persistence. A nullable `language` column (VARCHAR(32)) exists on the `sources` table (added in S2-02 migration 004). Existing sources have NULL, which means "use system default."
-
-#### Scenario: Missing title in metadata
-
-- **WHEN** a POST request is sent with metadata JSON that lacks the `title` field
-- **THEN** the response status SHALL be 422
-
-#### Scenario: Title exceeds maximum length
-
-- **WHEN** a POST request is sent with a `title` longer than 255 characters
-- **THEN** the response status SHALL be 422
-
-#### Scenario: Invalid metadata JSON
-
-- **WHEN** a POST request is sent with a `metadata` field that is not valid JSON
-- **THEN** the response status SHALL be 422
-
-#### Scenario: Invalid public_url format
-
-- **WHEN** a POST request is sent with `public_url` set to a non-HTTP/HTTPS string
-- **THEN** the response status SHALL be 422
-
-#### Scenario: source_type derived from extension
-
-- **WHEN** a `.md` file is uploaded
-- **THEN** the created Source record SHALL have `source_type` set to MARKDOWN
-
-- **WHEN** a `.txt` file is uploaded
-- **THEN** the created Source record SHALL have `source_type` set to TXT
-
-#### Scenario: Language field is persisted on Source record
-
-- **WHEN** a POST request is sent with metadata containing `"language": "russian"`
-- **THEN** the created Source record in PostgreSQL SHALL have `language` set to `"russian"`
-
-#### Scenario: Missing language field results in NULL
-
-- **WHEN** a POST request is sent with metadata that does not include `language`
-- **THEN** the created Source record in PostgreSQL SHALL have `language` set to NULL
-
-#### Scenario: Blank language is normalized to NULL
-
-- **WHEN** a POST request is sent with metadata containing `"language": "   "`
-- **THEN** the created Source record in PostgreSQL SHALL have `language` set to NULL
-
----
+## MODIFIED Requirements
 
 ### Requirement: Configurable file size limit
 
@@ -250,54 +160,6 @@ The SeaweedFS sources storage root SHALL be automatically created during the Fas
 
 ---
 
-### Requirement: arq pool lifecycle in FastAPI lifespan
-
-The FastAPI lifespan SHALL create an arq Redis pool (`ArqRedis`) during startup and store it in `app.state.arq_pool`. During shutdown, the pool SHALL be closed via `await app.state.arq_pool.close()`.
-
-#### Scenario: arq pool available after startup
-
-- **WHEN** the application has completed startup
-- **THEN** `app.state.arq_pool` SHALL be an active `ArqRedis` instance
-
-#### Scenario: arq pool closed on shutdown
-
-- **WHEN** the application shuts down
-- **THEN** `app.state.arq_pool.close()` SHALL be awaited
-
----
-
-### Requirement: Admin API no-auth security exception
-
-The `POST /api/admin/sources` and `GET /api/admin/tasks/{task_id}` endpoints SHALL NOT require authentication in S2-01. This is an explicit security exception documented as a deviation from secure-by-default principles. The codebase MUST contain a `TODO(S7-01)` comment referencing the future addition of Bearer token authentication on `/api/admin/*`. This exception is valid only for local Docker development; Caddy MUST NOT expose `/api/admin/*` externally without explicit configuration.
-
-#### Scenario: Admin endpoints accessible without auth
-
-- **WHEN** a request is sent to `POST /api/admin/sources` or `GET /api/admin/tasks/{id}` without any authorization header
-- **THEN** the request SHALL be processed normally (not rejected for missing auth)
-
-#### Scenario: TODO marker exists in codebase
-
-- **WHEN** the admin router source code is inspected
-- **THEN** a `TODO(S7-01)` comment referencing authentication SHALL be present
-
----
-
-### Requirement: Constants module for canonical seeded IDs
-
-The application SHALL provide a constants module (`app/core/constants.py`) that defines `DEFAULT_AGENT_ID` and `DEFAULT_KNOWLEDGE_BASE_ID` as the same UUIDs present in the seed migration. Runtime code SHALL import these constants from the constants module, NOT from migration files.
-
-#### Scenario: Constants match seed migration values
-
-- **WHEN** `DEFAULT_AGENT_ID` from `app.core.constants` is compared with the agent ID in seed migration 002
-- **THEN** they SHALL be identical UUIDs
-
-#### Scenario: Upload uses constants for agent_id
-
-- **WHEN** a file is uploaded via `POST /api/admin/sources`
-- **THEN** the Source record SHALL use `DEFAULT_AGENT_ID` as its `agent_id`
-
----
-
 ### Requirement: Upload response contract
 
 The `POST /api/admin/sources` endpoint SHALL return a JSON response with the following fields: `source_id` (UUID), `task_id` (UUID), `status` (string, value "pending"), `file_path` (string, the SeaweedFS object key), and `message` (string, human-readable confirmation).
@@ -329,3 +191,17 @@ Upload validation, endpoint flow, and error handling SHALL be covered by determi
 - **WHEN** the arq enqueue mock is configured to raise an exception
 - **THEN** the endpoint SHALL return 500
 - **AND** Source and BackgroundTask records in PG SHALL have status FAILED with error_message populated
+
+---
+
+## RENAMED Requirements
+
+### Requirement: MinIO file storage
+
+- **FROM:** MinIO file storage
+- **TO:** SeaweedFS file storage
+
+### Requirement: MinIO bucket auto-creation at startup
+
+- **FROM:** MinIO bucket auto-creation at startup
+- **TO:** SeaweedFS storage root auto-creation at startup

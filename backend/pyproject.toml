@@ -12,7 +12,6 @@ dependencies = [
   "google-genai>=1.14.0",
   "httpx>=0.28.1",
   "litellm>=1.82.3",
-  "minio>=7.2.0",
   "pydantic-settings>=2.12.5",
   "python-multipart>=0.0.20",
   "qdrant-client>=1.14.1",

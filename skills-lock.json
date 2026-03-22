@@ -91,6 +91,11 @@
       "sourceType": "github",
       "computedHash": "643bb2bffa527953f48bcd54fba4ff5666f7b2b0bdd40f158441510412bbe232"
     },
+    "seaweedfs": {
+      "source": "itechmeat/llm-code",
+      "sourceType": "github",
+      "computedHash": "384acfa128464cfaedb42deba335bbc0bddcc499142c4d78b4343cb55d2fd9e4"
+    },
     "ui-ux-pro-max": {
       "source": "nextlevelbuilder/ui-ux-pro-max-skill",
       "sourceType": "github",

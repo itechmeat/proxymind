@@ -35,10 +35,10 @@ Before considering an implementation complete, you MUST:
 
 ### Post-archive checklist (after archiving)
 
-After archiving a change (`/opsx:archive`), you MUST:
+After archiving a change (`/opsx:archive`), you MUST execute ALL steps below **before** presenting the archive summary to the user. The archive is NOT complete until every step is done. Do NOT output the archive summary and then "forget" the remaining steps.
 
 1. Mark the corresponding story checkbox in `docs/plan.md` as done (`- [x]`).
-2. Propose commit messages using the `commits` skill (conventional commits format).
+2. Propose commit messages using the `commits` skill (conventional commits format). This step is MANDATORY — the archive summary MUST include the proposed commit message at the end.
 3. Never commit without explicit user permission.
 4. Do not archive non-Phase-1 changes as "complete" unless stable implemented behavior is already covered by tests or the gap is explicitly documented.
 
@@ -49,7 +49,7 @@ ProxyMind is a self-hosted open-source digital twin — an AI agent that knows, 
 ## Tech Stack
 
 - Backend: Python, FastAPI, SQLAlchemy, Alembic, asyncpg, arq, LiteLLM, structlog
-- Data: PostgreSQL, Qdrant, MinIO, Redis
+- Data: PostgreSQL, Qdrant, SeaweedFS, Redis
 - AI: Gemini Embedding 2, Docling, Gemini Batch API
 - Frontend: Bun, React, Vite, Biome
 - Infra: Docker, Caddy, Prometheus, Grafana, OpenTelemetry
