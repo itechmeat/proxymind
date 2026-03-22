@@ -22,12 +22,13 @@ def _point(
     knowledge_base_id: uuid.UUID,
     vector: list[float],
     text_content: str,
+    source_id: uuid.UUID | None = None,
 ) -> QdrantChunkPoint:
     return QdrantChunkPoint(
         chunk_id=chunk_id,
         vector=vector,
         snapshot_id=snapshot_id,
-        source_id=uuid.uuid4(),
+        source_id=source_id or uuid.uuid4(),
         document_version_id=uuid.uuid4(),
         agent_id=agent_id,
         knowledge_base_id=knowledge_base_id,
@@ -56,19 +57,24 @@ async def test_qdrant_round_trip_filters_by_snapshot_id(qdrant_url: str) -> None
     snapshot_id = uuid.uuid4()
     other_snapshot_id = uuid.uuid4()
     agent_id = uuid.uuid4()
+    other_agent_id = uuid.uuid4()
     knowledge_base_id = uuid.uuid4()
+    other_knowledge_base_id = uuid.uuid4()
+    matched_chunk_id = uuid.uuid4()
+    matched_source_id = uuid.uuid4()
 
     try:
         await service.ensure_collection()
         await service.upsert_chunks(
             [
                 _point(
-                    chunk_id=uuid.uuid4(),
+                    chunk_id=matched_chunk_id,
                     snapshot_id=snapshot_id,
                     agent_id=agent_id,
                     knowledge_base_id=knowledge_base_id,
                     vector=[1.0, 0.0, 0.0],
                     text_content="matched chunk",
+                    source_id=matched_source_id,
                 ),
                 _point(
                     chunk_id=uuid.uuid4(),
@@ -77,6 +83,22 @@ async def test_qdrant_round_trip_filters_by_snapshot_id(qdrant_url: str) -> None
                     knowledge_base_id=knowledge_base_id,
                     vector=[0.0, 1.0, 0.0],
                     text_content="other chunk",
+                ),
+                _point(
+                    chunk_id=uuid.uuid4(),
+                    snapshot_id=snapshot_id,
+                    agent_id=other_agent_id,
+                    knowledge_base_id=knowledge_base_id,
+                    vector=[1.0, 0.0, 0.0],
+                    text_content="other agent chunk",
+                ),
+                _point(
+                    chunk_id=uuid.uuid4(),
+                    snapshot_id=snapshot_id,
+                    agent_id=agent_id,
+                    knowledge_base_id=other_knowledge_base_id,
+                    vector=[1.0, 0.0, 0.0],
+                    text_content="other knowledge base chunk",
                 ),
             ]
         )
@@ -89,20 +111,19 @@ async def test_qdrant_round_trip_filters_by_snapshot_id(qdrant_url: str) -> None
             limit=5,
         )
 
-        assert response == [
-            RetrievedChunk(
-                chunk_id=response[0].chunk_id,
-                source_id=response[0].source_id,
-                text_content="matched chunk",
-                score=response[0].score,
-                anchor_metadata={
-                    "anchor_page": None,
-                    "anchor_chapter": "Chapter",
-                    "anchor_section": "Section",
-                    "anchor_timecode": None,
-                },
-            )
-        ]
+        assert len(response) == 1
+        assert response[0] == RetrievedChunk(
+            chunk_id=matched_chunk_id,
+            source_id=matched_source_id,
+            text_content="matched chunk",
+            score=response[0].score,
+            anchor_metadata={
+                "anchor_page": None,
+                "anchor_chapter": "Chapter",
+                "anchor_section": "Section",
+                "anchor_timecode": None,
+            },
+        )
     finally:
         await client.delete_collection(collection_name)
         await client.close()

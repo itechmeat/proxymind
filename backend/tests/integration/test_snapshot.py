@@ -120,6 +120,7 @@ async def test_get_active_snapshot_returns_active_for_scope(
 ) -> None:
     active_id = uuid.uuid7()
     other_scope_id = uuid.uuid7()
+    other_agent_scope_id = uuid.uuid7()
     service = SnapshotService()
 
     async with session_factory() as session:
@@ -144,6 +145,13 @@ async def test_get_active_snapshot_returns_active_for_scope(
                     agent_id=DEFAULT_AGENT_ID,
                     knowledge_base_id=uuid.uuid7(),
                     name="Other Active",
+                    status=SnapshotStatus.ACTIVE,
+                ),
+                KnowledgeSnapshot(
+                    id=other_agent_scope_id,
+                    agent_id=uuid.uuid7(),
+                    knowledge_base_id=DEFAULT_KNOWLEDGE_BASE_ID,
+                    name="Other Agent Active",
                     status=SnapshotStatus.ACTIVE,
                 ),
             ]

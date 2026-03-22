@@ -13,6 +13,7 @@ from app.db.models.enums import ChunkStatus, SourceType
 from app.services.qdrant import (
     PAYLOAD_INDEX_FIELDS,
     CollectionSchemaMismatchError,
+    InvalidRetrievedChunkError,
     QdrantChunkPoint,
     QdrantService,
     RetrievedChunk,
@@ -305,6 +306,28 @@ async def test_search_omits_score_threshold_when_disabled() -> None:
 
 
 @pytest.mark.asyncio
+async def test_search_preserves_zero_score_threshold() -> None:
+    client = SimpleNamespace(query_points=AsyncMock(return_value=SimpleNamespace(points=[])))
+    service = QdrantService(
+        client=client,  # type: ignore[arg-type]
+        collection_name="proxymind_chunks",
+        embedding_dimensions=3,
+    )
+
+    await service.search(
+        vector=[0.3, 0.2, 0.1],
+        snapshot_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        knowledge_base_id=uuid.uuid4(),
+        limit=3,
+        score_threshold=0.0,
+    )
+
+    kwargs = client.query_points.await_args.kwargs
+    assert kwargs["score_threshold"] == 0.0
+
+
+@pytest.mark.asyncio
 async def test_search_returns_empty_list_when_qdrant_finds_nothing() -> None:
     client = SimpleNamespace(query_points=AsyncMock(return_value=SimpleNamespace(points=[])))
     service = QdrantService(
@@ -322,3 +345,36 @@ async def test_search_returns_empty_list_when_qdrant_finds_nothing() -> None:
     )
 
     assert results == []
+
+
+@pytest.mark.asyncio
+async def test_search_raises_typed_error_for_invalid_payload() -> None:
+    client = SimpleNamespace(
+        query_points=AsyncMock(
+            return_value=SimpleNamespace(
+                points=[
+                    SimpleNamespace(
+                        score=0.91,
+                        payload={
+                            "source_id": str(uuid.uuid4()),
+                            "text_content": "retrieved body",
+                        },
+                    )
+                ]
+            )
+        )
+    )
+    service = QdrantService(
+        client=client,  # type: ignore[arg-type]
+        collection_name="proxymind_chunks",
+        embedding_dimensions=3,
+    )
+
+    with pytest.raises(InvalidRetrievedChunkError, match="chunk_id"):
+        await service.search(
+            vector=[0.1, 0.2, 0.3],
+            snapshot_id=uuid.uuid4(),
+            agent_id=uuid.uuid4(),
+            knowledge_base_id=uuid.uuid4(),
+            limit=5,
+        )

@@ -32,8 +32,8 @@ def _raise_chat_http_error(error: Exception) -> None:
     status_code=status.HTTP_201_CREATED,
 )
 async def create_session(
+    chat_service: Annotated[ChatService, Depends(get_chat_service)],
     payload: CreateSessionRequest | None = Body(default=None),
-    chat_service: Annotated[ChatService, Depends(get_chat_service)] = None,
 ) -> SessionResponse:
     session = await chat_service.create_session(
         channel=(payload or CreateSessionRequest()).channel

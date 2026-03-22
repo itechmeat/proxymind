@@ -26,6 +26,10 @@ class CollectionSchemaMismatchError(RuntimeError):
     pass
 
 
+class InvalidRetrievedChunkError(RuntimeError):
+    pass
+
+
 @dataclass(slots=True, frozen=True)
 class QdrantChunkPoint:
     chunk_id: UUID
@@ -220,11 +224,39 @@ class QdrantService:
     @staticmethod
     def _to_retrieved_chunk(point: Any) -> RetrievedChunk:
         payload = point.payload or {}
+        raw_chunk_id = payload.get("chunk_id")
+        raw_source_id = payload.get("source_id")
+        raw_text_content = payload.get("text_content")
+        raw_score = getattr(point, "score", None)
+        missing_fields = [
+            field_name
+            for field_name, value in (
+                ("chunk_id", raw_chunk_id),
+                ("source_id", raw_source_id),
+                ("text_content", raw_text_content),
+                ("score", raw_score),
+            )
+            if value is None
+        ]
+        if missing_fields:
+            raise InvalidRetrievedChunkError(
+                "Qdrant point is missing retrieval fields: " + ", ".join(missing_fields)
+            )
+
+        try:
+            chunk_id = UUID(str(raw_chunk_id))
+            source_id = UUID(str(raw_source_id))
+            score = float(raw_score)
+        except (TypeError, ValueError) as error:
+            raise InvalidRetrievedChunkError(
+                "Qdrant point contains invalid retrieval metadata"
+            ) from error
+
         return RetrievedChunk(
-            chunk_id=UUID(str(payload["chunk_id"])),
-            source_id=UUID(str(payload["source_id"])),
-            text_content=str(payload["text_content"]),
-            score=float(point.score),
+            chunk_id=chunk_id,
+            source_id=source_id,
+            text_content=str(raw_text_content),
+            score=score,
             anchor_metadata={
                 "anchor_page": payload.get("anchor_page"),
                 "anchor_chapter": payload.get("anchor_chapter"),

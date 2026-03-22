@@ -5,6 +5,7 @@ from app.services.llm import LLMError, LLMResponse, LLMService
 from app.services.prompt import NO_CONTEXT_REFUSAL, SYSTEM_PROMPT, build_chat_prompt
 from app.services.qdrant import (
     CollectionSchemaMismatchError,
+    InvalidRetrievedChunkError,
     QdrantChunkPoint,
     QdrantService,
     RetrievedChunk,
@@ -25,6 +26,7 @@ __all__ = [
     "CollectionSchemaMismatchError",
     "DoclingParser",
     "EmbeddingService",
+    "InvalidRetrievedChunkError",
     "LLMError",
     "LLMResponse",
     "LLMService",

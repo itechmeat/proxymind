@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from pydantic import Field, computed_field
+from pydantic import Field, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -55,6 +55,14 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
+
+    @model_validator(mode="after")
+    def validate_retrieval_settings(self) -> Settings:
+        if self.min_retrieved_chunks > self.retrieval_top_n:
+            raise ValueError(
+                "MIN_RETRIEVED_CHUNKS must be less than or equal to RETRIEVAL_TOP_N"
+            )
+        return self
 
     @computed_field
     @property
