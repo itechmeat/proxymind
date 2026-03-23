@@ -62,7 +62,7 @@ async def process_batch_embed(ctx: dict[str, object], task_id: str) -> None:
 
         try:
             stored_chunk_ids = [uuid.UUID(raw_chunk_id) for raw_chunk_id in raw_chunk_ids]
-        except ValueError:
+        except (TypeError, ValueError, AttributeError):
             logger.warning(
                 "worker.batch_embed.invalid_chunk_ids",
                 task_id=task_id,
@@ -100,6 +100,7 @@ async def process_batch_embed(ctx: dict[str, object], task_id: str) -> None:
 
         pending_chunks = [chunk for chunk in ordered_chunks if chunk is not None]
         task.status = BackgroundTaskStatus.PROCESSING
+        task.started_at = datetime.now(UTC)
         await session.commit()
         try:
             await batch_orchestrator.submit_to_gemini(

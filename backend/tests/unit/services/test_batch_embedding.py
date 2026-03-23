@@ -39,12 +39,17 @@ def _batch_job(
     state: str,
     responses: list[object] | None = None,
     error_message: str | None = None,
+    include_completion_stats: bool = True,
 ):
     return SimpleNamespace(
         name="batches/123",
         state=SimpleNamespace(value=state),
         error=SimpleNamespace(message=error_message) if error_message else None,
-        completion_stats=SimpleNamespace(successful_count=1, failed_count=0),
+        completion_stats=(
+            SimpleNamespace(successful_count=1, failed_count=0)
+            if include_completion_stats
+            else None
+        ),
         dest=SimpleNamespace(inlined_embed_content_responses=responses),
     )
 
@@ -55,6 +60,7 @@ async def test_create_embedding_batch_returns_operation_name() -> None:
     client = BatchEmbeddingClient(
         model="gemini-embedding-2-preview",
         dimensions=2,
+        embedding_task_type="CLASSIFICATION",
         client=SimpleNamespace(batches=batches),  # type: ignore[arg-type]
     )
 
@@ -64,13 +70,15 @@ async def test_create_embedding_batch_returns_operation_name() -> None:
 
     assert operation_name == "batches/123"
     assert batches.create_calls[0]["model"] == "gemini-embedding-2-preview"
+    batch_src = batches.create_calls[0]["src"]
+    assert batch_src.inlined_requests.config.task_type == "CLASSIFICATION"
 
 
 @pytest.mark.asyncio
 async def test_get_batch_status_maps_gemini_state() -> None:
     batches = FakeBatches(
         create_response=SimpleNamespace(name="batches/123"),
-        get_responses=[_batch_job(state="JOB_STATE_RUNNING")],
+        get_responses=[_batch_job(state="JOB_STATE_RUNNING", include_completion_stats=False)],
     )
     client = BatchEmbeddingClient(
         model="gemini-embedding-2-preview",
@@ -82,6 +90,8 @@ async def test_get_batch_status_maps_gemini_state() -> None:
 
     assert status.status is BatchStatus.PROCESSING
     assert status.operation_name == "batches/123"
+    assert status.succeeded_count == 0
+    assert status.failed_count == 0
 
 
 @pytest.mark.asyncio
@@ -112,7 +122,10 @@ async def test_get_batch_results_validates_response_count_and_dimensions() -> No
 
 
 def test_map_gemini_state_covers_expected_values() -> None:
+    assert map_gemini_state(None) is BatchStatus.PROCESSING
+    assert map_gemini_state("JOB_STATE_UNSPECIFIED") is BatchStatus.PROCESSING
     assert map_gemini_state("JOB_STATE_PENDING") is BatchStatus.PROCESSING
+    assert map_gemini_state("JOB_STATE_PAUSED") is BatchStatus.PROCESSING
     assert map_gemini_state("JOB_STATE_RUNNING") is BatchStatus.PROCESSING
     assert map_gemini_state("JOB_STATE_SUCCEEDED") is BatchStatus.COMPLETE
     assert map_gemini_state("JOB_STATE_FAILED") is BatchStatus.FAILED

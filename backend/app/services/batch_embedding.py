@@ -23,10 +23,13 @@ def _is_retryable_batch_error(error: BaseException) -> bool:
 
 def map_gemini_state(state: str | None) -> BatchStatus:
     if state in {
+        None,
+        "JOB_STATE_UNSPECIFIED",
         "JOB_STATE_QUEUED",
         "JOB_STATE_PENDING",
         "JOB_STATE_RUNNING",
         "JOB_STATE_UPDATING",
+        "JOB_STATE_PAUSED",
     }:
         return BatchStatus.PROCESSING
     if state in {"JOB_STATE_SUCCEEDED", "JOB_STATE_PARTIALLY_SUCCEEDED"}:
@@ -68,11 +71,13 @@ class BatchEmbeddingClient:
         *,
         model: str,
         dimensions: int,
+        embedding_task_type: str = "RETRIEVAL_DOCUMENT",
         api_key: str | None = None,
         client: genai.Client | None = None,
     ) -> None:
         self._model = model
         self._dimensions = dimensions
+        self._embedding_task_type = embedding_task_type
         self._api_key = api_key
         self._client = client
         self._client_lock = threading.Lock()
@@ -99,18 +104,29 @@ class BatchEmbeddingClient:
     async def get_batch_status(self, operation_name: str) -> BatchEmbeddingStatus:
         batch_job = await asyncio.to_thread(self._get_batch_job, operation_name)
         state = batch_job.state.value if batch_job.state is not None else None
-        stats = batch_job.completion_stats
+        responses = (
+            batch_job.dest.inlined_embed_content_responses
+            if batch_job.dest is not None
+            else None
+        )
+        succeeded_count = 0
+        failed_count = 0
+        if responses is not None:
+            succeeded_count = sum(
+                1
+                for response in responses
+                if response.error is None
+                and response.response is not None
+                and response.response.embedding is not None
+            )
+            failed_count = len(responses) - succeeded_count
         return BatchEmbeddingStatus(
             operation_name=operation_name,
             status=map_gemini_state(state),
             state=state,
             error_message=batch_job.error.message if batch_job.error is not None else None,
-            succeeded_count=(
-                stats.successful_count
-                if stats and stats.successful_count is not None
-                else 0
-            ),
-            failed_count=stats.failed_count if stats and stats.failed_count is not None else 0,
+            succeeded_count=succeeded_count,
+            failed_count=failed_count,
             last_polled_at=datetime.now(UTC),
         )
 
@@ -189,7 +205,7 @@ class BatchEmbeddingClient:
         batch = types.EmbedContentBatch(
             contents=[request.text for request in requests],
             config=types.EmbedContentConfig(
-                task_type="RETRIEVAL_DOCUMENT",
+                task_type=self._embedding_task_type,
                 output_dimensionality=self._dimensions,
             ),
         )

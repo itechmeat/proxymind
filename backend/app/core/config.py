@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = Field(default=None)
     embedding_model: str = Field(default="gemini-embedding-2-preview", min_length=1)
     embedding_dimensions: int = Field(default=3072, ge=128, le=3072)
+    embedding_task_type: str = Field(default="RETRIEVAL_DOCUMENT", min_length=1)
     embedding_batch_size: int = Field(default=100, ge=1)
     batch_embed_chunk_threshold: int = Field(default=50, ge=1)
     batch_poll_interval_seconds: int = Field(default=30, ge=1, le=60)

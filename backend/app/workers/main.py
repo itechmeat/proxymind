@@ -59,6 +59,7 @@ async def on_startup(ctx: dict[str, Any]) -> None:
     batch_embedding_client = BatchEmbeddingClient(
         model=settings.embedding_model,
         dimensions=settings.embedding_dimensions,
+        embedding_task_type=settings.embedding_task_type,
         api_key=settings.gemini_api_key,
     )
     batch_orchestrator = BatchOrchestrator(

@@ -101,7 +101,12 @@ async def test_batch_embed_endpoint_creates_task_and_job(
 
     task_response = await api_client.get(f"/api/admin/tasks/{body['task_id']}")
     assert task_response.status_code == 200
-    assert task_response.json()["task_type"] == "batch_embedding"
+    task_body = task_response.json()
+    assert task_body["task_type"] == "batch_embedding"
+    assert task_body["source_id"] is None
+    assert task_body["result_metadata"]["source_ids"] == [str(source_id)]
+    assert "knowledge_base_id" in task_body["result_metadata"]
+    assert "snapshot_id" in task_body["result_metadata"]
 
 
 @pytest.mark.asyncio

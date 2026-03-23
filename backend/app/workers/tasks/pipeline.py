@@ -159,7 +159,7 @@ async def mark_persisted_records_failed(
     document = await session.get(Document, document_id)
     document_version = await session.get(DocumentVersion, document_version_id)
 
-    if source is not None:
+    if source is not None and source.status is not SourceStatus.DELETED:
         source.status = SourceStatus.FAILED
     if document is not None:
         document.status = DocumentStatus.FAILED

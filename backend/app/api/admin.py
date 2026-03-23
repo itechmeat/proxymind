@@ -241,6 +241,18 @@ async def create_batch_embed_job(
     ).all()
     if not chunks:
         raise HTTPException(status_code=422, detail="Sources have no pending chunks")
+    pending_source_ids = {chunk.source_id for chunk in chunks}
+    missing_pending_sources = [
+        str(source_id) for source_id in source_ids if source_id not in pending_source_ids
+    ]
+    if missing_pending_sources:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Each source must have at least one pending chunk: "
+                + ", ".join(missing_pending_sources)
+            ),
+        )
 
     snapshot_ids = {chunk.snapshot_id for chunk in chunks}
     if len(snapshot_ids) != 1:
@@ -285,26 +297,36 @@ async def create_batch_embed_job(
     session.add_all([task, batch_job])
     await session.commit()
 
+    enqueued_job_id: str | None = None
     try:
-        task.arq_job_id = await task_enqueuer.enqueue_batch_embed(task.id)
+        enqueued_job_id = await task_enqueuer.enqueue_batch_embed(task.id)
+        task.arq_job_id = enqueued_job_id
         await session.commit()
     except Exception as error:
         await session.rollback()
         task = await session.get(BackgroundTask, task.id)
         batch_job = await session.get(BatchJob, batch_job.id)
-        if task is not None:
+        if enqueued_job_id is not None and task is not None:
+            task.arq_job_id = enqueued_job_id
+            await session.commit()
+        elif task is not None:
             task.status = BackgroundTaskStatus.FAILED
             task.error_message = f"Failed to enqueue batch embedding task: {error}"
             task.completed_at = datetime.now(UTC)
-        if batch_job is not None:
-            batch_job.status = BatchStatus.FAILED
-            batch_job.error_message = str(error)
-            batch_job.completed_at = datetime.now(UTC)
-        await session.commit()
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to enqueue batch embedding task",
-        ) from error
+            if batch_job is not None:
+                batch_job.status = BatchStatus.FAILED
+                batch_job.error_message = str(error)
+                batch_job.completed_at = datetime.now(UTC)
+            await session.commit()
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to enqueue batch embedding task",
+            ) from error
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to reconcile batch embedding enqueue state",
+            ) from error
 
     return BatchEmbedResponse(
         task_id=task.id,

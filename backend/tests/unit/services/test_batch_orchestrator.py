@@ -243,7 +243,7 @@ async def test_submit_to_gemini_rejects_chunk_order_mismatch(
                 chunk_ids=list(reversed(ordered_chunk_ids)),
             )
 
-    batch_client.create_embedding_batch.assert_awaited_once()
+    batch_client.create_embedding_batch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -286,3 +286,113 @@ async def test_submit_to_gemini_marks_batch_failed_when_client_raises(
     assert batch_job.status is BatchStatus.FAILED
     assert batch_job.error_message == "gemini submit failed"
     assert batch_job.completed_at is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_apply_results_marks_partial_failures_on_source_and_task(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    task_id, batch_job_id, _ = await _seed_batch_context(session_factory, source_count=2)
+    qdrant_service = SimpleNamespace(
+        upsert_chunks=AsyncMock(),
+        delete_chunks=AsyncMock(),
+        bm25_language="english",
+    )
+    orchestrator = BatchOrchestrator(
+        batch_client=SimpleNamespace(model="gemini-embedding-2-preview", dimensions=3),
+        qdrant_service=qdrant_service,
+    )
+
+    async with session_factory() as session:
+        batch_job = await session.get(BatchJob, batch_job_id)
+        assert batch_job is not None
+        await orchestrator._apply_results(
+            session,
+            batch_job=batch_job,
+            results=[
+                BatchEmbeddingResultItem(index=0, embedding=[0.1, 0.2, 0.3], error_message=None),
+                BatchEmbeddingResultItem(index=1, embedding=None, error_message="bad row"),
+            ],
+        )
+
+    async with session_factory() as session:
+        task = await session.get(BackgroundTask, task_id)
+        batch_job = await session.get(BatchJob, batch_job_id)
+        sources = (await session.scalars(select(Source).order_by(Source.title.asc()))).all()
+        documents = (await session.scalars(select(Document).order_by(Document.title.asc()))).all()
+        versions = (
+            await session.scalars(
+                select(DocumentVersion).order_by(DocumentVersion.version_number.asc())
+            )
+        ).all()
+        chunks = (await session.scalars(select(Chunk).order_by(Chunk.text_content.asc()))).all()
+
+    assert task is not None
+    assert batch_job is not None
+    assert task.status is BackgroundTaskStatus.FAILED
+    assert task.error_message == "Gemini batch completed with failed items"
+    assert task.result_metadata is not None
+    assert task.result_metadata["failed_items"] == [
+        {"chunk_id": str(chunks[1].id), "error": "bad row"}
+    ]
+    assert batch_job.status is BatchStatus.COMPLETE
+    assert batch_job.error_message == "Gemini batch completed with failed items"
+    assert sources[0].status is SourceStatus.READY
+    assert sources[1].status is SourceStatus.FAILED
+    assert documents[0].status is DocumentStatus.READY
+    assert documents[1].status is DocumentStatus.FAILED
+    assert versions[0].status is DocumentVersionStatus.READY
+    assert versions[1].status is DocumentVersionStatus.FAILED
+    assert chunks[0].status is ChunkStatus.INDEXED
+    assert chunks[1].status is ChunkStatus.FAILED
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_poll_and_complete_marks_batch_failed_when_qdrant_upsert_raises(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    task_id, batch_job_id, _ = await _seed_batch_context(session_factory, source_count=1)
+    batch_client = SimpleNamespace(
+        model="gemini-embedding-2-preview",
+        dimensions=3,
+        get_batch_status=AsyncMock(
+            return_value=SimpleNamespace(
+                status=BatchStatus.COMPLETE,
+                last_polled_at=None,
+                succeeded_count=1,
+                failed_count=0,
+                error_message=None,
+            )
+        ),
+        get_batch_results=AsyncMock(
+            return_value=[
+                BatchEmbeddingResultItem(index=0, embedding=[0.1, 0.2, 0.3], error_message=None)
+            ]
+        ),
+    )
+    qdrant_service = SimpleNamespace(
+        upsert_chunks=AsyncMock(side_effect=RuntimeError("qdrant upsert failed")),
+        delete_chunks=AsyncMock(),
+        bm25_language="english",
+    )
+    orchestrator = BatchOrchestrator(batch_client=batch_client, qdrant_service=qdrant_service)
+
+    async with session_factory() as session:
+        batch_job = await session.get(BatchJob, batch_job_id)
+        assert batch_job is not None
+        with pytest.raises(RuntimeError, match="qdrant upsert failed"):
+            await orchestrator.poll_and_complete(session, batch_job=batch_job)
+
+    async with session_factory() as session:
+        task = await session.get(BackgroundTask, task_id)
+        batch_job = await session.get(BatchJob, batch_job_id)
+
+    assert task is not None
+    assert batch_job is not None
+    assert task.status is BackgroundTaskStatus.FAILED
+    assert task.error_message == "qdrant upsert failed"
+    assert batch_job.status is BatchStatus.FAILED
+    assert batch_job.error_message == "qdrant upsert failed"
+    qdrant_service.delete_chunks.assert_awaited_once()

@@ -275,7 +275,11 @@ async def test_worker_preserves_skip_embedding_during_path_a_to_path_b_fallback(
     )
     worker_ctx = {
         "session_factory": session_factory,
-        "settings": SimpleNamespace(bm25_language="english", batch_embed_chunk_threshold=50),
+        "settings": SimpleNamespace(
+            bm25_language="english",
+            batch_embed_chunk_threshold=50,
+            embedding_task_type="RETRIEVAL_DOCUMENT",
+        ),
         "path_a_text_threshold_pdf": 2000,
         "path_a_text_threshold_media": 500,
         "path_a_max_pdf_pages": 6,

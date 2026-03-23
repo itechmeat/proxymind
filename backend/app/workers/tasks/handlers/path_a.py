@@ -132,7 +132,7 @@ async def handle_path_a(
         vector = await services.embedding_service.embed_file(
             file_bytes,
             mime_type,
-            task_type="RETRIEVAL_DOCUMENT",
+            task_type=services.settings.embedding_task_type,
         )
         task.progress = 85
         await session.commit()
@@ -178,16 +178,18 @@ async def handle_path_a(
         )
     except Exception:
         await session.rollback()
-        if qdrant_write_may_have_happened and persisted_state is not None:
-            await cleanup_qdrant_chunks(services.qdrant_service, persisted_state.chunk_ids)
-        if persisted_state is not None:
-            await mark_persisted_records_failed(
-                session,
-                source_id=source.id,
-                document_id=persisted_state.document_id,
-                document_version_id=persisted_state.document_version_id,
-                chunk_ids=persisted_state.chunk_ids,
-            )
+        try:
+            if qdrant_write_may_have_happened and persisted_state is not None:
+                await cleanup_qdrant_chunks(services.qdrant_service, persisted_state.chunk_ids)
+        finally:
+            if persisted_state is not None:
+                await mark_persisted_records_failed(
+                    session,
+                    source_id=source.id,
+                    document_id=persisted_state.document_id,
+                    document_version_id=persisted_state.document_version_id,
+                    chunk_ids=persisted_state.chunk_ids,
+                )
         raise
 
 

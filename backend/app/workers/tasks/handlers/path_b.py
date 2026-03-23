@@ -3,7 +3,6 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import BackgroundTask, Chunk, Source
@@ -126,50 +125,29 @@ async def handle_path_b(
                 processing_path=ProcessingPath.PATH_B.value,
                 pipeline_version="s2-02-path-b",
             )
-            try:
-                await services.batch_orchestrator.submit_to_gemini(
-                    session,
-                    background_task_id=task.id,
-                    texts=[chunk.text_content for chunk in chunk_rows],
-                    chunk_ids=[chunk.id for chunk in chunk_rows],
-                    display_name=source.title,
-                )
-            except Exception:
-                await session.rollback()
-                reloaded_task = await session.get(BackgroundTask, task.id)
-                if reloaded_task is not None:
-                    task = reloaded_task
-                    task.progress = 50
-                source = await session.get(Source, source.id) or source
-                document = await session.get(type(document), document.id) or document
-                document_version = (
-                    await session.get(type(document_version), document_version.id)
-                    or document_version
-                )
-                chunk_rows = (
-                    await session.scalars(
-                        select(Chunk)
-                        .where(Chunk.id.in_([chunk.id for chunk in chunk_rows]))
-                        .order_by(Chunk.chunk_index.asc())
-                    )
-                ).all()
-            else:
-                task.progress = 60
-                await session.commit()
-                return BatchSubmittedResult(
-                    snapshot_id=snapshot_id,
-                    document_id=document.id,
-                    document_version_id=document_version.id,
-                    chunk_ids=[chunk.id for chunk in chunk_rows],
-                    chunk_count=len(chunk_rows),
-                    token_count_total=persisted_state.token_count_total,
-                    processing_path=ProcessingPath.PATH_B,
-                    pipeline_version="s2-02-path-b",
-                )
+            await services.batch_orchestrator.submit_to_gemini(
+                session,
+                background_task_id=task.id,
+                texts=[chunk.text_content for chunk in chunk_rows],
+                chunk_ids=[chunk.id for chunk in chunk_rows],
+                display_name=source.title,
+            )
+            task.progress = 60
+            await session.commit()
+            return BatchSubmittedResult(
+                snapshot_id=snapshot_id,
+                document_id=document.id,
+                document_version_id=document_version.id,
+                chunk_ids=[chunk.id for chunk in chunk_rows],
+                chunk_count=len(chunk_rows),
+                token_count_total=persisted_state.token_count_total,
+                processing_path=ProcessingPath.PATH_B,
+                pipeline_version="s2-02-path-b",
+            )
 
         vectors = await services.embedding_service.embed_texts(
             [chunk.text_content for chunk in chunk_data],
-            task_type="RETRIEVAL_DOCUMENT",
+            task_type=services.settings.embedding_task_type,
             title=source.title,
         )
         task.progress = 85

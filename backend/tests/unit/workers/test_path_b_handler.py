@@ -88,7 +88,10 @@ def _services(
         snapshot_service=SnapshotService(),
         gemini_content_service=SimpleNamespace(extract_text_content=AsyncMock()),
         tokenizer=SimpleNamespace(count_tokens=lambda _text: 1),
-        settings=SimpleNamespace(batch_embed_chunk_threshold=50),
+        settings=SimpleNamespace(
+            batch_embed_chunk_threshold=50,
+            embedding_task_type="RETRIEVAL_DOCUMENT",
+        ),
         default_language="english",
         path_a_text_threshold_pdf=2000,
         path_a_text_threshold_media=500,
@@ -161,7 +164,7 @@ async def test_handle_path_b_submits_batch_above_threshold(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("committed_data_cleanup")
-async def test_handle_path_b_falls_back_to_interactive_when_batch_submit_fails(
+async def test_handle_path_b_marks_records_failed_when_batch_submit_fails(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     source_id, task_id = await _seed_source_and_task(session_factory)
@@ -177,16 +180,22 @@ async def test_handle_path_b_falls_back_to_interactive_when_batch_submit_fails(
         assert source is not None
         assert task is not None
 
-        result = await handle_path_b(session, task, source, b"markdown-bytes", services)
+        with pytest.raises(RuntimeError, match="batch submit failed"):
+            await handle_path_b(session, task, source, b"markdown-bytes", services)
 
+    async with session_factory() as session:
+        document = await session.scalar(select(Document))
+        version = await session.scalar(select(DocumentVersion))
         chunks = (await session.scalars(select(Chunk).order_by(Chunk.chunk_index.asc()))).all()
 
-    assert isinstance(result, PathBResult)
-    assert result.chunk_count == 51
+    assert document is not None
+    assert document.status is DocumentStatus.FAILED
+    assert version is not None
+    assert version.status is DocumentVersionStatus.FAILED
     assert len(chunks) == 51
-    assert all(chunk.status is ChunkStatus.PENDING for chunk in chunks)
-    services.embedding_service.embed_texts.assert_awaited_once()  # type: ignore[attr-defined]
-    services.qdrant_service.upsert_chunks.assert_awaited_once()  # type: ignore[attr-defined]
+    assert all(chunk.status is ChunkStatus.FAILED for chunk in chunks)
+    services.embedding_service.embed_texts.assert_not_awaited()  # type: ignore[attr-defined]
+    services.qdrant_service.upsert_chunks.assert_not_awaited()  # type: ignore[attr-defined]
     batch_orchestrator.create_batch_job_for_threshold.assert_awaited_once()
     batch_orchestrator.submit_to_gemini.assert_awaited_once()
 

@@ -7,12 +7,15 @@ from datetime import UTC, datetime
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import BackgroundTask, BatchJob, Chunk, DocumentVersion, Source
+from app.db.models import BackgroundTask, BatchJob, Chunk, Document, DocumentVersion, Source
 from app.db.models.enums import (
     BackgroundTaskStatus,
     BatchOperationType,
     BatchStatus,
     ChunkStatus,
+    DocumentStatus,
+    DocumentVersionStatus,
+    SourceStatus,
 )
 from app.services.batch_embedding import (
     BatchEmbeddingClient,
@@ -20,6 +23,7 @@ from app.services.batch_embedding import (
 )
 from app.services.qdrant import QdrantChunkPoint, QdrantService
 from app.workers.tasks.ingestion import _apply_pipeline_success_state
+from app.workers.tasks.pipeline import cleanup_qdrant_chunks
 
 
 class BatchOrchestrator:
@@ -81,7 +85,10 @@ class BatchOrchestrator:
         display_name: str | None = None,
     ) -> BatchJob:
         batch_job = await session.scalar(
-            select(BatchJob).where(BatchJob.background_task_id == background_task_id).limit(1)
+            select(BatchJob)
+            .where(BatchJob.background_task_id == background_task_id)
+            .with_for_update()
+            .limit(1)
         )
         if batch_job is None:
             raise ValueError("Batch job not found for background task")
@@ -90,6 +97,17 @@ class BatchOrchestrator:
             BatchStatus.PROCESSING,
         }:
             return batch_job
+
+        if len(texts) != len(chunk_ids):
+            raise ValueError("Submitted texts and chunk_ids must have the same length")
+
+        metadata = dict(batch_job.result_metadata or {})
+        submitted_chunk_ids = [str(chunk_id) for chunk_id in chunk_ids]
+        stored_chunk_ids = metadata.get("chunk_ids")
+        if stored_chunk_ids is None:
+            metadata["chunk_ids"] = submitted_chunk_ids
+        elif list(stored_chunk_ids) != submitted_chunk_ids:
+            raise ValueError("Submitted chunk_ids do not match stored batch ordering")
 
         try:
             operation_name = await self._batch_client.create_embedding_batch(
@@ -105,13 +123,6 @@ class BatchOrchestrator:
             batch_job.completed_at = datetime.now(UTC)
             await session.commit()
             raise
-        metadata = dict(batch_job.result_metadata or {})
-        submitted_chunk_ids = [str(chunk_id) for chunk_id in chunk_ids]
-        stored_chunk_ids = metadata.get("chunk_ids")
-        if stored_chunk_ids is None:
-            metadata["chunk_ids"] = submitted_chunk_ids
-        elif list(stored_chunk_ids) != submitted_chunk_ids:
-            raise ValueError("Submitted chunk_ids do not match stored batch ordering")
         batch_job.batch_operation_name = operation_name
         batch_job.status = BatchStatus.PROCESSING
         batch_job.request_count = len(chunk_ids)
@@ -159,7 +170,26 @@ class BatchOrchestrator:
             batch_job.batch_operation_name,
             expected_count=batch_job.request_count or batch_job.item_count or 0,
         )
-        await self._apply_results(session, batch_job=batch_job, results=results)
+        try:
+            await self._apply_results(session, batch_job=batch_job, results=results)
+        except Exception as error:
+            await session.rollback()
+            failed_batch_job = await session.get(BatchJob, batch_job.id)
+            if failed_batch_job is not None:
+                failed_batch_job.status = BatchStatus.FAILED
+                failed_batch_job.error_message = str(error) or type(error).__name__
+                failed_batch_job.completed_at = datetime.now(UTC)
+                if failed_batch_job.background_task_id is not None:
+                    failed_task = await session.get(
+                        BackgroundTask,
+                        failed_batch_job.background_task_id,
+                    )
+                    if failed_task is not None:
+                        failed_task.status = BackgroundTaskStatus.FAILED
+                        failed_task.error_message = failed_batch_job.error_message
+                        failed_task.completed_at = datetime.now(UTC)
+                await session.commit()
+            raise
         return batch_job
 
     async def _apply_results(self, session: AsyncSession, *, batch_job: BatchJob, results) -> None:
@@ -191,13 +221,20 @@ class BatchOrchestrator:
         document_version_by_id = {
             document_version.id: document_version for document_version in document_versions
         }
+        document_ids = {document_version.document_id for document_version in document_versions}
+        documents = (
+            await session.scalars(select(Document).where(Document.id.in_(document_ids)))
+        ).all()
+        document_by_id = {document.id: document for document in documents}
 
         succeeded_chunk_ids: list[uuid.UUID] = []
+        failed_chunk_ids: list[uuid.UUID] = []
         failed_items: list[dict[str, str]] = []
         qdrant_points: list[QdrantChunkPoint] = []
         for chunk_id, result in zip(chunk_ids, results, strict=True):
             chunk = chunk_by_id[chunk_id]
             if result.embedding is None:
+                failed_chunk_ids.append(chunk_id)
                 failed_items.append(
                     {
                         "chunk_id": str(chunk_id),
@@ -231,11 +268,24 @@ class BatchOrchestrator:
             succeeded_chunk_ids.append(chunk.id)
 
         if qdrant_points:
-            await self._qdrant_service.upsert_chunks(qdrant_points)
+            try:
+                await self._qdrant_service.upsert_chunks(qdrant_points)
+            except Exception:
+                await cleanup_qdrant_chunks(
+                    self._qdrant_service,
+                    [point.chunk_id for point in qdrant_points],
+                )
+                raise
             await session.execute(
                 update(Chunk)
                 .where(Chunk.id.in_(succeeded_chunk_ids))
                 .values(status=ChunkStatus.INDEXED)
+            )
+        if failed_chunk_ids:
+            await session.execute(
+                update(Chunk)
+                .where(Chunk.id.in_(failed_chunk_ids))
+                .values(status=ChunkStatus.FAILED)
             )
 
         batch_job.succeeded_count = len(succeeded_chunk_ids)
@@ -254,24 +304,44 @@ class BatchOrchestrator:
             raise ValueError("Background task not found for batch job")
         if not succeeded_chunk_ids:
             batch_job.status = BatchStatus.FAILED
+            batch_job.error_message = "All Gemini batch items failed"
             task.status = BackgroundTaskStatus.FAILED
             task.error_message = "All Gemini batch items failed"
             task.completed_at = datetime.now(UTC)
+            for source in source_by_id.values():
+                if source.status is not SourceStatus.DELETED:
+                    source.status = SourceStatus.FAILED
+            for document in document_by_id.values():
+                document.status = DocumentStatus.FAILED
+            for document_version in document_version_by_id.values():
+                document_version.status = DocumentVersionStatus.FAILED
             await session.commit()
             return
 
         grouped_chunk_ids: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
+        failed_chunk_ids_by_source: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
         for chunk_id in succeeded_chunk_ids:
             grouped_chunk_ids[chunk_by_id[chunk_id].source_id].append(chunk_id)
+        for chunk_id in failed_chunk_ids:
+            failed_chunk_ids_by_source[chunk_by_id[chunk_id].source_id].append(chunk_id)
 
-        for source_id, source_chunk_ids in grouped_chunk_ids.items():
-            source = source_by_id[source_id]
-            document_version_id = chunk_by_id[source_chunk_ids[0]].document_version_id
+        for source_id, source in source_by_id.items():
+            source_failed_chunk_ids = failed_chunk_ids_by_source.get(source_id, [])
+            source_chunk_ids = grouped_chunk_ids.get(source_id, [])
+            representative_chunk_id = (source_chunk_ids or source_failed_chunk_ids)[0]
+            document_version_id = chunk_by_id[representative_chunk_id].document_version_id
             document_version = document_version_by_id[document_version_id]
+            document = document_by_id[document_version.document_id]
+            if source_failed_chunk_ids:
+                if source.status is not SourceStatus.DELETED:
+                    source.status = SourceStatus.FAILED
+                document.status = DocumentStatus.FAILED
+                document_version.status = DocumentVersionStatus.FAILED
+                continue
             await _apply_pipeline_success_state(
                 session=session,
                 source=source,
-                snapshot_id=chunk_by_id[source_chunk_ids[0]].snapshot_id,
+                snapshot_id=chunk_by_id[representative_chunk_id].snapshot_id,
                 document_id=document_version.document_id,
                 document_version_id=document_version.id,
                 chunk_ids=source_chunk_ids,
@@ -281,7 +351,9 @@ class BatchOrchestrator:
                 embedding_dimensions=self._batch_client.dimensions,
             )
 
-        task.status = BackgroundTaskStatus.COMPLETE
+        task.status = (
+            BackgroundTaskStatus.FAILED if failed_items else BackgroundTaskStatus.COMPLETE
+        )
         task.progress = 100
         task.result_metadata = {
             **(task.result_metadata or {}),
@@ -291,7 +363,11 @@ class BatchOrchestrator:
             "embedding_model": self._batch_client.model,
             "embedding_dimensions": self._batch_client.dimensions,
         }
+        task.error_message = (
+            "Gemini batch completed with failed items" if failed_items else None
+        )
         task.completed_at = datetime.now(UTC)
 
         batch_job.status = BatchStatus.COMPLETE
+        batch_job.error_message = task.error_message
         await session.commit()
