@@ -265,6 +265,7 @@ def chat_app(
     mock_llm_service: SimpleNamespace,
 ) -> FastAPI:
     from app.api.chat import router as chat_router
+    from app.persona.loader import PersonaContext
 
     app = FastAPI()
     app.include_router(chat_router)
@@ -274,6 +275,13 @@ def chat_app(
     app.state.session_factory = session_factory
     app.state.retrieval_service = mock_retrieval_service
     app.state.llm_service = mock_llm_service
+    app.state.persona_context = PersonaContext(
+        identity="Test twin identity",
+        soul="Test twin soul",
+        behavior="Test twin behavior",
+        config_commit_hash="test-commit-sha",
+        config_content_hash="test-content-hash",
+    )
     return app
 
 

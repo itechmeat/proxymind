@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+import structlog.testing
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +18,7 @@ from app.db.models.enums import (
     SnapshotStatus,
 )
 from app.db.models.knowledge import KnowledgeSnapshot
+from app.persona.loader import PersonaContext
 from app.services.chat import ChatService, NoActiveSnapshotError, SessionNotFoundError
 from app.services.llm import LLMError, LLMResponse
 from app.services.prompt import NO_CONTEXT_REFUSAL
@@ -66,6 +68,7 @@ def _chunk(
 def _make_service(
     db_session: AsyncSession,
     *,
+    persona_context: PersonaContext,
     retrieval_result: list[RetrievedChunk] | Exception | None = None,
     llm_result: LLMResponse | Exception | None = None,
     min_retrieved_chunks: int = 1,
@@ -87,9 +90,21 @@ def _make_service(
         snapshot_service=SnapshotService(session=db_session),
         retrieval_service=retrieval_service,
         llm_service=llm_service,
+        persona_context=persona_context,
         min_retrieved_chunks=min_retrieved_chunks,
     )
     return service, retrieval_service, llm_service
+
+
+@pytest.fixture
+def persona_context() -> PersonaContext:
+    return PersonaContext(
+        identity="Test identity",
+        soul="Test soul",
+        behavior="Test behavior",
+        config_commit_hash="test-commit",
+        config_content_hash="test-content-hash",
+    )
 
 
 async def _message_rows(db_session: AsyncSession, session_id: uuid.UUID) -> list[Message]:
@@ -105,9 +120,10 @@ async def _message_rows(db_session: AsyncSession, session_id: uuid.UUID) -> list
 @pytest.mark.asyncio
 async def test_create_session_uses_active_snapshot_when_available(
     db_session: AsyncSession,
+    persona_context: PersonaContext,
 ) -> None:
     active_snapshot = await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
-    service, _, _ = _make_service(db_session)
+    service, _, _ = _make_service(db_session, persona_context=persona_context)
 
     chat_session = await service.create_session(channel=SessionChannel.API)
 
@@ -119,8 +135,9 @@ async def test_create_session_uses_active_snapshot_when_available(
 @pytest.mark.asyncio
 async def test_create_session_leaves_snapshot_unbound_without_active_snapshot(
     db_session: AsyncSession,
+    persona_context: PersonaContext,
 ) -> None:
-    service, _, _ = _make_service(db_session)
+    service, _, _ = _make_service(db_session, persona_context=persona_context)
 
     chat_session = await service.create_session()
 
@@ -131,11 +148,13 @@ async def test_create_session_leaves_snapshot_unbound_without_active_snapshot(
 @pytest.mark.asyncio
 async def test_answer_saves_assistant_response_with_chunks(
     db_session: AsyncSession,
+    persona_context: PersonaContext,
 ) -> None:
     active_snapshot = await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
     source_id = uuid.uuid4()
     service, retrieval_service, llm_service = _make_service(
         db_session,
+        persona_context=persona_context,
         retrieval_result=[_chunk(source_id=source_id)],
         llm_result=LLMResponse(
             content="Grounded answer",
@@ -166,10 +185,12 @@ async def test_answer_saves_assistant_response_with_chunks(
 @pytest.mark.asyncio
 async def test_answer_returns_refusal_without_llm_when_no_chunks(
     db_session: AsyncSession,
+    persona_context: PersonaContext,
 ) -> None:
     active_snapshot = await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
     service, retrieval_service, llm_service = _make_service(
         db_session,
+        persona_context=persona_context,
         retrieval_result=[],
     )
     chat_session = await service.create_session()
@@ -188,8 +209,9 @@ async def test_answer_returns_refusal_without_llm_when_no_chunks(
 @pytest.mark.asyncio
 async def test_answer_raises_when_no_snapshot_is_available(
     db_session: AsyncSession,
+    persona_context: PersonaContext,
 ) -> None:
-    service, _, _ = _make_service(db_session)
+    service, _, _ = _make_service(db_session, persona_context=persona_context)
     chat_session = await service.create_session()
 
     with pytest.raises(NoActiveSnapshotError, match="No active snapshot is available"):
@@ -202,10 +224,12 @@ async def test_answer_raises_when_no_snapshot_is_available(
 @pytest.mark.asyncio
 async def test_answer_persists_failed_assistant_on_llm_error(
     db_session: AsyncSession,
+    persona_context: PersonaContext,
 ) -> None:
     await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
     service, _, _ = _make_service(
         db_session,
+        persona_context=persona_context,
         retrieval_result=[_chunk()],
         llm_result=LLMError("LLM completion failed"),
     )
@@ -225,10 +249,12 @@ async def test_answer_persists_failed_assistant_on_llm_error(
 @pytest.mark.asyncio
 async def test_answer_persists_failed_assistant_on_retrieval_error(
     db_session: AsyncSession,
+    persona_context: PersonaContext,
 ) -> None:
     await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
     service, _, llm_service = _make_service(
         db_session,
+        persona_context=persona_context,
         retrieval_result=RetrievalError("Retrieval failed"),
     )
     chat_session = await service.create_session()
@@ -247,10 +273,12 @@ async def test_answer_persists_failed_assistant_on_retrieval_error(
 @pytest.mark.asyncio
 async def test_answer_preserves_original_error_when_failed_message_persist_fails(
     db_session: AsyncSession,
+    persona_context: PersonaContext,
 ) -> None:
     await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
     service, _, _ = _make_service(
         db_session,
+        persona_context=persona_context,
         retrieval_result=RetrievalError("Retrieval failed"),
     )
     chat_session = await service.create_session()
@@ -276,9 +304,11 @@ async def test_answer_preserves_original_error_when_failed_message_persist_fails
 @pytest.mark.asyncio
 async def test_answer_lazy_binds_snapshot_when_it_appears_later(
     db_session: AsyncSession,
+    persona_context: PersonaContext,
 ) -> None:
     service, _, _ = _make_service(
         db_session,
+        persona_context=persona_context,
         retrieval_result=[_chunk()],
         llm_result=LLMResponse(
             content="Bound answer",
@@ -301,10 +331,12 @@ async def test_answer_lazy_binds_snapshot_when_it_appears_later(
 @pytest.mark.asyncio
 async def test_answer_keeps_bound_snapshot_immutable_after_new_active_snapshot(
     db_session: AsyncSession,
+    persona_context: PersonaContext,
 ) -> None:
     first_snapshot = await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
     service, retrieval_service, _ = _make_service(
         db_session,
+        persona_context=persona_context,
         retrieval_result=[_chunk()],
         llm_result=LLMResponse(
             content="Stable answer",
@@ -337,11 +369,13 @@ async def test_answer_keeps_bound_snapshot_immutable_after_new_active_snapshot(
 @pytest.mark.asyncio
 async def test_answer_deduplicates_source_ids(
     db_session: AsyncSession,
+    persona_context: PersonaContext,
 ) -> None:
     await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
     shared_source_id = uuid.uuid4()
     service, _, _ = _make_service(
         db_session,
+        persona_context=persona_context,
         retrieval_result=[
             _chunk(source_id=shared_source_id, text_content="One"),
             _chunk(source_id=shared_source_id, text_content="Two"),
@@ -363,10 +397,12 @@ async def test_answer_deduplicates_source_ids(
 @pytest.mark.asyncio
 async def test_get_session_returns_history_and_raises_for_missing_session(
     db_session: AsyncSession,
+    persona_context: PersonaContext,
 ) -> None:
     await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
     service, _, _ = _make_service(
         db_session,
+        persona_context=persona_context,
         retrieval_result=[_chunk()],
         llm_result=LLMResponse(
             content="History answer",
@@ -387,3 +423,53 @@ async def test_get_session_returns_history_and_raises_for_missing_session(
 
     with pytest.raises(SessionNotFoundError, match="Session not found"):
         await service.get_session(uuid.uuid7())
+
+
+@pytest.mark.asyncio
+async def test_config_hashes_logged_on_successful_response(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    service, _, _ = _make_service(
+        db_session,
+        persona_context=persona_context,
+        retrieval_result=[_chunk()],
+        llm_result=LLMResponse(
+            content="Grounded answer",
+            model_name="openai/gpt-4o",
+            token_count_prompt=12,
+            token_count_completion=6,
+        ),
+    )
+    chat_session = await service.create_session()
+
+    with structlog.testing.capture_logs() as logs:
+        await service.answer(session_id=chat_session.id, text="Question?")
+
+    completed_logs = [entry for entry in logs if entry.get("event") == "chat.assistant_completed"]
+    assert len(completed_logs) == 1
+    assert completed_logs[0]["config_commit_hash"] == persona_context.config_commit_hash
+    assert completed_logs[0]["config_content_hash"] == persona_context.config_content_hash
+
+
+@pytest.mark.asyncio
+async def test_config_hashes_logged_on_refusal(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    service, _, _ = _make_service(
+        db_session,
+        persona_context=persona_context,
+        retrieval_result=[],
+    )
+    chat_session = await service.create_session()
+
+    with structlog.testing.capture_logs() as logs:
+        await service.answer(session_id=chat_session.id, text="Question?")
+
+    refusal_logs = [entry for entry in logs if entry.get("event") == "chat.refusal_returned"]
+    assert len(refusal_logs) == 1
+    assert refusal_logs[0]["config_commit_hash"] == persona_context.config_commit_hash
+    assert refusal_logs[0]["config_content_hash"] == persona_context.config_content_hash

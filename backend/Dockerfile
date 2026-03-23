@@ -16,6 +16,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM python:3.14-slim-bookworm AS runtime
 
+ARG GIT_COMMIT_SHA="unknown"
+
 WORKDIR /app
 
 COPY --from=builder /root/.local/share/uv /opt/uv
@@ -38,6 +40,7 @@ RUN chmod +x /app/entrypoint.sh \
 
 ENV PATH="/app/.venv/bin:${PATH}"
 ENV VIRTUAL_ENV="/app/.venv"
+ENV GIT_COMMIT_SHA=${GIT_COMMIT_SHA}
 
 USER appuser
 

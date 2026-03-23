@@ -69,13 +69,21 @@ services:
   api:
     build:
       context: ./backend
+      args:
+        GIT_COMMIT_SHA: ${GIT_COMMIT_SHA:-}
     entrypoint:
       - /app/entrypoint.sh
     env_file:
       - .env
       - ./backend/.env
+    environment:
+      PERSONA_DIR: /app/persona
+      CONFIG_DIR: /app/config
     ports:
       - "8000:8000"
+    volumes:
+      - ./persona:/app/persona:ro
+      - ./config:/app/config:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -99,6 +107,8 @@ services:
   worker:
     build:
       context: ./backend
+      args:
+        GIT_COMMIT_SHA: ${GIT_COMMIT_SHA:-}
     command:
       - python
       - -m

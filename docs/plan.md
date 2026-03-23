@@ -107,7 +107,7 @@ Phase outcome: full-featured ingestion pipeline — all formats, hybrid search, 
 
 Phase outcome: full-featured dialog with persona, citations, memory, promotions.
 
-- [ ] **S4-01: Persona loader**
+- [x] **S4-01: Persona loader**
       Read `IDENTITY.md` / `SOUL.md` / `BEHAVIOR.md` from `persona/`. Inject into system prompt. System safety policy (immutable, on top of persona). `config_commit_hash` + `config_content_hash` for audit.
   - **Outcome:** twin responds according to configured persona
   - **Verification:** change SOUL.md → restart → response style changed; system safety policy cannot be bypassed via persona

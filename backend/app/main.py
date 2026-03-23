@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 import structlog
@@ -14,6 +15,7 @@ from app.api.health import router as health_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db import create_database_engine, create_session_factory
+from app.persona import PersonaLoader
 
 
 def _create_embedding_service(settings):
@@ -121,6 +123,11 @@ async def lifespan(app: FastAPI):
         app.state.arq_pool = await create_pool(
             RedisSettings(host=settings.redis_host, port=settings.redis_port)
         )
+        persona_loader = PersonaLoader(
+            persona_dir=Path(settings.persona_dir),
+            config_dir=Path(settings.config_dir),
+        )
+        app.state.persona_context = persona_loader.load()
     except Exception as error:
         logger.error("app.startup_failed", error=str(error))
         await _close_app_resources(app, logger)

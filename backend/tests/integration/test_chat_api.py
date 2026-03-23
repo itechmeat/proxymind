@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import uuid
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -10,6 +13,7 @@ from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
 from app.db.models import Message, Session
 from app.db.models.enums import MessageRole, MessageStatus, SessionChannel, SnapshotStatus
 from app.db.models.knowledge import KnowledgeSnapshot
+from app.persona.safety import SYSTEM_SAFETY_POLICY
 from app.services.llm import LLMResponse
 
 
@@ -234,3 +238,34 @@ async def test_lazy_bind_e2e_create_before_publish_send_after(
         session_row = await session.get(Session, uuid.UUID(session_id))
         assert session_row is not None
         assert session_row.snapshot_id == active_snapshot.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_persona_content_reaches_llm_prompt(
+    chat_client: httpx.AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    mock_llm_service: SimpleNamespace,
+    mock_retrieval_service: SimpleNamespace,
+    sample_retrieved_chunk,
+) -> None:
+    await _create_snapshot(session_factory, status=SnapshotStatus.ACTIVE)
+    mock_retrieval_service.search = AsyncMock(return_value=[sample_retrieved_chunk])
+
+    session_response = await chat_client.post("/api/chat/sessions", json={})
+    session_id = session_response.json()["id"]
+
+    response = await chat_client.post(
+        "/api/chat/messages",
+        json={"session_id": session_id, "text": "Hello"},
+    )
+
+    assert response.status_code == 200
+
+    sent_messages = mock_llm_service.complete.call_args.args[0]
+    system_message = sent_messages[0]["content"]
+
+    assert system_message.startswith(SYSTEM_SAFETY_POLICY)
+    assert "Test twin identity" in system_message
+    assert "Test twin soul" in system_message
+    assert "Test twin behavior" in system_message

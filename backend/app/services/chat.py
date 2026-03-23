@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
 from app.db.models import Message, Session
 from app.db.models.enums import MessageRole, MessageStatus, SessionChannel, SessionStatus
+from app.persona.loader import PersonaContext
 from app.services.llm import LLMService
 from app.services.prompt import NO_CONTEXT_REFUSAL, build_chat_prompt
 from app.services.qdrant import RetrievedChunk
@@ -42,12 +43,14 @@ class ChatService:
         snapshot_service: SnapshotService,
         retrieval_service: RetrievalService,
         llm_service: LLMService,
+        persona_context: PersonaContext,
         min_retrieved_chunks: int,
     ) -> None:
         self._session = session
         self._snapshot_service = snapshot_service
         self._retrieval_service = retrieval_service
         self._llm_service = llm_service
+        self._persona_context = persona_context
         self._min_retrieved_chunks = min_retrieved_chunks
         self._logger = structlog.get_logger(__name__)
 
@@ -125,6 +128,8 @@ class ChatService:
                     snapshot_id=str(snapshot_id),
                     retrieved_chunks_count=len(retrieved_chunks),
                     min_retrieved_chunks=self._min_retrieved_chunks,
+                    config_commit_hash=self._persona_context.config_commit_hash,
+                    config_content_hash=self._persona_context.config_content_hash,
                 )
                 return ChatAnswerResult(
                     assistant_message=assistant_message,
@@ -138,7 +143,7 @@ class ChatService:
                 retrieved_chunks_count=len(retrieved_chunks),
             )
             llm_response = await self._llm_service.complete(
-                build_chat_prompt(text, retrieved_chunks)
+                build_chat_prompt(text, retrieved_chunks, self._persona_context)
             )
             source_ids = self._deduplicate_source_ids(retrieved_chunks)
             assistant_message = await self._persist_message(
@@ -158,6 +163,8 @@ class ChatService:
                 snapshot_id=str(snapshot_id),
                 retrieved_chunks_count=len(retrieved_chunks),
                 model_name=llm_response.model_name,
+                config_commit_hash=self._persona_context.config_commit_hash,
+                config_content_hash=self._persona_context.config_content_hash,
             )
             return ChatAnswerResult(
                 assistant_message=assistant_message,
