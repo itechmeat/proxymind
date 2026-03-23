@@ -254,17 +254,25 @@ async def test_lifespan_picks_up_changed_persona_on_restart(
     settings.persona_dir = str(persona_dir)
     settings.config_dir = str(config_dir)
 
-    resources = _make_resource_bundle()
+    (
+        db_engine,
+        redis_client,
+        http_client,
+        storage_http_client,
+        qdrant_service,
+        storage_service,
+        create_pool,
+    ) = _make_resource_bundle()
     _patch_lifespan_dependencies(
         monkeypatch,
         settings,
-        db_engine=resources[0],
-        redis_client=resources[1],
-        http_client=resources[2],
-        storage_http_client=resources[3],
-        qdrant_service=resources[4],
-        storage_service=resources[5],
-        create_pool=resources[6],
+        db_engine=db_engine,
+        redis_client=redis_client,
+        http_client=http_client,
+        storage_http_client=storage_http_client,
+        qdrant_service=qdrant_service,
+        storage_service=storage_service,
+        create_pool=create_pool,
     )
 
     first_app = FastAPI()
@@ -274,17 +282,25 @@ async def test_lifespan_picks_up_changed_persona_on_restart(
 
     (persona_dir / "SOUL.md").write_text("Updated soul after edit", encoding="utf-8")
 
-    resources = _make_resource_bundle()
+    (
+        db_engine,
+        redis_client,
+        http_client,
+        storage_http_client,
+        qdrant_service,
+        storage_service,
+        create_pool,
+    ) = _make_resource_bundle()
     _patch_lifespan_dependencies(
         monkeypatch,
         settings,
-        db_engine=resources[0],
-        redis_client=resources[1],
-        http_client=resources[2],
-        storage_http_client=resources[3],
-        qdrant_service=resources[4],
-        storage_service=resources[5],
-        create_pool=resources[6],
+        db_engine=db_engine,
+        redis_client=redis_client,
+        http_client=http_client,
+        storage_http_client=storage_http_client,
+        qdrant_service=qdrant_service,
+        storage_service=storage_service,
+        create_pool=create_pool,
     )
 
     second_app = FastAPI()

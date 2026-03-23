@@ -15,35 +15,38 @@
 ## File Structure
 
 ### New files
-| File | Responsibility |
-|------|---------------|
-| `backend/app/persona/__init__.py` | Package init, re-exports `PersonaContext`, `PersonaLoader` |
-| `backend/app/persona/safety.py` | `SYSTEM_SAFETY_POLICY` constant |
-| `backend/app/persona/loader.py` | `PersonaLoader` class, `PersonaContext` dataclass |
-| `backend/tests/unit/test_persona_loader.py` | Unit tests for PersonaLoader |
-| `backend/tests/unit/test_persona_safety.py` | Unit tests for safety policy constant |
+
+| File                                        | Responsibility                                             |
+| ------------------------------------------- | ---------------------------------------------------------- |
+| `backend/app/persona/__init__.py`           | Package init, re-exports `PersonaContext`, `PersonaLoader` |
+| `backend/app/persona/safety.py`             | `SYSTEM_SAFETY_POLICY` constant                            |
+| `backend/app/persona/loader.py`             | `PersonaLoader` class, `PersonaContext` dataclass          |
+| `backend/tests/unit/test_persona_loader.py` | Unit tests for PersonaLoader                               |
+| `backend/tests/unit/test_persona_safety.py` | Unit tests for safety policy constant                      |
 
 ### Modified files
-| File | What changes |
-|------|-------------|
-| `backend/app/core/config.py` | Add `persona_dir` and `config_dir` settings with defaults |
-| `backend/app/services/prompt.py` | `build_chat_prompt` gets `persona` param; old `SYSTEM_PROMPT` removed |
-| `backend/app/services/__init__.py` | Remove `SYSTEM_PROMPT` from `_EXPORTS` and `__all__` |
-| `backend/tests/unit/test_prompt_builder.py` | All tests updated for new `persona` param |
-| `backend/app/services/chat.py` | `ChatService` receives and passes `PersonaContext`; hash logging on ALL response paths |
-| `backend/tests/unit/test_chat_service.py` | Tests updated to provide `PersonaContext` |
-| `backend/app/api/dependencies.py` | New `get_persona_context` dependency |
-| `backend/app/api/chat.py` | Chat endpoint passes persona through DI |
-| `backend/app/main.py` | Lifespan loads persona at startup |
-| `backend/tests/conftest.py` | `chat_app` fixture provides `persona_context` in `app.state` |
-| `docker-compose.yml` | Volume mounts for `persona/` and `config/` (API only), env vars, GIT_COMMIT_SHA build-arg |
-| `backend/Dockerfile` | Accept `GIT_COMMIT_SHA` build-arg, expose as env var |
+
+| File                                        | What changes                                                                              |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `backend/app/core/config.py`                | Add `persona_dir` and `config_dir` settings with defaults                                 |
+| `backend/app/services/prompt.py`            | `build_chat_prompt` gets `persona` param; old `SYSTEM_PROMPT` removed                     |
+| `backend/app/services/__init__.py`          | Remove `SYSTEM_PROMPT` from `_EXPORTS` and `__all__`                                      |
+| `backend/tests/unit/test_prompt_builder.py` | All tests updated for new `persona` param                                                 |
+| `backend/app/services/chat.py`              | `ChatService` receives and passes `PersonaContext`; hash logging on ALL response paths    |
+| `backend/tests/unit/test_chat_service.py`   | Tests updated to provide `PersonaContext`                                                 |
+| `backend/app/api/dependencies.py`           | New `get_persona_context` dependency                                                      |
+| `backend/app/api/chat.py`                   | Chat endpoint passes persona through DI                                                   |
+| `backend/app/main.py`                       | Lifespan loads persona at startup                                                         |
+| `backend/tests/conftest.py`                 | `chat_app` fixture provides `persona_context` in `app.state`                              |
+| `docker-compose.yml`                        | Volume mounts for `persona/` and `config/` (API only), env vars, GIT_COMMIT_SHA build-arg |
+| `backend/Dockerfile`                        | Accept `GIT_COMMIT_SHA` build-arg, expose as env var                                      |
 
 ---
 
 ### Task 1: System Safety Policy constant
 
 **Files:**
+
 - Create: `backend/app/persona/__init__.py`
 - Create: `backend/app/persona/safety.py`
 - Create: `backend/tests/unit/test_persona_safety.py`
@@ -123,7 +126,7 @@ Expected: 3 PASSED
 
 - [ ] **Step 5: Commit**
 
-```
+```text
 feat(persona): add system safety policy constant (S4-01)
 ```
 
@@ -132,6 +135,7 @@ feat(persona): add system safety policy constant (S4-01)
 ### Task 2: PersonaContext dataclass and PersonaLoader
 
 **Files:**
+
 - Create: `backend/app/persona/loader.py`
 - Create: `backend/tests/unit/test_persona_loader.py`
 - Modify: `backend/app/persona/__init__.py`
@@ -457,7 +461,7 @@ Expected: all PASSED
 
 - [ ] **Step 6: Commit**
 
-```
+```text
 feat(persona): add PersonaLoader and PersonaContext (S4-01)
 ```
 
@@ -466,6 +470,7 @@ feat(persona): add PersonaLoader and PersonaContext (S4-01)
 ### Task 3: Update prompt builder to accept PersonaContext
 
 **Files:**
+
 - Modify: `backend/app/services/prompt.py`
 - Modify: `backend/app/services/__init__.py` (remove `SYSTEM_PROMPT` from exports)
 - Modify: `backend/tests/unit/test_prompt_builder.py`
@@ -641,9 +646,10 @@ def build_chat_prompt(
     ]
 ```
 
-- [ ] **Step 4: Remove SYSTEM_PROMPT from services __init__.py**
+- [ ] **Step 4: Remove SYSTEM_PROMPT from services **init**.py**
 
 In `backend/app/services/__init__.py`:
+
 1. Remove `"SYSTEM_PROMPT": ("app.services.prompt", "SYSTEM_PROMPT"),` from `_EXPORTS` dict
 2. Remove `"SYSTEM_PROMPT",` from `__all__` list
 
@@ -654,7 +660,7 @@ Expected: all PASSED
 
 - [ ] **Step 6: Commit**
 
-```
+```text
 feat(persona): inject persona into system prompt via build_chat_prompt (S4-01)
 ```
 
@@ -663,6 +669,7 @@ feat(persona): inject persona into system prompt via build_chat_prompt (S4-01)
 ### Task 4: Update ChatService to pass PersonaContext
 
 **Files:**
+
 - Modify: `backend/app/services/chat.py`
 - Modify: `backend/tests/unit/test_chat_service.py`
 
@@ -794,7 +801,7 @@ Expected: all PASSED
 
 - [ ] **Step 4: Commit**
 
-```
+```text
 feat(persona): wire PersonaContext through ChatService (S4-01)
 ```
 
@@ -803,6 +810,7 @@ feat(persona): wire PersonaContext through ChatService (S4-01)
 ### Task 5: Update DI layer and chat API
 
 **Files:**
+
 - Modify: `backend/app/api/dependencies.py`
 - Modify: `backend/app/api/chat.py` (no changes needed if DI wires it through)
 - Modify: `backend/tests/conftest.py`
@@ -818,6 +826,7 @@ In `backend/app/api/dependencies.py`:
        return request.app.state.persona_context
    ```
 3. Update `get_chat_service` to inject persona:
+
    ```python
    def get_chat_service(
        request: Request,
@@ -878,7 +887,7 @@ Expected: all PASSED
 
 - [ ] **Step 4: Commit**
 
-```
+```text
 feat(persona): wire PersonaContext through DI and chat API (S4-01)
 ```
 
@@ -887,6 +896,7 @@ feat(persona): wire PersonaContext through DI and chat API (S4-01)
 ### Task 6: Add persona/config path settings and load in lifespan
 
 **Files:**
+
 - Modify: `backend/app/core/config.py`
 - Modify: `backend/app/main.py`
 
@@ -922,7 +932,7 @@ In `backend/app/main.py`:
 - [ ] **Step 3: Run existing app startup test**
 
 Run: `cd backend && python -m pytest tests/unit/test_app_main.py -v`
-Expected: PASS — the test fails at `ensure_collection` (line 74 of `test_app_main.py`) which is well before persona loading, so `PersonaLoader` is never reached in this test.
+Expected: FAIL at `ensure_collection` (line 74 of `test_app_main.py`), which occurs before persona loading, so `PersonaLoader` is not reached in this test.
 
 - [ ] **Step 4: Run full unit test suite**
 
@@ -931,7 +941,7 @@ Expected: all PASSED
 
 - [ ] **Step 5: Commit**
 
-```
+```text
 feat(persona): add configurable persona/config paths, load at startup (S4-01)
 ```
 
@@ -940,6 +950,7 @@ feat(persona): add configurable persona/config paths, load at startup (S4-01)
 ### Task 7: Docker and Dockerfile changes for persona
 
 **Files:**
+
 - Modify: `docker-compose.yml`
 - Modify: `backend/Dockerfile`
 
@@ -950,12 +961,12 @@ Worker does NOT get persona volumes or env vars in S4-01 — it does not use Per
 In `docker-compose.yml`, add to the `api` service:
 
 ```yaml
-    volumes:
-      - ./persona:/app/persona:ro
-      - ./config:/app/config:ro
-    environment:
-      PERSONA_DIR: /app/persona
-      CONFIG_DIR: /app/config
+volumes:
+  - ./persona:/app/persona:ro
+  - ./config:/app/config:ro
+environment:
+  PERSONA_DIR: /app/persona
+  CONFIG_DIR: /app/config
 ```
 
 - [ ] **Step 2: Add GIT_COMMIT_SHA build-arg**
@@ -963,21 +974,21 @@ In `docker-compose.yml`, add to the `api` service:
 In `docker-compose.yml`, update the `api` service `build` section:
 
 ```yaml
-  api:
-    build:
-      context: ./backend
-      args:
-        GIT_COMMIT_SHA: ${GIT_COMMIT_SHA:-}
+api:
+  build:
+    context: ./backend
+    args:
+      GIT_COMMIT_SHA: ${GIT_COMMIT_SHA:-}
 ```
 
 Do the same for `worker` (it shares the same image, so the build-arg should be consistent):
 
 ```yaml
-  worker:
-    build:
-      context: ./backend
-      args:
-        GIT_COMMIT_SHA: ${GIT_COMMIT_SHA:-}
+worker:
+  build:
+    context: ./backend
+    args:
+      GIT_COMMIT_SHA: ${GIT_COMMIT_SHA:-}
 ```
 
 This reads `GIT_COMMIT_SHA` from the host environment at build time.
@@ -1012,7 +1023,7 @@ Expected: exits 0 with no errors
 
 - [ ] **Step 5: Commit**
 
-```
+```text
 feat(persona): Docker persona mounts and GIT_COMMIT_SHA build-arg (S4-01)
 ```
 
@@ -1021,6 +1032,7 @@ feat(persona): Docker persona mounts and GIT_COMMIT_SHA build-arg (S4-01)
 ### Task 8: Lifespan persona loading test
 
 **Files:**
+
 - Modify: `backend/tests/unit/test_app_main.py`
 
 The existing `test_app_main.py` tests only the failure path where startup crashes before persona loading is reached. We need a test that verifies the happy-path: persona loads successfully and `app.state.persona_context` is populated.
@@ -1152,9 +1164,9 @@ async def test_lifespan_picks_up_changed_persona_on_restart(
 Run: `cd backend && python -m pytest tests/unit/test_app_main.py -v`
 Expected: all PASSED (including the new test)
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
-```
+```text
 test(persona): add lifespan persona loading happy-path test (S4-01)
 ```
 
@@ -1163,6 +1175,7 @@ test(persona): add lifespan persona loading happy-path test (S4-01)
 ### Task 9: End-to-end persona-in-prompt test and final verification
 
 **Files:**
+
 - Modify: `backend/tests/integration/test_chat_api.py`
 
 The existing integration tests use `chat_app` with `mock_llm_service`. After Task 5, `chat_app` fixture provides `persona_context` in `app.state`. We need a test that proves the full chain: persona from app.state → DI → ChatService → build_chat_prompt → LLM call with persona-informed system message.
@@ -1230,7 +1243,7 @@ Expected: no errors
 
 - [ ] **Step 5: Final commit (if any fixes needed)**
 
-```
+```text
 test(persona): add end-to-end persona-in-prompt verification (S4-01)
 ```
 

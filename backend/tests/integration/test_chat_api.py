@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -250,7 +249,7 @@ async def test_persona_content_reaches_llm_prompt(
     sample_retrieved_chunk,
 ) -> None:
     await _create_snapshot(session_factory, status=SnapshotStatus.ACTIVE)
-    mock_retrieval_service.search = AsyncMock(return_value=[sample_retrieved_chunk])
+    mock_retrieval_service.search.return_value = [sample_retrieved_chunk]
 
     session_response = await chat_client.post("/api/chat/sessions", json={})
     session_id = session_response.json()["id"]

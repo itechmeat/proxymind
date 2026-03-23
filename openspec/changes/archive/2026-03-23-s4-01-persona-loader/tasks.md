@@ -2,6 +2,15 @@
 
 No existing `TODO(S4-01)` stubs found in the codebase. Nothing to resolve.
 
+## Archived Note
+
+Tasks `4.3`, `5.3`, `6.5`, `8.2`, and `8.3` remain unchecked because repeated `pytest`
+runs for the `ChatService`, lifespan, and integration paths were interrupted by an
+external `KeyboardInterrupt` in the agent runtime before test assertions completed.
+The archive still includes the corresponding implementation changes: injected
+`get_persona_context` / updated `get_chat_service` in DI and `PersonaContext` wiring in
+the `chat_app` fixture.
+
 ## 1. System Safety Policy
 
 - [x] 1.1 Create `backend/app/persona/__init__.py` package with re-exports
