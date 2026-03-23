@@ -1,19 +1,28 @@
 from __future__ import annotations
 
+import json
 import uuid
 from types import SimpleNamespace
 
 import httpx
 import pytest
+from httpx_sse import aconnect_sse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
 from app.db.models import Message, Session
-from app.db.models.enums import MessageRole, MessageStatus, SessionChannel, SnapshotStatus
+from app.db.models.enums import MessageRole, SessionChannel, SnapshotStatus
 from app.db.models.knowledge import KnowledgeSnapshot
 from app.persona.safety import SYSTEM_SAFETY_POLICY
-from app.services.llm import LLMResponse
+
+
+async def _collect_sse_events(
+    client: httpx.AsyncClient,
+    payload: dict[str, str],
+) -> list[object]:
+    async with aconnect_sse(client, "POST", "/api/chat/messages", json=payload) as event_source:
+        return [event async for event in event_source.aiter_sse()]
 
 
 async def _create_snapshot(
@@ -68,28 +77,23 @@ async def test_send_message_returns_assistant_response(
 ) -> None:
     active_snapshot = await _create_snapshot(session_factory, status=SnapshotStatus.ACTIVE)
     mock_retrieval_service.search.return_value = [sample_retrieved_chunk]
-    mock_llm_service.complete.return_value = LLMResponse(
-        content="Grounded answer",
-        model_name="openai/gpt-4o",
-        token_count_prompt=12,
-        token_count_completion=6,
-    )
-
     session_response = await chat_client.post("/api/chat/sessions", json={})
     session_id = session_response.json()["id"]
 
-    response = await chat_client.post(
-        "/api/chat/messages",
-        json={"session_id": session_id, "text": "What does it say?"},
+    events = await _collect_sse_events(
+        chat_client,
+        {"session_id": session_id, "text": "What does it say?"},
     )
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["role"] == MessageRole.ASSISTANT.value
-    assert body["content"] == "Grounded answer"
-    assert body["status"] == MessageStatus.COMPLETE.value
-    assert body["model_name"] == "openai/gpt-4o"
-    assert body["retrieved_chunks_count"] == 1
+    assert events[0].event == "meta"
+    assert [json.loads(event.data)["content"] for event in events if event.event == "token"] == [
+        "Assistant",
+        " answer",
+    ]
+    assert events[-1].event == "done"
+    done = json.loads(events[-1].data)
+    assert done["model_name"] == "openai/gpt-4o"
+    assert done["retrieved_chunks_count"] == 1
 
     async with session_factory() as session:
         session_row = await session.get(Session, uuid.UUID(session_id))
@@ -168,18 +172,11 @@ async def test_get_session_returns_history(
 ) -> None:
     await _create_snapshot(session_factory, status=SnapshotStatus.ACTIVE)
     mock_retrieval_service.search.return_value = [sample_retrieved_chunk]
-    mock_llm_service.complete.return_value = LLMResponse(
-        content="Grounded answer",
-        model_name="openai/gpt-4o",
-        token_count_prompt=12,
-        token_count_completion=6,
-    )
-
     session_response = await chat_client.post("/api/chat/sessions", json={})
     session_id = session_response.json()["id"]
-    await chat_client.post(
-        "/api/chat/messages",
-        json={"session_id": session_id, "text": "What does it say?"},
+    await _collect_sse_events(
+        chat_client,
+        {"session_id": session_id, "text": "What does it say?"},
     )
 
     response = await chat_client.get(f"/api/chat/sessions/{session_id}")
@@ -219,19 +216,12 @@ async def test_lazy_bind_e2e_create_before_publish_send_after(
 
     active_snapshot = await _create_snapshot(session_factory, status=SnapshotStatus.ACTIVE)
     mock_retrieval_service.search.return_value = [sample_retrieved_chunk]
-    mock_llm_service.complete.return_value = LLMResponse(
-        content="Bound answer",
-        model_name="openai/gpt-4o",
-        token_count_prompt=12,
-        token_count_completion=6,
+    events = await _collect_sse_events(
+        chat_client,
+        {"session_id": session_id, "text": "What does it say?"},
     )
 
-    response = await chat_client.post(
-        "/api/chat/messages",
-        json={"session_id": session_id, "text": "What does it say?"},
-    )
-
-    assert response.status_code == 200
+    assert events[0].event == "meta"
 
     async with session_factory() as session:
         session_row = await session.get(Session, uuid.UUID(session_id))
@@ -254,14 +244,14 @@ async def test_persona_content_reaches_llm_prompt(
     session_response = await chat_client.post("/api/chat/sessions", json={})
     session_id = session_response.json()["id"]
 
-    response = await chat_client.post(
-        "/api/chat/messages",
-        json={"session_id": session_id, "text": "Hello"},
+    events = await _collect_sse_events(
+        chat_client,
+        {"session_id": session_id, "text": "Hello"},
     )
 
-    assert response.status_code == 200
+    assert events[0].event == "meta"
 
-    sent_messages = mock_llm_service.complete.call_args.args[0]
+    sent_messages = mock_llm_service.stream.call_args.args[0]
     system_message = sent_messages[0]["content"]
 
     assert system_message.startswith(SYSTEM_SAFETY_POLICY)

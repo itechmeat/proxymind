@@ -113,7 +113,7 @@ Phase outcome: full-featured dialog with persona, citations, memory, promotions.
   - **Verification:** change SOUL.md → restart → response style changed; system safety policy cannot be bypassed via persona
   - Tasks: file reader, prompt injection, system safety prompt, hash computation
 
-- [ ] **S4-02: SSE streaming**
+- [x] **S4-02: SSE streaming**
       Switch `POST /api/chat/messages` to SSE streaming. Message state machine: received → streaming → complete/partial/failed. Idempotency key. Persist user + assistant messages in PG.
   - **Outcome:** responses stream in real time
   - **Verification:** send message → SSE token stream → response saved; disconnect → partial; retry → idempotent result

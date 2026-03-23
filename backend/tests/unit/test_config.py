@@ -62,3 +62,18 @@ def test_batch_poll_interval_must_divide_minute() -> None:
         match="BATCH_POLL_INTERVAL_SECONDS must evenly divide 60",
     ):
         Settings(**_base_settings(), batch_poll_interval_seconds=45)
+
+
+def test_sse_settings_have_defaults() -> None:
+    settings = Settings(**_base_settings())
+
+    assert settings.sse_heartbeat_interval_seconds == 15
+    assert settings.sse_inter_token_timeout_seconds == 30
+
+
+def test_sse_settings_reject_non_positive_values() -> None:
+    with pytest.raises(ValidationError):
+        Settings(**_base_settings(), sse_heartbeat_interval_seconds=0)
+
+    with pytest.raises(ValidationError):
+        Settings(**_base_settings(), sse_inter_token_timeout_seconds=0)

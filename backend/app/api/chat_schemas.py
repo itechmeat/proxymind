@@ -32,6 +32,7 @@ class SessionResponse(BaseModel):
 class SendMessageRequest(BaseModel):
     session_id: uuid.UUID
     text: str = Field(min_length=1)
+    idempotency_key: str | None = None
 
     @field_validator("text", mode="before")
     @classmethod

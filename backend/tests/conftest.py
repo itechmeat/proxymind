@@ -226,7 +226,16 @@ def mock_retrieval_service() -> SimpleNamespace:
 
 @pytest.fixture
 def mock_llm_service() -> SimpleNamespace:
-    from app.services.llm import LLMResponse
+    from app.services.llm import LLMResponse, LLMStreamEnd, LLMToken
+
+    async def _fake_stream(*args, **kwargs):
+        yield LLMToken(content="Assistant")
+        yield LLMToken(content=" answer")
+        yield LLMStreamEnd(
+            model_name="openai/gpt-4o",
+            token_count_prompt=10,
+            token_count_completion=5,
+        )
 
     return SimpleNamespace(
         complete=AsyncMock(
@@ -236,7 +245,8 @@ def mock_llm_service() -> SimpleNamespace:
                 token_count_prompt=10,
                 token_count_completion=5,
             )
-        )
+        ),
+        stream=AsyncMock(side_effect=_fake_stream),
     )
 
 
@@ -271,6 +281,8 @@ def chat_app(
     app.include_router(chat_router)
     app.state.settings = SimpleNamespace(
         min_retrieved_chunks=1,
+        sse_heartbeat_interval_seconds=15,
+        sse_inter_token_timeout_seconds=30,
     )
     app.state.session_factory = session_factory
     app.state.retrieval_service = mock_retrieval_service

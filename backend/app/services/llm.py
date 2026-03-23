@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,6 +21,21 @@ class LLMResponse:
     model_name: str | None
     token_count_prompt: int | None
     token_count_completion: int | None
+
+
+@dataclass(slots=True, frozen=True)
+class LLMToken:
+    content: str
+
+
+@dataclass(slots=True, frozen=True)
+class LLMStreamEnd:
+    model_name: str | None
+    token_count_prompt: int | None
+    token_count_completion: int | None
+
+
+LLMStreamEvent = LLMToken | LLMStreamEnd
 
 
 class LLMService:
@@ -75,4 +90,60 @@ class LLMService:
             model_name=getattr(response, "model", None),
             token_count_prompt=getattr(usage, "prompt_tokens", None),
             token_count_completion=getattr(usage, "completion_tokens", None),
+        )
+
+    async def stream(
+        self,
+        messages: list[ChatMessage],
+        *,
+        temperature: float | None = None,
+    ) -> AsyncIterator[LLMStreamEvent]:
+        try:
+            response = await self._completion_func(
+                model=self._model,
+                messages=messages,
+                temperature=self._temperature if temperature is None else temperature,
+                api_key=self._api_key,
+                base_url=self._api_base,
+                stream=True,
+                stream_options={"include_usage": True},
+            )
+        except Exception as error:
+            self._logger.error("llm.stream_init_failed", model=self._model, error=str(error))
+            raise LLMError("LLM streaming failed") from error
+
+        model_name: str | None = None
+        token_count_prompt: int | None = None
+        token_count_completion: int | None = None
+        emitted_token = False
+
+        try:
+            async for chunk in response:
+                choices = getattr(chunk, "choices", None)
+                delta = getattr(choices[0], "delta", None) if choices else None
+                delta_content = getattr(delta, "content", None)
+                if isinstance(delta_content, str) and delta_content:
+                    emitted_token = True
+                    yield LLMToken(content=delta_content)
+
+                usage = getattr(chunk, "usage", None)
+                if usage is not None:
+                    token_count_prompt = getattr(usage, "prompt_tokens", None)
+                    token_count_completion = getattr(usage, "completion_tokens", None)
+
+                chunk_model = getattr(chunk, "model", None)
+                if chunk_model is not None:
+                    model_name = chunk_model
+        except Exception as error:
+            self._logger.error("llm.stream_read_failed", model=self._model, error=str(error))
+            raise LLMError("LLM streaming failed") from error
+
+        if not emitted_token:
+            self._logger.error("llm.empty_content", model=self._model)
+            raise LLMError("LLM returned empty content")
+
+        yield LLMStreamEnd(
+            model_name=model_name,
+            token_count_prompt=token_count_prompt,
+            token_count_completion=token_count_completion,
         )

@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     retrieval_top_n: int = Field(default=5, ge=1)
     min_retrieved_chunks: int = Field(default=1, ge=0)
     min_dense_similarity: float | None = Field(default=None, ge=0.0, le=1.0)
+    sse_heartbeat_interval_seconds: int = Field(default=15, ge=1)
+    sse_inter_token_timeout_seconds: int = Field(default=30, ge=1)
     persona_dir: str = Field(default=str(REPO_ROOT / "persona"))
     config_dir: str = Field(default=str(REPO_ROOT / "config"))
 
@@ -70,9 +72,7 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_retrieval_settings(self) -> Settings:
         if self.min_retrieved_chunks > self.retrieval_top_n:
-            raise ValueError(
-                "MIN_RETRIEVED_CHUNKS must be less than or equal to RETRIEVAL_TOP_N"
-            )
+            raise ValueError("MIN_RETRIEVED_CHUNKS must be less than or equal to RETRIEVAL_TOP_N")
         if 60 % self.batch_poll_interval_seconds != 0:
             raise ValueError(
                 "BATCH_POLL_INTERVAL_SECONDS must evenly divide 60 "
