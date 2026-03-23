@@ -18,7 +18,12 @@ from app.db.models.enums import (
     SourceStatus,
     SourceType,
 )
-from app.services.snapshot import SnapshotConflictError, SnapshotService, SnapshotValidationError
+from app.services.snapshot import (
+    SnapshotConflictError,
+    SnapshotNotFoundError,
+    SnapshotService,
+    SnapshotValidationError,
+)
 
 
 async def _create_snapshot(
@@ -47,7 +52,9 @@ async def _create_snapshot(
             published_at=datetime.now(UTC)
             if status in {SnapshotStatus.PUBLISHED, SnapshotStatus.ACTIVE}
             else None,
-            activated_at=activated_at if status is SnapshotStatus.ACTIVE else None,
+            activated_at=activated_at
+            if status in {SnapshotStatus.PUBLISHED, SnapshotStatus.ACTIVE}
+            else None,
             archived_at=datetime.now(UTC) if status is SnapshotStatus.ARCHIVED else None,
         )
         session.add(snapshot)
@@ -410,3 +417,144 @@ async def test_ensure_draft_or_rebind_rebinds_published_snapshot_to_new_draft(
         snapshots = (await session.scalars(select(KnowledgeSnapshot))).all()
 
     assert len(snapshots) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_rollback_reactivates_previous_snapshot(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    snapshot_a_id = await _create_snapshot(
+        session_factory,
+        status=SnapshotStatus.PUBLISHED,
+        chunk_statuses=[ChunkStatus.INDEXED],
+        activated_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    snapshot_b_id = await _create_snapshot(
+        session_factory,
+        status=SnapshotStatus.ACTIVE,
+        chunk_statuses=[ChunkStatus.INDEXED],
+        activated_at=datetime(2026, 1, 2, tzinfo=UTC),
+    )
+
+    async with session_factory() as session:
+        rolled_back_from, rolled_back_to = await SnapshotService(session).rollback(snapshot_b_id)
+
+    assert rolled_back_from.id == snapshot_b_id
+    assert rolled_back_from.status is SnapshotStatus.PUBLISHED
+    assert rolled_back_to.id == snapshot_a_id
+    assert rolled_back_to.status is SnapshotStatus.ACTIVE
+
+    async with session_factory() as session:
+        agent = await session.get(Agent, DEFAULT_AGENT_ID)
+        assert agent is not None
+        assert agent.active_snapshot_id == snapshot_a_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_rollback_non_active_raises_conflict(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    snapshot_id = await _create_snapshot(
+        session_factory,
+        status=SnapshotStatus.PUBLISHED,
+        chunk_statuses=[ChunkStatus.INDEXED],
+    )
+
+    async with session_factory() as session:
+        with pytest.raises(SnapshotConflictError, match="Only the active snapshot"):
+            await SnapshotService(session).rollback(snapshot_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_rollback_no_previous_raises_conflict(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    snapshot_id = await _create_snapshot(
+        session_factory,
+        status=SnapshotStatus.ACTIVE,
+        chunk_statuses=[ChunkStatus.INDEXED],
+        activated_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+    async with session_factory() as session:
+        with pytest.raises(SnapshotConflictError, match="No previously activated"):
+            await SnapshotService(session).rollback(snapshot_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_rollback_not_found_raises_error(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory() as session:
+        with pytest.raises(SnapshotNotFoundError, match="Snapshot not found"):
+            await SnapshotService(session).rollback(uuid.uuid4())
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_rollback_twice_toggles_between_two_most_recent_snapshots(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    snapshot_a_id = await _create_snapshot(
+        session_factory,
+        status=SnapshotStatus.PUBLISHED,
+        chunk_statuses=[ChunkStatus.INDEXED],
+        activated_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    snapshot_b_id = await _create_snapshot(
+        session_factory,
+        status=SnapshotStatus.ACTIVE,
+        chunk_statuses=[ChunkStatus.INDEXED],
+        activated_at=datetime(2026, 1, 2, tzinfo=UTC),
+    )
+
+    async with session_factory() as session:
+        _, first_target = await SnapshotService(session).rollback(snapshot_b_id)
+    assert first_target.id == snapshot_a_id
+
+    async with session_factory() as session:
+        _, second_target = await SnapshotService(session).rollback(snapshot_a_id)
+        agent = await session.get(Agent, DEFAULT_AGENT_ID)
+        assert agent is not None
+        assert agent.active_snapshot_id == snapshot_b_id
+
+    assert second_target.id == snapshot_b_id
+    snapshot_a = await _get_snapshot(session_factory, snapshot_a_id)
+    snapshot_b = await _get_snapshot(session_factory, snapshot_b_id)
+    assert snapshot_a.status is SnapshotStatus.PUBLISHED
+    assert snapshot_b.status is SnapshotStatus.ACTIVE
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_rollback_selects_target_only_within_locked_snapshot_scope(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    current_scope_target_id = await _create_snapshot(
+        session_factory,
+        status=SnapshotStatus.PUBLISHED,
+        chunk_statuses=[ChunkStatus.INDEXED],
+        activated_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    active_snapshot_id = await _create_snapshot(
+        session_factory,
+        status=SnapshotStatus.ACTIVE,
+        chunk_statuses=[ChunkStatus.INDEXED],
+        activated_at=datetime(2026, 1, 2, tzinfo=UTC),
+    )
+    await _create_snapshot(
+        session_factory,
+        status=SnapshotStatus.PUBLISHED,
+        chunk_statuses=[ChunkStatus.INDEXED],
+        activated_at=datetime(2026, 1, 3, tzinfo=UTC),
+        knowledge_base_id=uuid.uuid7(),
+    )
+
+    async with session_factory() as session:
+        _, target = await SnapshotService(session).rollback(active_snapshot_id)
+
+    assert target.id == current_scope_target_id

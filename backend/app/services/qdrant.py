@@ -56,6 +56,8 @@ class QdrantChunkPoint:
     source_type: SourceType
     language: str | None
     status: ChunkStatus
+    page_count: int | None = None
+    duration_seconds: float | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -143,24 +145,7 @@ class QdrantService:
                     DENSE_VECTOR_NAME: chunk.vector,
                     BM25_VECTOR_NAME: self._build_bm25_document(chunk.text_content),
                 },
-                payload={
-                    "snapshot_id": str(chunk.snapshot_id),
-                    "source_id": str(chunk.source_id),
-                    "chunk_id": str(chunk.chunk_id),
-                    "document_version_id": str(chunk.document_version_id),
-                    "agent_id": str(chunk.agent_id),
-                    "knowledge_base_id": str(chunk.knowledge_base_id),
-                    "text_content": chunk.text_content,
-                    "chunk_index": chunk.chunk_index,
-                    "token_count": chunk.token_count,
-                    "anchor_page": chunk.anchor_page,
-                    "anchor_chapter": chunk.anchor_chapter,
-                    "anchor_section": chunk.anchor_section,
-                    "anchor_timecode": chunk.anchor_timecode,
-                    "source_type": chunk.source_type.value,
-                    "language": chunk.language,
-                    "status": chunk.status.value,
-                },
+                payload=self._build_payload(chunk),
             )
             for chunk in chunks
         ]
@@ -271,6 +256,32 @@ class QdrantService:
 
     async def close(self) -> None:
         await self._client.close()
+
+    @staticmethod
+    def _build_payload(chunk: QdrantChunkPoint) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "snapshot_id": str(chunk.snapshot_id),
+            "source_id": str(chunk.source_id),
+            "chunk_id": str(chunk.chunk_id),
+            "document_version_id": str(chunk.document_version_id),
+            "agent_id": str(chunk.agent_id),
+            "knowledge_base_id": str(chunk.knowledge_base_id),
+            "text_content": chunk.text_content,
+            "chunk_index": chunk.chunk_index,
+            "token_count": chunk.token_count,
+            "anchor_page": chunk.anchor_page,
+            "anchor_chapter": chunk.anchor_chapter,
+            "anchor_section": chunk.anchor_section,
+            "anchor_timecode": chunk.anchor_timecode,
+            "source_type": chunk.source_type.value,
+            "language": chunk.language,
+            "status": chunk.status.value,
+        }
+        if chunk.page_count is not None:
+            payload["page_count"] = chunk.page_count
+        if chunk.duration_seconds is not None:
+            payload["duration_seconds"] = chunk.duration_seconds
+        return payload
 
     @retry(
         retry=retry_if_exception_type((httpx.TransportError, ResponseHandlingException)),

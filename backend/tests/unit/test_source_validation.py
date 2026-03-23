@@ -5,7 +5,12 @@ from pydantic import ValidationError
 
 from app.api.schemas import SourceUploadMetadata
 from app.db.models.enums import SourceType
-from app.services.storage import StorageService, determine_source_type, validate_file_extension
+from app.services.storage import (
+    StorageService,
+    determine_mime_type,
+    determine_source_type,
+    validate_file_extension,
+)
 
 
 def test_generate_object_key_sanitizes_and_formats_values() -> None:
@@ -45,6 +50,12 @@ def test_generate_object_key_truncates_long_filenames() -> None:
         "page.html",
         "page.htm",
         "page.HTML",
+        "photo.png",
+        "photo.JPEG",
+        "photo.jpg",
+        "voice.mp3",
+        "voice.WAV",
+        "clip.mp4",
     ],
 )
 def test_validate_file_extension_accepts_supported_types_case_insensitively(
@@ -54,13 +65,19 @@ def test_validate_file_extension_accepts_supported_types_case_insensitively(
         ".md",
         ".txt",
         ".pdf",
-        ".docx",
-        ".html",
-        ".htm",
+            ".docx",
+            ".html",
+            ".htm",
+            ".png",
+            ".jpeg",
+            ".jpg",
+            ".mp3",
+            ".wav",
+            ".mp4",
     }
 
 
-@pytest.mark.parametrize("filename", ["notes.xlsx", "photo.png", "data.csv", "archive.zip"])
+@pytest.mark.parametrize("filename", ["notes.xlsx", "clip.avi", "data.csv", "archive.zip"])
 def test_validate_file_extension_rejects_unsupported_types(filename: str) -> None:
     with pytest.raises(ValueError, match="Unsupported file format"):
         validate_file_extension(filename)
@@ -77,10 +94,32 @@ def test_validate_file_extension_rejects_unsupported_types(filename: str) -> Non
         ("page.html", SourceType.HTML),
         ("page.htm", SourceType.HTML),
         ("page.HTML", SourceType.HTML),
+        ("photo.png", SourceType.IMAGE),
+        ("photo.JPEG", SourceType.IMAGE),
+        ("photo.jpg", SourceType.IMAGE),
+        ("voice.mp3", SourceType.AUDIO),
+        ("voice.WAV", SourceType.AUDIO),
+        ("clip.mp4", SourceType.VIDEO),
     ],
 )
 def test_determine_source_type_maps_extension(filename: str, expected: SourceType) -> None:
     assert determine_source_type(filename) is expected
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("notes.md", "text/markdown"),
+        ("report.pdf", "application/pdf"),
+        ("photo.PNG", "image/png"),
+        ("photo.jpg", "image/jpeg"),
+        ("voice.mp3", "audio/mpeg"),
+        ("voice.wav", "audio/wav"),
+        ("clip.mp4", "video/mp4"),
+    ],
+)
+def test_determine_mime_type_maps_supported_extension(filename: str, expected: str) -> None:
+    assert determine_mime_type(filename) == expected
 
 
 def test_source_upload_metadata_requires_title() -> None:

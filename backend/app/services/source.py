@@ -21,6 +21,8 @@ from app.db.models.enums import (
 class TaskEnqueuer(Protocol):
     async def enqueue_ingestion(self, task_id: uuid.UUID) -> str: ...
 
+    async def enqueue_batch_embed(self, task_id: uuid.UUID) -> str: ...
+
 
 class SourcePersistenceError(RuntimeError):
     pass
@@ -50,6 +52,7 @@ class SourceService:
         file_path: str,
         file_size_bytes: int,
         mime_type: str | None,
+        skip_embedding: bool = False,
     ) -> SourceTaskBundle:
         source = Source(
             id=source_id,
@@ -72,6 +75,7 @@ class SourceService:
             task_type=BackgroundTaskType.INGESTION,
             status=BackgroundTaskStatus.PENDING,
             source_id=source_id,
+            result_metadata={"skip_embedding": True} if skip_embedding else None,
         )
         self._session.add_all([source, task])
 

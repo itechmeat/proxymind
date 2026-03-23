@@ -111,13 +111,21 @@ def _worker_context(
             if embedding_side_effect is not None
             else AsyncMock(return_value=[[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
         ),
+        embed_file=AsyncMock(return_value=[0.1, 0.2, 0.3]),
     )
     return {
         "session_factory": session_factory,
         "settings": SimpleNamespace(bm25_language="english"),
+        "path_a_text_threshold_pdf": 2000,
+        "path_a_text_threshold_media": 500,
+        "path_a_max_pdf_pages": 6,
+        "path_a_max_audio_duration_sec": 80,
+        "path_a_max_video_duration_sec": 120,
         "storage_service": SimpleNamespace(download=AsyncMock(return_value=b"# ProxyMind")),
         "docling_parser": SimpleNamespace(parse_and_chunk=AsyncMock(return_value=chunk_data)),
         "embedding_service": embedding_service,
+        "gemini_content_service": SimpleNamespace(extract_text_content=AsyncMock()),
+        "tokenizer": SimpleNamespace(count_tokens=lambda text: len(str(text).split())),
         "qdrant_service": SimpleNamespace(
             upsert_chunks=AsyncMock(),
             delete_chunks=AsyncMock(),
@@ -137,13 +145,21 @@ def _real_parser_worker_context(
         embed_texts=AsyncMock(
             side_effect=lambda texts, **kwargs: [[0.1, 0.2, 0.3] for _ in texts]
         ),
+        embed_file=AsyncMock(return_value=[0.1, 0.2, 0.3]),
     )
     return {
         "session_factory": session_factory,
         "settings": SimpleNamespace(bm25_language="english"),
+        "path_a_text_threshold_pdf": 2000,
+        "path_a_text_threshold_media": 500,
+        "path_a_max_pdf_pages": 6,
+        "path_a_max_audio_duration_sec": 80,
+        "path_a_max_video_duration_sec": 120,
         "storage_service": SimpleNamespace(download=AsyncMock(return_value=file_bytes)),
         "docling_parser": DoclingParser(chunk_max_tokens=1024),
         "embedding_service": embedding_service,
+        "gemini_content_service": SimpleNamespace(extract_text_content=AsyncMock()),
+        "tokenizer": SimpleNamespace(count_tokens=lambda text: len(str(text).split())),
         "qdrant_service": SimpleNamespace(
             upsert_chunks=AsyncMock(),
             delete_chunks=AsyncMock(),

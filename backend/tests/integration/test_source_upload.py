@@ -42,14 +42,23 @@ async def _load_source_and_task(
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("committed_data_cleanup")
 @pytest.mark.parametrize(
-    ("filename", "expected_type"),
+    ("filename", "expected_type", "expected_mime_type"),
     [
-        ("doc.md", SourceType.MARKDOWN),
-        ("notes.TXT", SourceType.TXT),
-        ("report.pdf", SourceType.PDF),
-        ("document.docx", SourceType.DOCX),
-        ("page.html", SourceType.HTML),
-        ("page.htm", SourceType.HTML),
+        ("doc.md", SourceType.MARKDOWN, "text/markdown"),
+        ("notes.TXT", SourceType.TXT, "text/plain"),
+        ("report.pdf", SourceType.PDF, "application/pdf"),
+        (
+            "document.docx",
+            SourceType.DOCX,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ),
+        ("page.html", SourceType.HTML, "text/html"),
+        ("page.htm", SourceType.HTML, "text/html"),
+        ("photo.png", SourceType.IMAGE, "image/png"),
+        ("photo.JPG", SourceType.IMAGE, "image/jpeg"),
+        ("clip.mp3", SourceType.AUDIO, "audio/mpeg"),
+        ("clip.wav", SourceType.AUDIO, "audio/wav"),
+        ("movie.mp4", SourceType.VIDEO, "video/mp4"),
     ],
 )
 async def test_upload_endpoint_accepts_supported_formats(
@@ -58,6 +67,7 @@ async def test_upload_endpoint_accepts_supported_formats(
     mock_storage_service: SimpleNamespace,
     filename: str,
     expected_type: SourceType,
+    expected_mime_type: str,
 ) -> None:
     response = await api_client.post(
         "/api/admin/sources",
@@ -76,11 +86,13 @@ async def test_upload_endpoint_accepts_supported_formats(
     assert sources[0].id == uuid.UUID(body["source_id"])
     assert sources[0].agent_id == DEFAULT_AGENT_ID
     assert sources[0].source_type is expected_type
+    assert sources[0].mime_type == expected_mime_type
     assert sources[0].status is SourceStatus.PENDING
     assert tasks[0].source_id == sources[0].id
     assert tasks[0].task_type is BackgroundTaskType.INGESTION
     assert tasks[0].status is BackgroundTaskStatus.PENDING
     mock_storage_service.upload.assert_awaited_once()
+    assert mock_storage_service.upload.await_args.args[2] == expected_mime_type
 
     task_response = await api_client.get(f"/api/admin/tasks/{body['task_id']}")
     assert task_response.status_code == 200
@@ -291,6 +303,11 @@ async def test_upload_worker_and_task_status_round_trip(
         {
             "session_factory": session_factory,
             "settings": SimpleNamespace(bm25_language="english"),
+            "path_a_text_threshold_pdf": 2000,
+            "path_a_text_threshold_media": 500,
+            "path_a_max_pdf_pages": 6,
+            "path_a_max_audio_duration_sec": 80,
+            "path_a_max_video_duration_sec": 120,
             "storage_service": SimpleNamespace(download=AsyncMock(return_value=b"# hello world")),
             "docling_parser": SimpleNamespace(
                 parse_and_chunk=AsyncMock(
@@ -310,7 +327,10 @@ async def test_upload_worker_and_task_status_round_trip(
                 model="gemini-embedding-2-preview",
                 dimensions=3,
                 embed_texts=AsyncMock(return_value=[[0.1, 0.2, 0.3]]),
+                embed_file=AsyncMock(return_value=[0.1, 0.2, 0.3]),
             ),
+            "gemini_content_service": SimpleNamespace(extract_text_content=AsyncMock()),
+            "tokenizer": SimpleNamespace(count_tokens=lambda text: len(str(text).split())),
             "qdrant_service": SimpleNamespace(
                 upsert_chunks=AsyncMock(),
                 delete_chunks=AsyncMock(),

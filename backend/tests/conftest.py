@@ -198,12 +198,22 @@ def admin_app(
         upload_max_file_size_mb=100,
         seaweedfs_sources_path="/sources",
         bm25_language="english",
+        batch_max_items_per_request=1000,
     )
     app.state.session_factory = session_factory
     app.state.storage_service = mock_storage_service
     app.state.arq_pool = mock_arq_pool
+    app.state.embedding_service = SimpleNamespace(
+        model="gemini-embedding-2-preview",
+        dimensions=3,
+        embed_texts=AsyncMock(return_value=[[0.1, 0.2, 0.3]]),
+        embed_file=AsyncMock(return_value=[0.1, 0.2, 0.3]),
+    )
     app.state.qdrant_service = SimpleNamespace(
+        hybrid_search=AsyncMock(return_value=[]),
+        dense_search=AsyncMock(return_value=[]),
         keyword_search=AsyncMock(return_value=[]),
+        delete_chunks=AsyncMock(),
         bm25_language="english",
     )
     return app
