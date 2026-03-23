@@ -8,7 +8,20 @@ import httpx
 
 from app.db.models.enums import SourceType
 
-ALLOWED_SOURCE_EXTENSIONS = (".md", ".txt", ".pdf", ".docx", ".html", ".htm")
+ALLOWED_SOURCE_EXTENSIONS = (
+    ".md",
+    ".txt",
+    ".pdf",
+    ".docx",
+    ".html",
+    ".htm",
+    ".png",
+    ".jpeg",
+    ".jpg",
+    ".mp3",
+    ".wav",
+    ".mp4",
+)
 SOURCE_TYPE_BY_EXTENSION = {
     ".md": SourceType.MARKDOWN,
     ".txt": SourceType.TXT,
@@ -16,6 +29,28 @@ SOURCE_TYPE_BY_EXTENSION = {
     ".docx": SourceType.DOCX,
     ".html": SourceType.HTML,
     ".htm": SourceType.HTML,
+    ".png": SourceType.IMAGE,
+    ".jpeg": SourceType.IMAGE,
+    ".jpg": SourceType.IMAGE,
+    ".mp3": SourceType.AUDIO,
+    ".wav": SourceType.AUDIO,
+    ".mp4": SourceType.VIDEO,
+}
+MIME_TYPE_BY_EXTENSION = {
+    ".md": "text/markdown",
+    ".txt": "text/plain",
+    ".pdf": "application/pdf",
+    ".docx": (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ),
+    ".html": "text/html",
+    ".htm": "text/html",
+    ".png": "image/png",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".mp4": "video/mp4",
 }
 _UNSAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 _MAX_FILENAME_LENGTH = 255
@@ -48,6 +83,11 @@ def validate_file_extension(filename: str) -> str:
 def determine_source_type(filename: str) -> SourceType:
     extension = validate_file_extension(filename)
     return SOURCE_TYPE_BY_EXTENSION[extension]
+
+
+def determine_mime_type(filename: str) -> str:
+    extension = validate_file_extension(filename)
+    return MIME_TYPE_BY_EXTENSION[extension]
 
 
 class StorageService:

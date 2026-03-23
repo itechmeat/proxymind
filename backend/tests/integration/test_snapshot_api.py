@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import UTC, datetime
 
@@ -24,7 +25,9 @@ async def _create_snapshot(
     *,
     status: SnapshotStatus,
     chunk_statuses: list[ChunkStatus] | None = None,
+    chunk_count_override: int | None = None,
     name: str | None = None,
+    activated_at: datetime | None = None,
     knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
 ) -> uuid.UUID:
     snapshot_id = uuid.uuid7()
@@ -37,11 +40,15 @@ async def _create_snapshot(
             knowledge_base_id=knowledge_base_id,
             name=name or f"Snapshot {status.value}",
             status=status,
-            chunk_count=len(chunk_statuses),
+            chunk_count=(
+                chunk_count_override if chunk_count_override is not None else len(chunk_statuses)
+            ),
             published_at=datetime.now(UTC)
             if status in {SnapshotStatus.PUBLISHED, SnapshotStatus.ACTIVE}
             else None,
-            activated_at=datetime.now(UTC) if status is SnapshotStatus.ACTIVE else None,
+            activated_at=activated_at
+            if status in {SnapshotStatus.PUBLISHED, SnapshotStatus.ACTIVE}
+            else None,
             archived_at=datetime.now(UTC) if status is SnapshotStatus.ARCHIVED else None,
         )
         session.add(snapshot)
@@ -290,3 +297,209 @@ async def test_activate_endpoint_returns_409_for_non_published(
     wrong_scope_response = await api_client.post(f"/api/admin/snapshots/{other_scope_id}/activate")
     assert wrong_scope_response.status_code == 404
     assert wrong_scope_response.json()["detail"] == "Snapshot not found"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_rollback_endpoint_returns_200(
+    api_client,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    previous_snapshot_id = await _create_snapshot(
+        session_factory,
+        status=SnapshotStatus.PUBLISHED,
+        chunk_statuses=[ChunkStatus.INDEXED],
+        activated_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    active_snapshot_id = await _create_snapshot(
+        session_factory,
+        status=SnapshotStatus.ACTIVE,
+        chunk_statuses=[ChunkStatus.INDEXED],
+        activated_at=datetime(2026, 1, 2, tzinfo=UTC),
+    )
+
+    response = await api_client.post(f"/api/admin/snapshots/{active_snapshot_id}/rollback")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["rolled_back_from"]["id"] == str(active_snapshot_id)
+    assert body["rolled_back_from"]["name"] == "Snapshot active"
+    assert body["rolled_back_from"]["status"] == "published"
+    assert body["rolled_back_from"]["published_at"] is not None
+    assert body["rolled_back_from"]["activated_at"] is not None
+    assert body["rolled_back_to"]["id"] == str(previous_snapshot_id)
+    assert body["rolled_back_to"]["name"] == "Snapshot published"
+    assert body["rolled_back_to"]["status"] == "active"
+    assert body["rolled_back_to"]["published_at"] is not None
+    assert body["rolled_back_to"]["activated_at"] is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_rollback_endpoint_returns_409_for_non_active(
+    api_client,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    snapshot_id = await _create_snapshot(
+        session_factory,
+        status=SnapshotStatus.PUBLISHED,
+        chunk_statuses=[ChunkStatus.INDEXED],
+        activated_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+    response = await api_client.post(f"/api/admin/snapshots/{snapshot_id}/rollback")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Only the active snapshot can be rolled back"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_rollback_endpoint_returns_409_when_no_previous_snapshot_exists(
+    api_client,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    snapshot_id = await _create_snapshot(
+        session_factory,
+        status=SnapshotStatus.ACTIVE,
+        chunk_statuses=[ChunkStatus.INDEXED],
+        activated_at=datetime(2026, 1, 2, tzinfo=UTC),
+    )
+
+    response = await api_client.post(f"/api/admin/snapshots/{snapshot_id}/rollback")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "No previously activated snapshot available for rollback"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_rollback_endpoint_returns_404_for_unknown_snapshot(api_client) -> None:
+    response = await api_client.post(f"/api/admin/snapshots/{uuid.uuid4()}/rollback")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Snapshot not found"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_rollback_endpoint_serializes_concurrent_requests(
+    api_client,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await _create_snapshot(
+        session_factory,
+        status=SnapshotStatus.PUBLISHED,
+        chunk_statuses=[ChunkStatus.INDEXED],
+        activated_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    active_snapshot_id = await _create_snapshot(
+        session_factory,
+        status=SnapshotStatus.ACTIVE,
+        chunk_statuses=[ChunkStatus.INDEXED],
+        activated_at=datetime(2026, 1, 2, tzinfo=UTC),
+    )
+
+    responses = await asyncio.gather(
+        api_client.post(f"/api/admin/snapshots/{active_snapshot_id}/rollback"),
+        api_client.post(f"/api/admin/snapshots/{active_snapshot_id}/rollback"),
+    )
+
+    status_codes = sorted(response.status_code for response in responses)
+    assert status_codes == [200, 409]
+    assert any(
+        response.json()["detail"] == "Only the active snapshot can be rolled back"
+        for response in responses
+        if response.status_code == 409
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_draft_test_endpoint_returns_422_for_non_draft(
+    api_client,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    snapshot_id = await _create_snapshot(
+        session_factory,
+        status=SnapshotStatus.PUBLISHED,
+        chunk_statuses=[ChunkStatus.INDEXED],
+    )
+
+    response = await api_client.post(
+        f"/api/admin/snapshots/{snapshot_id}/test",
+        json={"query": "test query"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Only draft snapshots can be tested"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_draft_test_endpoint_returns_422_for_empty_draft(
+    api_client,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    snapshot_id = await _create_snapshot(
+        session_factory,
+        status=SnapshotStatus.DRAFT,
+        chunk_statuses=[],
+        chunk_count_override=3,
+    )
+
+    response = await api_client.post(
+        f"/api/admin/snapshots/{snapshot_id}/test",
+        json={"query": "test query"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Draft has no indexed chunks to search"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_draft_test_endpoint_returns_404_for_unknown(api_client) -> None:
+    response = await api_client.post(
+        f"/api/admin/snapshots/{uuid.uuid4()}/test",
+        json={"query": "test query"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Snapshot not found"
+
+
+@pytest.mark.asyncio
+async def test_draft_test_endpoint_rejects_blank_query(api_client) -> None:
+    response = await api_client.post(
+        f"/api/admin/snapshots/{uuid.uuid4()}/test",
+        json={"query": "   "},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["msg"] == "Value error, query must not be empty"
+
+
+@pytest.mark.asyncio
+async def test_draft_test_endpoint_rejects_out_of_range_top_n(api_client) -> None:
+    low_response = await api_client.post(
+        f"/api/admin/snapshots/{uuid.uuid4()}/test",
+        json={"query": "test query", "top_n": 0},
+    )
+    high_response = await api_client.post(
+        f"/api/admin/snapshots/{uuid.uuid4()}/test",
+        json={"query": "test query", "top_n": 101},
+    )
+
+    assert low_response.status_code == 422
+    assert high_response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_draft_test_endpoint_rejects_invalid_mode(api_client) -> None:
+    response = await api_client.post(
+        f"/api/admin/snapshots/{uuid.uuid4()}/test",
+        json={"query": "test query", "mode": "invalid"},
+    )
+
+    assert response.status_code == 422

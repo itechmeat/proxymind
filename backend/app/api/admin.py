@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import (
@@ -15,12 +16,23 @@ from fastapi import (
     status,
 )
 from pydantic import ValidationError
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.batch_schemas import (
+    BatchEmbedRequest,
+    BatchEmbedResponse,
+    BatchJobDetailResponse,
+    BatchJobListResponse,
+    BatchJobResponse,
+)
 from app.api.dependencies import (
+    get_embedding_service,
     get_qdrant_service,
     get_snapshot_service,
     get_source_service,
     get_storage_service,
+    get_task_enqueuer,
 )
 from app.api.schemas import (
     KeywordSearchRequest,
@@ -30,9 +42,30 @@ from app.api.schemas import (
     SourceUploadResponse,
     TaskStatusResponse,
 )
-from app.api.snapshot_schemas import SnapshotResponse
+from app.api.snapshot_schemas import (
+    DraftTestAnchor,
+    DraftTestRequest,
+    DraftTestResponse,
+    DraftTestResult,
+    RetrievalMode,
+    RollbackResponse,
+    RollbackSnapshotResponse,
+    SnapshotResponse,
+)
+from app.api.source_schemas import SourceDeleteResponse
 from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
-from app.db.models.enums import SnapshotStatus
+from app.db.models import BackgroundTask, BatchJob, Chunk, Source
+from app.db.models.enums import (
+    BackgroundTaskStatus,
+    BackgroundTaskType,
+    BatchOperationType,
+    BatchStatus,
+    ChunkStatus,
+    SnapshotStatus,
+    SourceStatus,
+)
+from app.db.session import get_session
+from app.services.embedding import EmbeddingService
 from app.services.qdrant import QdrantService
 from app.services.snapshot import (
     SnapshotConflictError,
@@ -40,8 +73,19 @@ from app.services.snapshot import (
     SnapshotService,
     SnapshotValidationError,
 )
-from app.services.source import SourcePersistenceError, SourceService, TaskEnqueueError
-from app.services.storage import StorageService, determine_source_type, validate_file_extension
+from app.services.source import (
+    SourcePersistenceError,
+    SourceService,
+    TaskEnqueueError,
+    TaskEnqueuer,
+)
+from app.services.source_delete import SourceDeleteService, SourceNotFoundError
+from app.services.storage import (
+    StorageService,
+    determine_mime_type,
+    determine_source_type,
+    validate_file_extension,
+)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 UPLOAD_READ_CHUNK_SIZE = 64 * 1024
@@ -85,6 +129,7 @@ async def upload_source(
     metadata: Annotated[str, Form(...)],
     storage_service: Annotated[StorageService, Depends(get_storage_service)],
     source_service: Annotated[SourceService, Depends(get_source_service)],
+    skip_embedding: Annotated[bool, Query()] = False,
 ) -> SourceUploadResponse:
     # TODO(S7-01): Protect /api/admin/* with Bearer auth before any non-local deployment.
     try:
@@ -100,6 +145,7 @@ async def upload_source(
         try:
             validate_file_extension(filename)
             source_type = determine_source_type(filename)
+            mime_type = determine_mime_type(filename)
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -110,7 +156,7 @@ async def upload_source(
         object_key = storage_service.generate_object_key(DEFAULT_AGENT_ID, source_id, filename)
 
         try:
-            await storage_service.upload(object_key, content, file.content_type)
+            await storage_service.upload(object_key, content, mime_type)
         except Exception as error:
             raise HTTPException(
                 status_code=500,
@@ -124,7 +170,8 @@ async def upload_source(
                 source_type=source_type,
                 file_path=object_key,
                 file_size_bytes=len(content),
-                mime_type=file.content_type,
+                mime_type=mime_type,
+                skip_embedding=skip_embedding,
             )
         except SourcePersistenceError as error:
             await storage_service.delete(object_key)
@@ -146,6 +193,195 @@ async def upload_source(
         status=bundle.task.status.value.lower(),
         file_path=bundle.source.file_path,
         message="Source uploaded and queued for ingestion.",
+    )
+
+
+@router.post(
+    "/batch-embed",
+    response_model=BatchEmbedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_batch_embed_job(
+    request: Request,
+    payload: BatchEmbedRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    task_enqueuer: Annotated[TaskEnqueuer, Depends(get_task_enqueuer)],
+) -> BatchEmbedResponse:
+    source_ids = list(dict.fromkeys(payload.source_ids))
+    source_result = await session.scalars(select(Source).where(Source.id.in_(source_ids)))
+    sources = source_result.all()
+    if len(sources) != len(source_ids):
+        raise HTTPException(status_code=422, detail="All source_ids must exist")
+
+    scoped_agent_ids = {source.agent_id for source in sources}
+    scoped_kb_ids = {source.knowledge_base_id for source in sources}
+    if len(scoped_agent_ids) != 1 or len(scoped_kb_ids) != 1:
+        raise HTTPException(status_code=422, detail="All sources must belong to one scope")
+    if any(source.status is not SourceStatus.READY for source in sources):
+        raise HTTPException(status_code=422, detail="All sources must be READY")
+
+    active_batch = await session.scalar(
+        select(BatchJob)
+        .where(BatchJob.status.in_((BatchStatus.PENDING, BatchStatus.PROCESSING)))
+        .where(BatchJob.source_ids.op("&&")(source_ids))
+        .limit(1)
+    )
+    if active_batch is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Active batch already exists for these sources",
+        )
+
+    chunks = (
+        await session.scalars(
+            select(Chunk)
+            .where(Chunk.source_id.in_(source_ids), Chunk.status == ChunkStatus.PENDING)
+            .order_by(Chunk.source_id.asc(), Chunk.chunk_index.asc())
+        )
+    ).all()
+    if not chunks:
+        raise HTTPException(status_code=422, detail="Sources have no pending chunks")
+
+    snapshot_ids = {chunk.snapshot_id for chunk in chunks}
+    if len(snapshot_ids) != 1:
+        raise HTTPException(status_code=422, detail="Pending chunks must share one snapshot")
+
+    chunk_count = len(chunks)
+    if chunk_count > request.app.state.settings.batch_max_items_per_request:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Batch exceeds batch_max_items_per_request. Split source_ids into smaller groups"
+            ),
+        )
+
+    task = BackgroundTask(
+        id=uuid.uuid7(),
+        agent_id=sources[0].agent_id,
+        task_type=BackgroundTaskType.BATCH_EMBEDDING,
+        status=BackgroundTaskStatus.PENDING,
+        source_id=None,
+        result_metadata={
+            "source_ids": [str(source_id) for source_id in source_ids],
+            "knowledge_base_id": str(sources[0].knowledge_base_id),
+            "snapshot_id": str(next(iter(snapshot_ids))),
+        },
+    )
+    batch_job = BatchJob(
+        id=uuid.uuid7(),
+        agent_id=sources[0].agent_id,
+        knowledge_base_id=sources[0].knowledge_base_id,
+        snapshot_id=next(iter(snapshot_ids)),
+        task_id=str(task.id),
+        source_ids=source_ids,
+        background_task_id=task.id,
+        operation_type=BatchOperationType.EMBEDDING,
+        status=BatchStatus.PENDING,
+        item_count=chunk_count,
+        result_metadata={
+            "chunk_ids": [str(chunk.id) for chunk in chunks],
+        },
+    )
+    session.add_all([task, batch_job])
+    await session.commit()
+
+    try:
+        task.arq_job_id = await task_enqueuer.enqueue_batch_embed(task.id)
+        await session.commit()
+    except Exception as error:
+        await session.rollback()
+        task = await session.get(BackgroundTask, task.id)
+        batch_job = await session.get(BatchJob, batch_job.id)
+        if task is not None:
+            task.status = BackgroundTaskStatus.FAILED
+            task.error_message = f"Failed to enqueue batch embedding task: {error}"
+            task.completed_at = datetime.now(UTC)
+        if batch_job is not None:
+            batch_job.status = BatchStatus.FAILED
+            batch_job.error_message = str(error)
+            batch_job.completed_at = datetime.now(UTC)
+        await session.commit()
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to enqueue batch embedding task",
+        ) from error
+
+    return BatchEmbedResponse(
+        task_id=task.id,
+        batch_job_id=batch_job.id,
+        chunk_count=chunk_count,
+        message="Batch embedding job created",
+    )
+
+
+@router.get("/batch-jobs", response_model=BatchJobListResponse)
+async def list_batch_jobs(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    status_filter: Annotated[BatchStatus | None, Query(alias="status")] = None,
+    operation_type: BatchOperationType | None = None,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> BatchJobListResponse:
+    filters = []
+    if status_filter is not None:
+        filters.append(BatchJob.status == status_filter)
+    if operation_type is not None:
+        filters.append(BatchJob.operation_type == operation_type)
+
+    total = int(
+        await session.scalar(select(func.count()).select_from(BatchJob).where(*filters)) or 0
+    )
+    items = (
+        await session.scalars(
+            select(BatchJob)
+            .where(*filters)
+            .order_by(BatchJob.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+    ).all()
+    return BatchJobListResponse(
+        items=[BatchJobResponse.from_batch_job(item) for item in items],
+        total=total,
+    )
+
+
+@router.get("/batch-jobs/{batch_job_id}", response_model=BatchJobDetailResponse)
+async def get_batch_job_detail(
+    batch_job_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> BatchJobDetailResponse:
+    batch_job = await session.get(BatchJob, batch_job_id)
+    if batch_job is None:
+        raise HTTPException(status_code=404, detail="Batch job not found")
+    return BatchJobDetailResponse.from_batch_job(batch_job)
+
+
+@router.delete("/sources/{source_id}", response_model=SourceDeleteResponse)
+async def delete_source(
+    source_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    qdrant_service: Annotated[QdrantService, Depends(get_qdrant_service)],
+    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
+    knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
+) -> SourceDeleteResponse:
+    service = SourceDeleteService(session, qdrant_service=qdrant_service)
+    try:
+        result = await service.soft_delete(
+            source_id,
+            agent_id=agent_id,
+            knowledge_base_id=knowledge_base_id,
+        )
+    except SourceNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+    return SourceDeleteResponse(
+        id=result.source.id,
+        title=result.source.title,
+        source_type=result.source.source_type,
+        status=result.source.status,
+        deleted_at=result.source.deleted_at,
+        warnings=result.warnings,
     )
 
 
@@ -232,6 +468,135 @@ async def activate_snapshot(
         _raise_snapshot_http_error(error)
 
     return SnapshotResponse.model_validate(snapshot)
+
+
+@router.post("/snapshots/{snapshot_id}/rollback", response_model=RollbackResponse)
+async def rollback_snapshot(
+    snapshot_id: uuid.UUID,
+    snapshot_service: Annotated[SnapshotService, Depends(get_snapshot_service)],
+    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
+    knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
+) -> RollbackResponse:
+    try:
+        rolled_back_from, rolled_back_to = await snapshot_service.rollback(
+            snapshot_id,
+            agent_id=agent_id,
+            knowledge_base_id=knowledge_base_id,
+        )
+    except Exception as error:
+        _raise_snapshot_http_error(error)
+
+    return RollbackResponse(
+        rolled_back_from=RollbackSnapshotResponse.model_validate(rolled_back_from),
+        rolled_back_to=RollbackSnapshotResponse.model_validate(rolled_back_to),
+    )
+
+
+@router.post("/snapshots/{snapshot_id}/test", response_model=DraftTestResponse)
+async def test_draft_snapshot(
+    snapshot_id: uuid.UUID,
+    payload: DraftTestRequest,
+    snapshot_service: Annotated[SnapshotService, Depends(get_snapshot_service)],
+    embedding_service: Annotated[EmbeddingService, Depends(get_embedding_service)],
+    qdrant_service: Annotated[QdrantService, Depends(get_qdrant_service)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
+    knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
+) -> DraftTestResponse:
+    try:
+        snapshot = await snapshot_service.get_snapshot(
+            snapshot_id,
+            agent_id=agent_id,
+            knowledge_base_id=knowledge_base_id,
+        )
+        if snapshot is None:
+            raise SnapshotNotFoundError("Snapshot not found")
+        if snapshot.status is not SnapshotStatus.DRAFT:
+            raise SnapshotValidationError("Only draft snapshots can be tested")
+
+        indexed_count = int(
+            await session.scalar(
+                select(func.count())
+                .select_from(Chunk)
+                .where(
+                    Chunk.snapshot_id == snapshot_id,
+                    Chunk.status == ChunkStatus.INDEXED,
+                )
+            )
+            or 0
+        )
+        if indexed_count == 0:
+            raise SnapshotValidationError("Draft has no indexed chunks to search")
+
+        if payload.mode is RetrievalMode.SPARSE:
+            retrieved_chunks = await qdrant_service.keyword_search(
+                text=payload.query,
+                snapshot_id=snapshot.id,
+                agent_id=agent_id,
+                knowledge_base_id=knowledge_base_id,
+                limit=payload.top_n,
+            )
+        else:
+            embeddings = await embedding_service.embed_texts(
+                [payload.query],
+                task_type="RETRIEVAL_QUERY",
+            )
+            if payload.mode is RetrievalMode.DENSE:
+                retrieved_chunks = await qdrant_service.dense_search(
+                    vector=embeddings[0],
+                    snapshot_id=snapshot.id,
+                    agent_id=agent_id,
+                    knowledge_base_id=knowledge_base_id,
+                    limit=payload.top_n,
+                )
+            else:
+                retrieved_chunks = await qdrant_service.hybrid_search(
+                    text=payload.query,
+                    vector=embeddings[0],
+                    snapshot_id=snapshot.id,
+                    agent_id=agent_id,
+                    knowledge_base_id=knowledge_base_id,
+                    limit=payload.top_n,
+                )
+    except (
+        SnapshotNotFoundError,
+        SnapshotConflictError,
+        SnapshotValidationError,
+    ) as error:
+        _raise_snapshot_http_error(error)
+
+    source_titles: dict[uuid.UUID, str | None] = {}
+    source_ids = {chunk.source_id for chunk in retrieved_chunks}
+    try:
+        if source_ids:
+            source_result = await session.scalars(select(Source).where(Source.id.in_(source_ids)))
+            source_titles = {source.id: source.title for source in source_result.all()}
+    except Exception as error:
+        raise HTTPException(status_code=500, detail="Failed to enrich source titles") from error
+
+    return DraftTestResponse(
+        snapshot_id=snapshot.id,
+        snapshot_name=snapshot.name,
+        query=payload.query,
+        mode=payload.mode,
+        total_chunks_in_draft=indexed_count,
+        results=[
+            DraftTestResult(
+                chunk_id=chunk.chunk_id,
+                source_id=chunk.source_id,
+                source_title=source_titles.get(chunk.source_id),
+                text_content=chunk.text_content[:500],
+                score=chunk.score,
+                anchor=DraftTestAnchor(
+                    page=chunk.anchor_metadata.get("anchor_page"),
+                    chapter=chunk.anchor_metadata.get("anchor_chapter"),
+                    section=chunk.anchor_metadata.get("anchor_section"),
+                    timecode=chunk.anchor_metadata.get("anchor_timecode"),
+                ),
+            )
+            for chunk in retrieved_chunks
+        ],
+    )
 
 
 @router.post("/search/keyword", response_model=KeywordSearchResponse)

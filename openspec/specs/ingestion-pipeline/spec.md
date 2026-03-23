@@ -133,27 +133,107 @@ The existing `StorageService` SHALL provide a `download(object_key: str) -> byte
 
 ### Requirement: Pipeline orchestration in the worker task
 
-The ingestion worker task (`app/workers/tasks/ingestion.py`) SHALL replace the noop handler with a real pipeline that executes these stages in sequence: (1) Download source file from SeaweedFS, (2) Parse and chunk via DoclingParser, (3) Persist draft snapshot + Document + DocumentVersion + Chunk records in PostgreSQL (Tx 1), (4) Generate embeddings via EmbeddingService, (5) Upsert vectors to Qdrant via QdrantService, (6) Finalize statuses and create EmbeddingProfile (Tx 2). The worker task IS the orchestrator; there SHALL NOT be a separate Pipeline abstraction class.
+**[Modified by S3-06]** The ingestion worker task (`app/workers/tasks/ingestion.py`) SHALL be refactored into a thin orchestrator that dispatches to separate handler modules. The orchestrator SHALL execute these stages in sequence: (1) Download source file from SeaweedFS, (2) Inspect file via `PathRouter.inspect_file()` and determine processing path via `PathRouter.determine_path()`, (3) If path is REJECTED, mark the task FAILED with the rejection reason and return, (4) Dispatch to `handle_path_a()` (`app/workers/tasks/handlers/path_a.py`) or `handle_path_b()` (`app/workers/tasks/handlers/path_b.py`) based on the routing decision, (5) Finalize statuses and create EmbeddingProfile (Tx 2). Each handler module SHALL own its own stages internally: persist (Tx 1), embed, index. The worker task IS the orchestrator; there SHALL NOT be a separate Pipeline abstraction class.
 
-**[Modified by S2-03]** Stage 3 (Persist) SHALL use `ensure_draft_or_rebind` to acquire a FOR UPDATE lock on the snapshot row before persisting any chunks. The lock SHALL be held through the chunk insert and transaction commit. If the snapshot is no longer DRAFT (published concurrently), the worker SHALL rebind to a new draft via the same method.
+**[Modified by S2-03]** Stage persist (inside each handler) SHALL use `ensure_draft_or_rebind` to acquire a FOR UPDATE lock on the snapshot row before persisting any chunks. The lock SHALL be held through the chunk insert and transaction commit. If the snapshot is no longer DRAFT (published concurrently), the worker SHALL rebind to a new draft via the same method.
 
-#### Scenario: Successful end-to-end pipeline execution
+**[Modified by S3-06]** The orchestrator SHALL accept an optional `skip_embedding` flag from the `BackgroundTask.result_metadata`. When `skip_embedding=true`, the handler SHALL parse and chunk the source but SHALL NOT call `embedding_service.embed_texts()`, `embed_file()`, or `qdrant_service.upsert_chunks()`. Chunks SHALL be saved with status `PENDING`. The Source SHALL be set to `READY`. The BackgroundTask SHALL be marked COMPLETE with `result_metadata.skip_embedding = true`.
 
-- **WHEN** the ingestion task processes a valid source with status PENDING
-- **THEN** the Source status SHALL transition PENDING -> PROCESSING -> READY
+**[Modified by S3-06]** When `skip_embedding=false` (default) and the chunk count after parsing exceeds `batch_embed_chunk_threshold` (default 50), the handler SHALL return a `BatchSubmittedResult` early — before `_finalize_pipeline_success` is called. The handler SHALL create a `BatchJob` inline via `BatchOrchestrator.create_batch_job_for_threshold()`, then submit to Gemini via `BatchOrchestrator.submit_to_gemini()`. The Source SHALL stay `PROCESSING`, the BackgroundTask SHALL stay `PROCESSING`. The calling code in `_process_task` SHALL detect `BatchSubmittedResult` and exit without finalization. The `poll_active_batches` cron SHALL complete the lifecycle.
+
+#### Scenario: Successful end-to-end pipeline execution via Path B
+
+- **WHEN** the ingestion task processes a valid text source (e.g., `.md`, `.txt`, `.docx`, `.html`) with status PENDING
+- **THEN** the PathRouter SHALL route the source to Path B
+- **AND** the Source status SHALL transition PENDING -> PROCESSING -> READY
 - **AND** a Document record SHALL be created with status READY
 - **AND** a DocumentVersion record SHALL be created with `version_number=1`, `processing_path=PATH_B`, status READY
 - **AND** Chunk records SHALL be created with status INDEXED
 - **AND** vectors SHALL be upserted to Qdrant
-- **AND** an EmbeddingProfile record SHALL be created
+- **AND** an EmbeddingProfile record SHALL be created with `pipeline_version="s2-02-path-b"`
 - **AND** the BackgroundTask SHALL have status COMPLETE, progress 100, and `result_metadata` populated
+
+#### Scenario: Successful end-to-end pipeline execution via Path A
+
+- **WHEN** the ingestion task processes a valid Path A source (e.g., image, short PDF, short audio/video) with status PENDING
+- **THEN** the PathRouter SHALL route the source to Path A
+- **AND** the Source status SHALL transition PENDING -> PROCESSING -> READY
+- **AND** a Document record SHALL be created with status READY
+- **AND** a DocumentVersion record SHALL be created with `version_number=1`, `processing_path=PATH_A`, status READY
+- **AND** exactly one Chunk record SHALL be created with status INDEXED
+- **AND** vectors SHALL be upserted to Qdrant (dense + BM25)
+- **AND** an EmbeddingProfile record SHALL be created with `pipeline_version="s3-04-path-a"`
+- **AND** the BackgroundTask SHALL have status COMPLETE, progress 100, and `result_metadata` populated
+
+#### Scenario: Orchestrator dispatches to Path B handler for text formats
+
+- **WHEN** the orchestrator receives a routing decision of Path B from PathRouter
+- **THEN** the orchestrator SHALL call `handle_path_b()` with the downloaded file bytes and pipeline services
+- **AND** the Path B handler SHALL execute the existing Docling-based pipeline logic
+
+#### Scenario: Orchestrator dispatches to Path A handler for multimodal formats
+
+- **WHEN** the orchestrator receives a routing decision of Path A from PathRouter
+- **THEN** the orchestrator SHALL call `handle_path_a()` with the downloaded file bytes and pipeline services
+
+#### Scenario: Path A fallback is re-dispatched by the orchestrator
+
+- **WHEN** the orchestrator dispatches a PDF source to `handle_path_a()`
+- **AND** `handle_path_a()` returns a fallback signal because the extracted text exceeds `path_a_text_threshold_pdf`
+- **THEN** the orchestrator SHALL call `handle_path_b()` for the same source
+- **AND** the final persisted `DocumentVersion.processing_path` SHALL be `PATH_B`
+- **AND** the final `result_metadata["processing_path"]` SHALL be `"path_b"`
+
+#### Scenario: Orchestrator rejects source when PathRouter returns REJECTED
+
+- **WHEN** the PathRouter returns a REJECTED decision (e.g., audio/video exceeding duration limits)
+- **THEN** the orchestrator SHALL mark the Source and BackgroundTask as FAILED
+- **AND** the `BackgroundTask.error_message` SHALL contain the rejection reason from PathRouter
+- **AND** no Document, DocumentVersion, or Chunk records SHALL be created
 
 #### Scenario: Pipeline creates Document and DocumentVersion during ingestion
 
-- **WHEN** the pipeline reaches Stage 3 (Persist)
+- **WHEN** the pipeline reaches the persist stage inside a handler
 - **THEN** a Document record SHALL be created with `source_id` referencing the source and status PROCESSING
-- **AND** a DocumentVersion record SHALL be created with `document_id` referencing the document, `version_number=1`, and `processing_path=PATH_B`
+- **AND** a DocumentVersion record SHALL be created with `document_id` referencing the document, `version_number=1`, and `processing_path` matching the handler's path (PATH_A or PATH_B)
 - **AND** Chunk records SHALL be bulk-inserted with status PENDING, linked to the DocumentVersion and snapshot
+
+#### Scenario: Skip-embedding path parses and chunks without embedding
+
+- **WHEN** the ingestion task has `result_metadata.skip_embedding = true`
+- **THEN** the handler SHALL parse and chunk the source file
+- **AND** chunks SHALL be saved to PostgreSQL with status `PENDING`
+- **AND** `embedding_service.embed_texts()` SHALL NOT be called
+- **AND** `embed_file()` SHALL NOT be called
+- **AND** `qdrant_service.upsert_chunks()` SHALL NOT be called
+- **AND** the Source status SHALL be set to `READY`
+- **AND** the BackgroundTask SHALL be marked COMPLETE
+- **AND** `result_metadata` SHALL contain `skip_embedding: true`
+
+#### Scenario: Skip-embedding also applies to Path A sources
+
+- **WHEN** the ingestion task has `result_metadata.skip_embedding = true`
+- **AND** the source is routed to Path A
+- **THEN** the handler SHALL extract text content and persist one chunk with status `PENDING`
+- **AND** `embed_file()` SHALL NOT be called
+- **AND** `qdrant_service.upsert_chunks()` SHALL NOT be called
+- **AND** the Source status SHALL be set to `READY`
+
+#### Scenario: Auto-threshold routes large source to Batch API
+
+- **WHEN** the ingestion task has `skip_embedding=false` (default)
+- **AND** parsing produces a chunk count exceeding `batch_embed_chunk_threshold`
+- **THEN** the handler SHALL return a `BatchSubmittedResult`
+- **AND** a `BatchJob` SHALL be created and submitted to Gemini
+- **AND** the Source SHALL remain in `PROCESSING` status
+- **AND** the BackgroundTask SHALL remain in `PROCESSING` status
+- **AND** `_finalize_pipeline_success` SHALL NOT be called
+
+#### Scenario: Below-threshold source uses interactive embedding
+
+- **WHEN** the ingestion task has `skip_embedding=false`
+- **AND** parsing produces a chunk count at or below `batch_embed_chunk_threshold`
+- **THEN** the handler SHALL proceed with interactive `embed_texts()` and Qdrant upsert as normal
 
 ---
 
@@ -237,12 +317,13 @@ The worker task SHALL update `BackgroundTask.progress` at each stage boundary: S
 
 ### Requirement: All-or-nothing error handling with failure cleanup
 
-On any failure after Tx 1 has committed, the pipeline SHALL execute a recovery transaction that marks the DocumentVersion, all associated Chunks, and the Document as FAILED. The Source SHALL be marked FAILED. The BackgroundTask SHALL be marked FAILED with `error_message` populated. Qdrant points SHALL use stable deterministic IDs derived from `chunk_id`, so re-upserts remain idempotent. If the worker cannot prove whether a Qdrant upsert wrote data, it SHALL attempt compensating deletion by those same `chunk_id` values before final failure handling. Failed records in PostgreSQL are NOT deleted; they serve as audit trail.
+**[Modified by S3-04]** On any failure after Tx 1 has committed, the **handler** (not the orchestrator) SHALL execute a recovery transaction that marks the DocumentVersion, all associated Chunks, and the Document as FAILED. Each handler SHALL wrap its post-Tx-1 logic in a try/except block and call `mark_persisted_records_failed()` on failure. The Source SHALL be marked FAILED. The BackgroundTask SHALL be marked FAILED with `error_message` populated. Qdrant points SHALL use stable deterministic IDs derived from `chunk_id`, so re-upserts remain idempotent. If the worker cannot prove whether a Qdrant upsert wrote data, it SHALL attempt compensating deletion by those same `chunk_id` values before final failure handling. Failed records in PostgreSQL are NOT deleted; they serve as audit trail.
 
 #### Scenario: Failure during embedding marks all records as FAILED
 
 - **WHEN** the Gemini embedding call fails after Tx 1 has committed Chunk records
-- **THEN** the DocumentVersion status SHALL be FAILED
+- **THEN** the handler SHALL catch the exception and call `mark_persisted_records_failed()`
+- **AND** the DocumentVersion status SHALL be FAILED
 - **AND** all Chunk records for this version SHALL have status FAILED
 - **AND** the Document status SHALL be FAILED
 - **AND** the Source status SHALL be FAILED
@@ -250,7 +331,7 @@ On any failure after Tx 1 has committed, the pipeline SHALL execute a recovery t
 
 #### Scenario: Failure before Tx 1 leaves no orphaned records
 
-- **WHEN** the pipeline fails during Stage 1 (Download from SeaweedFS) or Stage 2 (Parse)
+- **WHEN** the pipeline fails during Stage 1 (Download from SeaweedFS) or during handler execution before Tx 1
 - **THEN** no Document, DocumentVersion, or Chunk records SHALL exist in PostgreSQL
 - **AND** the Source and BackgroundTask SHALL be marked FAILED
 
@@ -262,45 +343,78 @@ On any failure after Tx 1 has committed, the pipeline SHALL execute a recovery t
 #### Scenario: Ambiguous Qdrant upsert triggers compensating cleanup
 
 - **WHEN** the Qdrant upsert may have partially succeeded but the worker loses the response or later finalization fails
-- **THEN** the worker SHALL attempt to delete the affected Qdrant points by deterministic `chunk_id`
+- **THEN** the handler SHALL attempt to delete the affected Qdrant points by deterministic `chunk_id`
 - **AND** a later retry or re-upsert SHALL remain idempotent because the point IDs are stable
+
+#### Scenario: Each handler owns its own cleanup
+
+- **WHEN** the Path A handler fails after Tx 1
+- **THEN** the Path A handler itself SHALL execute the failure cleanup (not the orchestrator)
+- **AND** cleanup SHALL mark persisted records as FAILED and attempt Qdrant point deletion
+
+- **WHEN** the Path B handler fails after Tx 1
+- **THEN** the Path B handler itself SHALL execute the failure cleanup (not the orchestrator)
+- **AND** cleanup SHALL mark persisted records as FAILED and attempt Qdrant point deletion
 
 ---
 
 ### Requirement: Result metadata on successful completion
 
-On success, the BackgroundTask `result_metadata` SHALL contain: `chunk_count` (int), `embedding_model` (string), `embedding_dimensions` (int), `processing_path` (string, value "path_b"), `snapshot_id` (UUID string), `document_id` (UUID string), `document_version_id` (UUID string), `token_count_total` (int, sum of all chunk token counts).
+**[Modified by S3-04]** On success, the BackgroundTask `result_metadata` SHALL contain: `chunk_count` (int), `embedding_model` (string), `embedding_dimensions` (int), `processing_path` (string, value `"path_a"` or `"path_b"`), `snapshot_id` (UUID string), `document_id` (UUID string), `document_version_id` (UUID string), `token_count_total` (int, sum of all chunk token counts). `DocumentVersion.processing_path` and `result_metadata["processing_path"]` represent the same outcome in different forms: the database field uses the enum values `PATH_A` / `PATH_B`, while `result_metadata["processing_path"]` uses the lowercase string values `"path_a"` / `"path_b"`. The `processing_path` value in `result_metadata` SHALL reflect the actual path used: `"path_a"` for Path A handler, `"path_b"` for Path B handler. For Path A with threshold fallback to Path B, the value SHALL be `"path_b"` and the persisted `DocumentVersion.processing_path` SHALL be `PATH_B`.
 
-#### Scenario: result_metadata contains all required fields
+#### Scenario: result_metadata contains all required fields for Path B
 
-- **WHEN** the ingestion task completes successfully
+- **WHEN** the ingestion task completes successfully via Path B
 - **THEN** `result_metadata` SHALL contain all 8 specified fields with correct types and values
+- **AND** `processing_path` SHALL be `"path_b"`
+
+#### Scenario: result_metadata contains all required fields for Path A
+
+- **WHEN** the ingestion task completes successfully via Path A
+- **THEN** `result_metadata` SHALL contain all 8 specified fields with correct types and values
+- **AND** `processing_path` SHALL be `"path_a"`
+- **AND** `chunk_count` SHALL be 1
 
 ---
 
 ### Requirement: EmbeddingProfile audit record
 
-The pipeline SHALL create one `EmbeddingProfile` record per successful ingestion pass during Tx 2. The record SHALL capture the embedding model, dimensions, task type, and pipeline metadata. EmbeddingProfile records SHALL never be updated; each ingestion creates a new record for audit trail.
+**[Modified by S3-04]** The pipeline SHALL create one `EmbeddingProfile` record per successful ingestion pass during Tx 2. The record SHALL capture the embedding model, dimensions, task type, and pipeline metadata. The `pipeline_version` field SHALL be parameterized: `"s3-04-path-a"` for Path A ingestion, `"s2-02-path-b"` for Path B ingestion. EmbeddingProfile records SHALL never be updated; each ingestion creates a new record for audit trail. The `_finalize_pipeline_success()` helper SHALL accept `processing_path` and `pipeline_version` parameters from the handler to populate these fields.
 
-#### Scenario: EmbeddingProfile created on success
+#### Scenario: EmbeddingProfile created on success via Path B
 
-- **WHEN** the ingestion pipeline completes successfully
+- **WHEN** the ingestion pipeline completes successfully via Path B
 - **THEN** exactly one new EmbeddingProfile record SHALL exist in PostgreSQL
 - **AND** its `model_name` field SHALL match `settings.embedding_model`
 - **AND** its `dimensions` field SHALL match `settings.embedding_dimensions`
+- **AND** its `pipeline_version` field SHALL be `"s2-02-path-b"`
+
+#### Scenario: EmbeddingProfile created on success via Path A
+
+- **WHEN** the ingestion pipeline completes successfully via Path A
+- **THEN** exactly one new EmbeddingProfile record SHALL exist in PostgreSQL
+- **AND** its `model_name` field SHALL match `settings.embedding_model`
+- **AND** its `dimensions` field SHALL match `settings.embedding_dimensions`
+- **AND** its `pipeline_version` field SHALL be `"s3-04-path-a"`
 
 ---
 
 ### Requirement: Worker service initialization
 
-The arq worker `on_startup` hook SHALL initialize and store in the worker context: a dedicated `storage_http_client` (`httpx.AsyncClient` with `base_url=settings.seaweedfs_filer_url` and `timeout=30.0`), `StorageService` (wrapping the storage HTTP client with `base_path=settings.seaweedfs_sources_path`), `DoclingParser`, `QdrantService` (async Qdrant client), `EmbeddingService` (GenAI client), `SnapshotService`, and `settings`. The `on_startup` hook SHALL call `qdrant_service.ensure_collection()` (idempotent) and `storage_service.ensure_storage_root()` (idempotent). The `on_shutdown` hook SHALL close the Qdrant client connection AND call `await ctx["storage_http_client"].aclose()` to properly clean up the storage HTTP client.
+**[Modified by S3-04]** The arq worker `on_startup` hook SHALL initialize and store in the worker context: a dedicated `storage_http_client` (`httpx.AsyncClient` with `base_url=settings.seaweedfs_filer_url` and `timeout=30.0`), `StorageService` (wrapping the storage HTTP client with `base_path=settings.seaweedfs_sources_path`), `DoclingParser`, `QdrantService` (async Qdrant client), `EmbeddingService` (GenAI client), `SnapshotService`, `GeminiContentService` (GenAI client for text extraction), `HuggingFaceTokenizer` (for Path A token counting), and `settings`. The worker context SHALL also store Path A configuration values from settings (`path_a_text_threshold_pdf`, `path_a_text_threshold_media`, `path_a_max_pdf_pages`, `path_a_max_audio_duration_sec`, `path_a_max_video_duration_sec`). The `on_startup` hook SHALL call `qdrant_service.ensure_collection()` (idempotent) and `storage_service.ensure_storage_root()` (idempotent). The `on_shutdown` hook SHALL close the Qdrant client connection AND call `await ctx["storage_http_client"].aclose()` to properly clean up the storage HTTP client.
 
-The `storage_http_client` is a **new lifecycle responsibility** for the worker. The previous MinIO SDK was synchronous and did not require async cleanup. The worker now MUST manage the async httpx client lifecycle: create in `on_startup`, close in `on_shutdown`.
+A `PipelineServices` dataclass (or equivalent container) SHALL bundle all services and configuration needed by handlers, so that handler signatures remain clean. `PipelineServices` SHALL include: `storage_service`, `docling_parser`, `qdrant_service`, `embedding_service`, `snapshot_service`, `gemini_content_service`, `tokenizer`, `settings`, and Path A configuration values.
 
 #### Scenario: All services available in worker context after startup
 
 - **WHEN** the arq worker completes startup
-- **THEN** `ctx["storage_http_client"]`, `ctx["storage_service"]`, `ctx["docling_parser"]`, `ctx["qdrant_service"]`, `ctx["embedding_service"]`, `ctx["snapshot_service"]`, and `ctx["settings"]` SHALL all be present and initialized
+- **THEN** `ctx["storage_http_client"]`, `ctx["storage_service"]`, `ctx["docling_parser"]`, `ctx["qdrant_service"]`, `ctx["embedding_service"]`, `ctx["snapshot_service"]`, `ctx["gemini_content_service"]`, `ctx["tokenizer"]`, and `ctx["settings"]` SHALL all be present and initialized
+
+#### Scenario: PipelineServices bundles all handler dependencies
+
+- **WHEN** a handler is invoked by the orchestrator
+- **THEN** the handler SHALL receive a `PipelineServices` instance containing all required services and configuration
+- **AND** the handler SHALL NOT access the raw worker context directly
 
 #### Scenario: Qdrant collection ensured on startup
 
@@ -340,6 +454,100 @@ The pipeline SHALL use the `language` value from the Source record (persisted at
 
 ---
 
+### Requirement: PathRouter integration in orchestrator
+
+**[Added by S3-04]** After downloading the source file from SeaweedFS, the orchestrator SHALL call `PathRouter.inspect_file(file_bytes, source_type)` to obtain `FileMetadata`, then call `PathRouter.determine_path(source_type, file_metadata)` to obtain a `PathDecision`. The orchestrator SHALL use the `PathDecision` to dispatch to the appropriate handler or reject the source. PathRouter is responsible only for initial metadata-based routing (page count, duration, source type); token-threshold enforcement remains the responsibility of `handle_path_a()`. If `handle_path_a()` reports a fallback condition, the orchestrator SHALL re-dispatch to `handle_path_b()` rather than having the handler call Path B directly. The PathRouter is a pure service with no database or network dependencies; it SHALL be called synchronously within the orchestrator.
+
+#### Scenario: Orchestrator calls PathRouter after download
+
+- **WHEN** the orchestrator has downloaded the source file
+- **THEN** it SHALL call `inspect_file()` with the file bytes and source type
+- **AND** then call `determine_path()` with the source type and file metadata
+- **AND** use the resulting `PathDecision` to determine the next step
+
+#### Scenario: PathRouter inspection failure for text formats defaults to Path B
+
+- **WHEN** `inspect_file()` fails to read metadata for a PDF (e.g., corrupt header)
+- **THEN** `determine_path()` SHALL return Path B as a conservative fallback
+
+#### Scenario: PathRouter inspection failure for audio/video defaults to Path A
+
+- **WHEN** `inspect_file()` fails to read duration for an audio or video file
+- **THEN** `determine_path()` SHALL return Path A (threshold check is the safety net)
+
+#### Scenario: Token threshold checks are evaluated inside Path A
+
+- **WHEN** a source is initially routed to Path A by PathRouter
+- **THEN** PathRouter SHALL NOT evaluate `path_a_text_threshold_pdf` or `path_a_text_threshold_media`
+- **AND** `handle_path_a()` SHALL evaluate those thresholds after text extraction
+- **AND** any fallback to Path B SHALL be signaled back to the orchestrator for re-dispatch
+
+---
+
+### Requirement: Parameterized pipeline_version on EmbeddingProfile
+
+**[Added by S3-04]** The `_finalize_pipeline_success()` function SHALL accept `processing_path` and `pipeline_version` as parameters. Each handler SHALL pass its own values when calling finalization: Path A passes `processing_path=PATH_A` and `pipeline_version="s3-04-path-a"`, Path B passes `processing_path=PATH_B` and `pipeline_version="s2-02-path-b"`. This ensures the EmbeddingProfile accurately records which pipeline produced the embeddings.
+
+#### Scenario: Path A handler passes correct pipeline_version
+
+- **WHEN** the Path A handler completes successfully and calls finalization
+- **THEN** it SHALL pass `pipeline_version="s3-04-path-a"` to `_finalize_pipeline_success()`
+
+#### Scenario: Path B handler passes correct pipeline_version
+
+- **WHEN** the Path B handler completes successfully and calls finalization
+- **THEN** it SHALL pass `pipeline_version="s2-02-path-b"` to `_finalize_pipeline_success()`
+
+---
+
+## Requirements added by S3-06
+
+### Requirement: skip_embedding query parameter on POST /api/admin/sources
+
+**[Added by S3-06]** The `POST /api/admin/sources` endpoint SHALL accept an optional `skip_embedding` query parameter (boolean, default `false`). When `true`, the ingestion task SHALL be created with `result_metadata.skip_embedding = true`. The worker SHALL read this flag and skip the embedding and Qdrant upsert stages. Chunks SHALL be saved with status `PENDING`. The Source SHALL be set to `READY` (parsed and chunked). The BackgroundTask SHALL be marked COMPLETE. This does NOT mean the source is searchable — `PENDING` chunks are never upserted to Qdrant and cannot be returned by vector search. Those chunks SHALL become searchable only through a later embedding lifecycle such as `POST /api/admin/batch-embed`, which creates a separate `BATCH_EMBEDDING` BackgroundTask and transitions the existing chunk rows from `PENDING` to `INDEXED`.
+
+#### Scenario: skip_embedding=true creates task with flag
+
+- **WHEN** `POST /api/admin/sources?skip_embedding=true` is called with a valid file
+- **THEN** the created BackgroundTask SHALL have `result_metadata.skip_embedding = true`
+- **AND** the response SHALL be the same as a normal upload (source created, task enqueued)
+
+#### Scenario: skip_embedding=false preserves existing behavior
+
+- **WHEN** `POST /api/admin/sources` is called without `skip_embedding` or with `skip_embedding=false`
+- **THEN** the BackgroundTask `result_metadata` SHALL NOT include the `skip_embedding` key
+- **AND** the ingestion pipeline SHALL proceed with interactive embedding as normal
+
+#### Scenario: skip_embedding source reaches READY without Qdrant entries
+
+- **WHEN** a source is uploaded with `skip_embedding=true` and the worker completes processing
+- **THEN** the Source status SHALL be `READY`
+- **AND** all chunks SHALL have status `PENDING`
+- **AND** no vectors SHALL exist in Qdrant for these chunks
+
+---
+
+### Requirement: SkipEmbeddingResult and BatchSubmittedResult pipeline result types
+
+**[Added by S3-06]** The ingestion pipeline SHALL define two new dataclass result types to signal early returns from handlers. `SkipEmbeddingResult` SHALL indicate that the handler completed parse+chunk but skipped embedding per the `skip_embedding` flag. `BatchSubmittedResult` SHALL indicate that the handler created a BatchJob and submitted to Gemini instead of performing interactive embedding. Both dataclasses SHALL carry the persisted pipeline identifiers needed by the caller: `snapshot_id`, `document_id`, `document_version_id`, `chunk_ids`, `chunk_count`, `token_count_total`, `processing_path`, and `pipeline_version`. The calling code in `_process_task` SHALL detect these result types via `isinstance()` and handle finalization accordingly: `SkipEmbeddingResult` triggers immediate task completion, `BatchSubmittedResult` exits without finalization (cron completes the lifecycle).
+
+#### Scenario: SkipEmbeddingResult triggers task completion
+
+- **WHEN** a handler returns `SkipEmbeddingResult`
+- **THEN** `_process_task` SHALL mark the Source as `READY`
+- **AND** SHALL mark the BackgroundTask as COMPLETE with progress `100`
+- **AND** SHALL populate `result_metadata` with `skip_embedding: true`, `chunk_count`, `processing_path`, `snapshot_id`, `document_id`, `document_version_id`, and `token_count_total`
+- **AND** SHALL NOT call `_finalize_pipeline_success`
+
+#### Scenario: BatchSubmittedResult exits without finalization
+
+- **WHEN** a handler returns `BatchSubmittedResult`
+- **THEN** `_process_task` SHALL exit without calling `_finalize_pipeline_success`
+- **AND** the BackgroundTask SHALL remain in PROCESSING status
+- **AND** the Source SHALL remain in PROCESSING status
+
+---
+
 ## Test Coverage
 
 ### CI tests (deterministic, mocked external services)
@@ -353,6 +561,16 @@ The following stable behavior MUST be covered by CI tests before archive:
 - **Integration tests with real PG**: run the pipeline with mocked GenAI and real Docling (local library for MD/TXT). Verify all PG records are created with correct statuses, relationships, and field values.
 - **Snapshot locking integration tests with real PG** [Added by S2-03]: verify that the ingestion worker calls `ensure_draft_or_rebind` before chunk persistence. Verify that chunks are inserted under the FOR UPDATE lock. Verify the rebind scenario: when the snapshot has been published between `get_or_create_draft` and chunk insert, the worker rebinds to a new draft and the published snapshot receives no new chunks.
 - **Worker shutdown test**: verify that the worker `on_shutdown` properly closes both the Qdrant client AND the `storage_http_client` via `aclose()`.
+- **Skip-embedding flow**: upload source with `skip_embedding=true` -> worker parses and chunks -> chunks PENDING, source READY, no Qdrant entries, task COMPLETE.
+- **Skip-embedding flag propagation**: verify `result_metadata.skip_embedding` is set on BackgroundTask when upload uses `skip_embedding=true`.
+- **Skip-embedding applies to Path A**: verify Path A sources skip `embed_file()` and still persist `PENDING` chunks without Qdrant writes.
+- **Auto-threshold detection**: mock chunk count above threshold -> handler returns `BatchSubmittedResult`, no interactive embedding, source stays PROCESSING.
+- **Batch threshold boundary**: exactly `batch_embed_chunk_threshold` uses interactive embedding, while `threshold + 1` routes to batch submission.
+- **BatchJob creation failure after Tx 1**: auto-threshold path marks persisted Document, DocumentVersion, and Chunk rows FAILED if `create_batch_job_for_threshold()` raises after persistence.
+- **Skip-embedding survives Path A -> Path B fallback**: verify PDF fallback to Path B keeps chunks `PENDING`, avoids both embedding paths, and completes the original ingestion task.
+- **SkipEmbeddingResult handling**: verify `_process_task` marks task COMPLETE on `SkipEmbeddingResult`.
+- **BatchSubmittedResult handling**: verify `_process_task` exits without finalization on `BatchSubmittedResult`.
+- **Existing pipeline tests unaffected**: all existing ingestion pipeline tests SHALL continue to pass without modification.
 
 ### Evals (non-CI, real providers)
 
@@ -396,3 +614,40 @@ When `DoclingParser.parse_and_chunk()` raises an exception due to a corrupt or m
 
 - **WHEN** `DoclingParser` raises an exception with message "Invalid PDF header"
 - **THEN** `BackgroundTask.error_message` SHALL contain "Invalid PDF header" or a message that includes the original exception text
+
+---
+
+## Requirements added by S3-05
+
+### Requirement: Source status guard in ingestion worker
+
+**[Added by S3-05]** The ingestion worker SHALL check the source's `status` inside `_process_task()`, after loading the `BackgroundTask` and `Source` rows and before calling `_load_pipeline_services()`. The guard only decides whether processing may continue; it does not add a separate transition path outside `_process_task()`. For non-deleted sources, `_process_task()` continues with the existing worker lifecycle: `BackgroundTask` transitions from `PENDING` to `PROCESSING` to `COMPLETE` or `FAILED`, and `Source` transitions from `PENDING` to `PROCESSING` to `READY` or `FAILED`. If `source.status` is `DELETED`, the worker MUST mark the `BackgroundTask` as FAILED with `error_message` set to `"Source was deleted before processing completed"` and return immediately without executing any pipeline stages. This prevents race conditions where a source is deleted while its ingestion task is in the queue.
+
+#### Scenario: Deleted source is rejected at task start
+
+- **WHEN** the ingestion worker picks up a task for a source with `status = DELETED`
+- **THEN** the `BackgroundTask` status SHALL be FAILED
+- **AND** `BackgroundTask.error_message` SHALL be "Source was deleted before processing completed"
+- **AND** no pipeline stages SHALL execute (no download, no parsing, no embedding, no Qdrant operations)
+- **AND** no Document, DocumentVersion, or Chunk records SHALL be created
+
+#### Scenario: Guard runs before pipeline services are loaded
+
+- **WHEN** the ingestion worker enters `_process_task()`
+- **THEN** the source status check SHALL occur before `_load_pipeline_services()` is called
+- **AND** if the source is DELETED, no service initialization (Qdrant, embedding, etc.) SHALL occur for this task
+
+#### Scenario: Non-deleted source proceeds normally
+
+- **WHEN** the ingestion worker picks up a task for a source with `status = PENDING`
+- **THEN** the source status guard SHALL pass
+- **AND** the worker SHALL proceed to load pipeline services
+- **AND** continue with the normal `_process_task()` transitions (`BackgroundTask -> PROCESSING`, `Source -> PROCESSING`, then final `COMPLETE/FAILED` and `READY/FAILED` outcomes)
+
+#### Scenario: Source deleted between enqueue and processing
+
+- **WHEN** a source is enqueued for ingestion with `status = PENDING`
+- **AND** the source is soft-deleted (`status = DELETED`) before the worker picks up the task
+- **THEN** the worker SHALL detect `status = DELETED` at the guard check
+- **AND** mark the task as FAILED with the descriptive message
+- **AND** the source's `status` SHALL remain `DELETED` (not changed to FAILED)

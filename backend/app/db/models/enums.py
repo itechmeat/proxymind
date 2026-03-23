@@ -126,6 +126,7 @@ class BatchStatus(StrEnum):
 
 class BackgroundTaskType(StrEnum):
     INGESTION = "INGESTION"
+    BATCH_EMBEDDING = "BATCH_EMBEDDING"
 
 
 class BackgroundTaskStatus(StrEnum):

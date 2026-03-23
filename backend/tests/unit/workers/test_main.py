@@ -13,6 +13,8 @@ from app.workers import main
 async def test_on_startup_passes_bm25_language_to_qdrant_service(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    tokenizer = object()
+    gemini_content_service = object()
     settings = SimpleNamespace(
         seaweedfs_filer_url="http://localhost:8888",
         seaweedfs_sources_path="/sources",
@@ -22,8 +24,15 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
         bm25_language="english",
         embedding_model="gemini-embedding-2-preview",
         embedding_batch_size=16,
+        gemini_content_model="gemini-2.5-flash",
+        gemini_file_upload_threshold_bytes=10 * 1024 * 1024,
         gemini_api_key=None,
         chunk_max_tokens=1024,
+        path_a_text_threshold_pdf=2000,
+        path_a_text_threshold_media=500,
+        path_a_max_pdf_pages=6,
+        path_a_max_audio_duration_sec=80,
+        path_a_max_video_duration_sec=120,
     )
     storage_http_client = SimpleNamespace(aclose=AsyncMock())
     qdrant_client = object()
@@ -63,7 +72,15 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
     monkeypatch.setattr("app.services.qdrant.QdrantService", fake_qdrant_service)
     monkeypatch.setattr("app.services.docling_parser.DoclingParser", lambda **_kwargs: object())
     monkeypatch.setattr("app.services.embedding.EmbeddingService", lambda **_kwargs: object())
+    monkeypatch.setattr(
+        "app.services.gemini_content.GeminiContentService",
+        lambda **_kwargs: gemini_content_service,
+    )
     monkeypatch.setattr("app.services.snapshot.SnapshotService", lambda: object())
+    monkeypatch.setattr(
+        "docling_core.transforms.chunker.tokenizer.huggingface.HuggingFaceTokenizer.from_pretrained",
+        lambda **_kwargs: tokenizer,
+    )
 
     await main.on_startup(ctx)
 
@@ -75,6 +92,13 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
     }
     qdrant_service.ensure_collection.assert_awaited_once()
     storage_service.ensure_storage_root.assert_awaited_once()
+    assert ctx["gemini_content_service"] is gemini_content_service
+    assert ctx["tokenizer"] is tokenizer
+    assert ctx["path_a_text_threshold_pdf"] == 2000
+    assert ctx["path_a_text_threshold_media"] == 500
+    assert ctx["path_a_max_pdf_pages"] == 6
+    assert ctx["path_a_max_audio_duration_sec"] == 80
+    assert ctx["path_a_max_video_duration_sec"] == 120
 
 
 @pytest.mark.asyncio

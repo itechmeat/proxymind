@@ -6,6 +6,7 @@ import pytest
 from google.genai.errors import ClientError, ServerError
 
 from app.services.embedding import EmbeddingService
+from app.services.gemini_file_transfer import PreparedFilePart
 
 
 class FakeModels:
@@ -13,7 +14,7 @@ class FakeModels:
         self._responses = list(responses)
         self.calls: list[dict[str, object]] = []
 
-    def embed_content(self, *, model: str, contents: list[str], config: object) -> object:
+    def embed_content(self, *, model: str, contents: list[object], config: object) -> object:
         self.calls.append(
             {
                 "model": model,
@@ -127,3 +128,35 @@ async def test_embed_texts_raises_after_retries_exhausted() -> None:
         await service.embed_texts(["retry me"])
 
     assert len(models.calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_embed_file_uses_prepare_file_part_and_returns_single_vector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    models = FakeModels([_response([0.1, 0.2])])
+    cleanup_calls: list[str | None] = []
+
+    async def fake_prepare_file_part(*args, **kwargs) -> PreparedFilePart:
+        return PreparedFilePart(part="file-part", uploaded_file_name="files/123")  # type: ignore[arg-type]
+
+    async def fake_cleanup_uploaded_file(_client, file_name: str | None) -> None:
+        cleanup_calls.append(file_name)
+
+    monkeypatch.setattr("app.services.embedding.prepare_file_part", fake_prepare_file_part)
+    monkeypatch.setattr("app.services.embedding.cleanup_uploaded_file", fake_cleanup_uploaded_file)
+    service = EmbeddingService(
+        model="gemini-embedding-2-preview",
+        dimensions=2,
+        batch_size=2,
+        client=SimpleNamespace(models=models),  # type: ignore[arg-type]
+    )
+
+    vector = await service.embed_file(b"image-bytes", "image/png")
+
+    assert vector == [0.1, 0.2]
+    assert models.calls[0]["contents"] == ["file-part"]
+    assert models.calls[0]["config"].task_type == "RETRIEVAL_DOCUMENT"
+    assert models.calls[0]["config"].output_dimensionality == 2
+    assert models.calls[0]["config"].mime_type == "image/png"
+    assert cleanup_calls == ["files/123"]

@@ -99,7 +99,7 @@ Two-tier parsing:
 
 - Long PDFs (> 6 pages) — parsing + HybridChunker
 - DOCX, HTML, Markdown, TXT
-- Audio > 80 sec (via `asr` extra)
+- Long audio/video are currently rejected in the worker. Docling-based Path B for audio/video is deferred until the ASR path is wired in a later story.
 
 **Chunking:** Docling HybridChunker — structure-aware, tokenization-aware, preserves headings and metadata. Configurable chunk size for the 8192-token window of Gemini Embedding 2.
 

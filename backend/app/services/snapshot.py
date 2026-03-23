@@ -255,6 +255,54 @@ class SnapshotService:
             concurrent_detail="Cannot activate: concurrent active snapshot conflict detected",
         )
 
+    async def rollback(
+        self,
+        snapshot_id: uuid.UUID,
+        *,
+        agent_id: uuid.UUID | None = None,
+        knowledge_base_id: uuid.UUID | None = None,
+        session: AsyncSession | None = None,
+    ) -> tuple[KnowledgeSnapshot, KnowledgeSnapshot]:
+        db_session = self._resolve_session(session)
+        current = await self._get_snapshot_for_update(
+            db_session,
+            snapshot_id,
+            agent_id=agent_id,
+            knowledge_base_id=knowledge_base_id,
+        )
+        if current is None:
+            raise SnapshotNotFoundError("Snapshot not found")
+        if current.status is not SnapshotStatus.ACTIVE:
+            raise SnapshotConflictError("Only the active snapshot can be rolled back")
+
+        target = await db_session.scalar(
+            select(KnowledgeSnapshot)
+            .where(
+                KnowledgeSnapshot.status == SnapshotStatus.PUBLISHED,
+                KnowledgeSnapshot.activated_at.is_not(None),
+                KnowledgeSnapshot.agent_id == current.agent_id,
+                KnowledgeSnapshot.knowledge_base_id == current.knowledge_base_id,
+            )
+            .order_by(KnowledgeSnapshot.activated_at.desc())
+            .limit(1)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if target is None:
+            raise SnapshotConflictError("No previously activated snapshot available for rollback")
+
+        # Preserve the old activation timestamp for auditability; _do_activate()
+        # only assigns activated_at on the newly activated snapshot.
+        current.status = SnapshotStatus.PUBLISHED
+        await self._do_activate(db_session, target)
+        await self._commit_snapshot_change(
+            db_session,
+            target,
+            concurrent_detail="Another rollback or activation happened concurrently",
+        )
+        await db_session.refresh(current)
+        return current, target
+
     async def _commit_snapshot_change(
         self,
         session: AsyncSession,

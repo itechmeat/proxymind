@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy import ForeignKey, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, PrimaryKeyMixin, TimestampMixin
@@ -38,7 +39,17 @@ class BatchJob(PrimaryKeyMixin, TimestampMixin, Base):
 
     agent_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
     knowledge_base_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, index=True)
+    snapshot_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, index=True)
     task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_ids: Mapped[list[uuid.UUID] | None] = mapped_column(
+        ARRAY(UUID(as_uuid=True)),
+        nullable=True,
+    )
+    background_task_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("background_tasks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     batch_operation_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     operation_type: Mapped[BatchOperationType] = mapped_column(
         pg_enum(BatchOperationType, name="batch_operation_type_enum"),
@@ -50,7 +61,12 @@ class BatchJob(PrimaryKeyMixin, TimestampMixin, Base):
     )
     item_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     processed_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    request_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    succeeded_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    failed_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    last_polled_at: Mapped[datetime | None] = mapped_column(nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
 

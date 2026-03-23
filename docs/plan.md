@@ -2,6 +2,8 @@
 
 Initial focus — chat-first digital twin. The plan is built in vertical slices: each phase ends with a working and verifiable result. After phase 2, you can already upload a document and get an answer.
 
+> **Security ordering note:** The Chat API is public from S2-04, and Admin API endpoints are added throughout Phases 2–5, but rate limiting (S7-02) and admin auth (S7-01) are in Phase 7. This is acceptable for local development but MUST be resolved before any production deployment. Rate limiting and admin auth are baseline security per `docs/development.md` and `docs/architecture.md`, not late hardening. For production readiness, implement S7-01 and S7-02 before exposing the instance to untrusted traffic.
+
 ## Testing Strategy
 
 Tests are split into two tracks:
@@ -31,7 +33,7 @@ Phase outcome: the project starts, all services run, API responds.
 
 Phase outcome: minimal working product. Upload a Markdown file → get a snapshot → ask a question → see an answer.
 
-- [x] **S2-01: Upload source**
+- [x] **S2-01: Upload source** (DON'T CHANGE!!!)
       `POST /api/admin/sources` — accept file (Markdown/TXT) + metadata. File → MinIO, metadata → PostgreSQL, task → Redis queue.
   - **Outcome:** a file can be uploaded via API and is persisted
   - **Verification:** `curl -F file=@doc.md /api/admin/sources` → 202 + task_id; file in MinIO; record in PG
@@ -83,23 +85,23 @@ Phase outcome: full-featured ingestion pipeline — all formats, hybrid search, 
   - **Verification:** query → results better than dense-only; filtering by snapshot works
   - Tasks: Qdrant hybrid query, RRF fusion config, payload filtering, retrieval service upgrade
 
-- [ ] **S3-04: Path A (Gemini native)**
+- [x] **S3-04: Path A (Gemini native)**
       For short PDFs/images/audio/video: Gemini LLM → text_content, Gemini Embedding 2 → vector. Thresholds for switching to Path B (`path_a_text_threshold_pdf`, `path_a_text_threshold_media`).
   - **Outcome:** multimodal sources are indexed and searchable
   - **Verification:** upload image → text_content generated → search query finds it
   - Tasks: Gemini GenerateContent for text extraction, Path A/B routing logic, threshold config
 
-- [ ] **S3-05: Snapshot lifecycle (full)**
+- [x] **S3-05: Snapshot lifecycle (full)**
       Rollback to previous published. Draft testing via Admin API (`POST /api/admin/snapshots/:id/test`). Soft delete source considering published snapshots. Snapshot list/detail already delivered in S2-03.
   - **Outcome:** full knowledge version management
   - **Verification:** publish → rollback → twin responds from old snapshot; test draft → only draft chunks visible
   - Tasks: rollback endpoint, draft test endpoint, source soft delete logic
 
-- [ ] **S3-06: Gemini Batch API**
-      Bulk operations: batch_jobs in PG, Gemini → internal status mapping, deduplication on retry, polling.
+- [x] **S3-06: Gemini Batch API**
+      Bulk operations: extend existing `batch_jobs` table (created in S1-02) with Gemini-specific fields, Gemini → internal status mapping, deduplication on retry, polling.
   - **Outcome:** bulk uploads are processed cheaper and in parallel
   - **Verification:** upload 10+ files → batch job → all processed; retry → batch not duplicated
-  - Tasks: Batch API client, batch_jobs table, status mapping, retry guard
+  - Tasks: Batch API client, extend batch_jobs schema, status mapping, retry guard
 
 ### Phase 4: Dialog Expansion
 
@@ -136,9 +138,9 @@ Phase outcome: full-featured dialog with persona, citations, memory, promotions.
   - Tasks: PROMOTIONS.md parser, expiry filter, priority-based inclusion, prompt layer
 
 - [ ] **S4-06: Context assembly (full)**
-      All 8 prompt layers: system safety → IDENTITY → SOUL → BEHAVIOR → PROMOTIONS → dialog memory → retrieval → user query. Token budget management (`retrieval_context_budget`). Content type markup (fact/inference/recommendation).
-  - **Outcome:** full prompt assembly with all layers and content types
-  - **Verification:** all layers present; when budget exceeded — retrieval is trimmed; response distinguishes content types
+      All prompt layers except conversation memory (delivered in S4-07): system safety → IDENTITY → SOUL → BEHAVIOR → PROMOTIONS → retrieval → user query. Token budget management (`retrieval_context_budget`). Content type markup (fact/inference/recommendation). Conversation memory slot is reserved in the prompt builder but populated in S4-07.
+  - **Outcome:** prompt assembly with all available layers and content types; conversation memory slot is a placeholder until S4-07
+  - **Verification:** all implemented layers present; when budget exceeded — retrieval is trimmed; response distinguishes content types
   - Tasks: prompt builder service, token counting, budget trimming, content type instructions
 
 - [ ] **S4-07: Conversation memory**
@@ -175,14 +177,8 @@ Phase outcome: full-featured web interface for visitors and the owner.
   - **Verification:** create snapshot → publish → twin responds from it; rollback → previous version
   - Tasks: snapshot list, publish/rollback buttons, draft test view
 
-- [ ] **S5-05: Admin UI — product catalog**
-      Product catalog CRUD, source ↔ catalog item linking.
-  - **Outcome:** owner manages products through the interface
-  - **Verification:** add product → link to source → citation includes purchase link
-  - Tasks: catalog form, source-catalog linking UI
-
-- [ ] **S5-06: Admin UI — twin profile**
-      Avatar (upload → SeaweedFS), name, public links.
+- [ ] **S5-05: Admin UI — twin profile**
+      Avatar (upload → SeaweedFS), name. Note: "public links" require a backend schema extension (no profile endpoint or storage for links exists in the current spec) — defer public links to a future story or add a backend story before this one.
   - **Outcome:** twin profile is configured and displayed in the chat
   - **Verification:** upload avatar → visible in chat interface
   - Tasks: avatar upload, profile metadata form, display in chat header
@@ -197,7 +193,13 @@ Phase outcome: full commercial layer — catalog, recommendations, citation inte
   - **Verification:** citation of a book linked to a product → store link nearby
   - Tasks: catalog API endpoints, source-catalog linking, citation enrichment
 
-- [ ] **S6-02: Native recommendations (end-to-end)**
+- [ ] **S6-02a: Admin UI — product catalog**
+      Product catalog CRUD, source ↔ catalog item linking. Depends on S6-01 (backend).
+  - **Outcome:** owner manages products through the interface
+  - **Verification:** add product → link to source → citation includes purchase link
+  - Tasks: catalog form, source-catalog linking UI
+
+- [ ] **S6-03: Native recommendations (end-to-end)**
       Catalog + PROMOTIONS.md + citation builder. Native delivery. Citation takes priority over commercial link.
   - **Outcome:** twin recommends products naturally in context
   - **Verification:** conversation about music → twin mentions a concert; not every response contains a recommendation

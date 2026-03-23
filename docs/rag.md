@@ -77,7 +77,7 @@ Pipeline Path A:
 
 **Trade-off:** Path A creates one chunk per file. This simplifies the pipeline but reduces retrieval and citation granularity to the file level (instead of page/section/timecode). For short single-topic files this is acceptable. For topically dense documents (even short ones) — it is not.
 
-**Criterion for switching to Path B:** if the `text_content` from Path A exceeds a threshold, the file is redirected to Path B for structural chunking via Docling, even if the format/size allows Path A. Thresholds are separate per modality: `path_a_text_threshold_pdf` (default: 2000 tokens) and `path_a_text_threshold_media` (default: 500 tokens, since media descriptions are typically shorter). This guarantees granular retrieval for content-rich documents.
+**Criterion for switching to Path B:** only PDF falls back from Path A to Path B when `text_content` exceeds `path_a_text_threshold_pdf` (default: 2000 tokens). Images stay in Path A regardless of description length. Audio and video use `path_a_text_threshold_media` (default: 500 tokens); if exceeded, ingestion fails because Path B is not yet available for those formats.
 
 ### Path B — Docling
 
@@ -85,7 +85,7 @@ For everything that does not fit Path A limits:
 
 - Long PDFs (> 6 pages)
 - DOCX, HTML, Markdown, TXT
-- Audio > 80 sec
+- Long audio/video are currently rejected in the worker. Docling-based Path B for these formats is deferred until ASR support is wired in a later story.
 
 Pipeline Path B:
 
@@ -284,7 +284,7 @@ Starting values for v1. All configurable. Refined based on eval results.
 | `max_citations_per_response`    | 5                          | Maximum citations per response                                                                                                                                                                                                |
 | `max_promotions_per_response`   | 1                          | Maximum commercial recommendations per response                                                                                                                                                                               |
 | `path_a_text_threshold_pdf`     | 2000 tokens                | text_content threshold for PDF: Path A → Path B                                                                                                                                                                               |
-| `path_a_text_threshold_media`   | 500 tokens                 | text_content threshold for audio/video/images: Path A → Path B. Lower than for PDF since media descriptions are typically shorter                                                                                             |
+| `path_a_text_threshold_media`   | 500 tokens                 | text_content threshold for audio/video only. Over-threshold audio/video fail ingestion because Path B is not yet available; images ignore this threshold and remain single-chunk Path A                                       |
 | `conversation_history_messages` | 10                         | Maximum recent messages for query rewriting (additionally limited by `rewrite_token_budget`)                                                                                                                                  |
 | `bm25_language`                 | english                    | Qdrant BM25 language (Snowball stemmer)                                                                                                                                                                                       |
 

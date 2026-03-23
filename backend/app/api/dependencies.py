@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
 from app.services.chat import ChatService
+from app.services.embedding import EmbeddingService
 from app.services.llm import LLMService
 from app.services.qdrant import QdrantService
 from app.services.retrieval import RetrievalService
@@ -25,12 +26,22 @@ def get_qdrant_service(request: Request) -> QdrantService:
     return request.app.state.qdrant_service
 
 
+def get_embedding_service(request: Request) -> EmbeddingService:
+    return request.app.state.embedding_service
+
+
 class ArqTaskEnqueuer(TaskEnqueuer):
     def __init__(self, arq_pool: ArqRedis) -> None:
         self._arq_pool = arq_pool
 
     async def enqueue_ingestion(self, task_id: uuid.UUID) -> str:
         job = await self._arq_pool.enqueue_job("process_ingestion", str(task_id))
+        if job is None:
+            raise RuntimeError("arq returned no job handle")
+        return job.job_id
+
+    async def enqueue_batch_embed(self, task_id: uuid.UUID) -> str:
+        job = await self._arq_pool.enqueue_job("process_batch_embed", str(task_id))
         if job is None:
             raise RuntimeError("arq returned no job handle")
         return job.job_id

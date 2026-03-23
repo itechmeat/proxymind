@@ -361,6 +361,41 @@ async def test_upsert_chunks_sends_dense_and_bm25_vectors(
 
 
 @pytest.mark.asyncio
+async def test_upsert_chunks_only_includes_optional_media_payload_when_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = SimpleNamespace(upsert=AsyncMock())
+    service, _logger = _service(monkeypatch, client=client, embedding_dimensions=3)
+    point = QdrantChunkPoint(
+        chunk_id=uuid.uuid4(),
+        vector=[0.1, 0.2, 0.3],
+        snapshot_id=uuid.uuid4(),
+        source_id=uuid.uuid4(),
+        document_version_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        knowledge_base_id=uuid.uuid4(),
+        text_content="chunk body",
+        chunk_index=0,
+        token_count=12,
+        anchor_page=1,
+        anchor_chapter=None,
+        anchor_section=None,
+        anchor_timecode=None,
+        source_type=SourceType.PDF,
+        language="english",
+        status=ChunkStatus.INDEXED,
+        page_count=4,
+        duration_seconds=None,
+    )
+
+    await service.upsert_chunks([point])
+
+    payload = client.upsert.await_args.kwargs["points"][0].payload
+    assert payload["page_count"] == 4
+    assert "duration_seconds" not in payload
+
+
+@pytest.mark.asyncio
 async def test_upsert_chunks_retries_transient_connection_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

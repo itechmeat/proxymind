@@ -29,7 +29,17 @@ class Settings(BaseSettings):
     embedding_model: str = Field(default="gemini-embedding-2-preview", min_length=1)
     embedding_dimensions: int = Field(default=3072, ge=128, le=3072)
     embedding_batch_size: int = Field(default=100, ge=1)
+    batch_embed_chunk_threshold: int = Field(default=50, ge=1)
+    batch_poll_interval_seconds: int = Field(default=30, ge=1, le=60)
+    batch_max_items_per_request: int = Field(default=1000, ge=1)
+    gemini_content_model: str = Field(default="gemini-2.5-flash", min_length=1)
+    gemini_file_upload_threshold_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
     chunk_max_tokens: int = Field(default=1024, ge=1, le=8192)
+    path_a_text_threshold_pdf: int = Field(default=2000, ge=1)
+    path_a_text_threshold_media: int = Field(default=500, ge=1)
+    path_a_max_pdf_pages: int = Field(default=6, ge=1)
+    path_a_max_audio_duration_sec: int = Field(default=80, ge=1)
+    path_a_max_video_duration_sec: int = Field(default=120, ge=1)
     qdrant_collection: str = Field(default="proxymind_chunks", min_length=1)
     bm25_language: str = Field(default="english", min_length=1)
     llm_model: str = Field(default="openai/gpt-4o", min_length=1)
@@ -59,6 +69,10 @@ class Settings(BaseSettings):
         if self.min_retrieved_chunks > self.retrieval_top_n:
             raise ValueError(
                 "MIN_RETRIEVED_CHUNKS must be less than or equal to RETRIEVAL_TOP_N"
+            )
+        if 60 % self.batch_poll_interval_seconds != 0:
+            raise ValueError(
+                "BATCH_POLL_INTERVAL_SECONDS must evenly divide 60 for the current arq cron schedule"
             )
         return self
 
