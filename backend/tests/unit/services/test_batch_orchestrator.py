@@ -251,7 +251,10 @@ async def test_submit_to_gemini_rejects_chunk_order_mismatch(
 async def test_submit_to_gemini_marks_batch_failed_when_client_raises(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    task_id, batch_job_id, ordered_chunk_ids = await _seed_batch_context(session_factory, source_count=1)
+    task_id, batch_job_id, ordered_chunk_ids = await _seed_batch_context(
+        session_factory,
+        source_count=1,
+    )
     batch_client = SimpleNamespace(
         create_embedding_batch=AsyncMock(side_effect=RuntimeError("gemini submit failed")),
         model="gemini-embedding-2-preview",

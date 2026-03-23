@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     retrieval_top_n: int = Field(default=5, ge=1)
     min_retrieved_chunks: int = Field(default=1, ge=0)
     min_dense_similarity: float | None = Field(default=None, ge=0.0, le=1.0)
+    persona_dir: str = Field(default=str(REPO_ROOT / "persona"))
+    config_dir: str = Field(default=str(REPO_ROOT / "config"))
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
@@ -73,7 +75,8 @@ class Settings(BaseSettings):
             )
         if 60 % self.batch_poll_interval_seconds != 0:
             raise ValueError(
-                "BATCH_POLL_INTERVAL_SECONDS must evenly divide 60 for the current arq cron schedule"
+                "BATCH_POLL_INTERVAL_SECONDS must evenly divide 60 "
+                "for the current arq cron schedule"
             )
         return self
 
