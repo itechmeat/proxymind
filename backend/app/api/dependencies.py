@@ -81,6 +81,14 @@ def get_persona_context(request: Request) -> PersonaContext:
     return request.app.state.persona_context
 
 
+def get_sse_settings(request: Request) -> dict[str, int]:
+    settings = request.app.state.settings
+    return {
+        "heartbeat_interval": settings.sse_heartbeat_interval_seconds,
+        "inter_token_timeout": settings.sse_inter_token_timeout_seconds,
+    }
+
+
 def get_chat_service(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],

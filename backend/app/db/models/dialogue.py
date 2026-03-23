@@ -52,8 +52,10 @@ class Message(PrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "messages"
     __table_args__ = (
         Index("ix_messages_session_id", "session_id"),
+        Index("ix_messages_parent_message_id", "parent_message_id"),
         Index(
             "uq_messages_idempotency_key_not_null",
+            "session_id",
             "idempotency_key",
             unique=True,
             postgresql_where=text("idempotency_key IS NOT NULL"),
@@ -61,6 +63,11 @@ class Message(PrimaryKeyMixin, TimestampMixin, Base):
     )
 
     session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sessions.id"), nullable=False)
+    parent_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("messages.id"),
+        nullable=True,
+        default=None,
+    )
     role: Mapped[MessageRole] = mapped_column(
         pg_enum(MessageRole, name="message_role_enum"),
         nullable=False,
