@@ -2,7 +2,7 @@
 
 Initial focus — chat-first digital twin. The plan is built in vertical slices: each phase ends with a working and verifiable result. After phase 2, you can already upload a document and get an answer.
 
-> **Security ordering note:** The Chat API is public from S2-04, and Admin API endpoints are added throughout Phases 2–5, but rate limiting (S7-02) and admin auth (S7-01) are in Phase 7. This is acceptable for local development but MUST be resolved before any production deployment. Rate limiting and admin auth are baseline security per `docs/development.md` and `docs/architecture.md`, not late hardening. For production readiness, implement S7-01 and S7-02 before exposing the instance to untrusted traffic.
+> **Security ordering note:** The Chat API is public from S2-04, and Admin API endpoints are added throughout Phases 2–5, but API security (S7-01: auth + rate limiting) is in Phase 7. This is acceptable for local development but MUST be resolved before any production deployment. Rate limiting and admin auth are baseline security per `docs/development.md` and `docs/architecture.md`, not late hardening. For production readiness, implement S7-01 before exposing the instance to untrusted traffic.
 
 ## Testing Strategy
 
@@ -120,7 +120,7 @@ Phase outcome: full-featured dialog with persona, citations, memory, promotions.
   - Tasks: SSE endpoint, message state machine, idempotency, message persistence
 
 - [x] **S4-03: Citation builder**
-      LLM returns `[source_id:N]`, backend substitutes URL (online) or text citation (offline). Anchor metadata from Qdrant payload. SSE event type=citations.
+      LLM returns `[source:N]`, backend substitutes URL (online) or text citation (offline). Anchor metadata from Qdrant payload. SSE event type=citations.
   - **Outcome:** responses contain verified source references
   - **Verification:** response with citation → correct URL; offline source → "Book, chapter N, p. M"
   - Tasks: citation prompt instructions, source_id extraction, URL/text substitution, SSE citation event
@@ -130,27 +130,21 @@ Phase outcome: full-featured dialog with persona, citations, memory, promotions.
   - **Outcome:** multi-turn dialog yields relevant retrieval
   - **Verification:** "tell me more" → reformulated → better retrieval; timeout → fallback to original
   - Tasks: rewrite prompt, timeout handling, token budget trimming
+  - **Parallel pair:** S5-01 (Chat UI) — pure backend vs pure frontend, zero file overlap
 
-- [ ] **S4-05: PROMOTIONS.md integration**
-      Backend parses `PROMOTIONS.md`: filter expired, inject into prompt by priority rules (high/medium/low). No more than one recommendation per response.
-  - **Outcome:** twin natively recommends relevant current products in context
-  - **Verification:** promo with expired date → not in prompt; high priority → appears in relevant context
-  - Tasks: PROMOTIONS.md parser, expiry filter, priority-based inclusion, prompt layer
-  - **Parallel pair:** S5-01 (Chat UI) — pure backend vs pure frontend, zero overlap
+- [ ] **S4-05: Promotions + context assembly**
+      Backend parses `PROMOTIONS.md`: filter expired, inject into prompt by priority rules (high/medium/low). No more than one recommendation per response. Full context assembly of all prompt layers except conversation memory (delivered in S4-06): system safety → IDENTITY → SOUL → BEHAVIOR → PROMOTIONS → retrieval → user query. Token budget management (`retrieval_context_budget`). Content type markup (fact/inference/recommendation). Conversation memory slot is reserved but populated in S4-06.
+  - **Outcome:** prompt assembly with all layers including promotions, token budgets, and content type markup; conversation memory slot is a placeholder until S4-06
+  - **Verification:** promo with expired date → not in prompt; all layers present; when budget exceeded — retrieval is trimmed; response distinguishes content types
+  - Tasks: PROMOTIONS.md parser, expiry filter, priority-based inclusion, prompt builder service, token counting, budget trimming, content type instructions
+  - **Parallel pair:** S5-02 (Chat polish) — backend prompt work vs frontend components, zero file overlap
 
-- [ ] **S4-06: Context assembly (full)**
-      All prompt layers except conversation memory (delivered in S4-07): system safety → IDENTITY → SOUL → BEHAVIOR → PROMOTIONS → retrieval → user query. Token budget management (`retrieval_context_budget`). Content type markup (fact/inference/recommendation). Conversation memory slot is reserved in the prompt builder but populated in S4-07.
-  - **Outcome:** prompt assembly with all available layers and content types; conversation memory slot is a placeholder until S4-07
-  - **Verification:** all implemented layers present; when budget exceeded — retrieval is trimmed; response distinguishes content types
-  - Tasks: prompt builder service, token counting, budget trimming, content type instructions
-  - **Parallel pair:** any frontend task (S5-02..S5-04) — backend-only, no frontend touches
-
-- [ ] **S4-07: Conversation memory**
+- [ ] **S4-06: Conversation memory**
       Dialog history + summary for long conversations. Trimming when token budget exceeded. Session management.
   - **Outcome:** long conversations retain context
   - **Verification:** 20+ messages → context preserved; summary generated when limit reached
   - Tasks: history window, summary generation trigger, token budget integration
-  - **Parallel pair:** any frontend task (S5-02..S5-04) or S7-01 (Admin auth) — backend dialog vs middleware/frontend
+  - **Parallel pair:** S5-03 (Admin UI — knowledge) — backend dialog vs admin frontend, zero file overlap
 
 ### Phase 5: Frontend
 
@@ -161,92 +155,57 @@ Phase outcome: full-featured web interface for visitors and the owner.
   - **Outcome:** visitor can chat with the twin in the browser
   - **Verification:** open → send message → streaming response → history on refresh
   - Tasks: chat layout, SSE client, message rendering, session persistence
-  - **Parallel pair:** S4-05 or S4-06 — frontend-only, no backend overlap
+  - **Parallel pair:** S4-04 (Query rewriting) — pure frontend vs pure backend, zero file overlap
 
-- [ ] **S5-02: Citations display**
-      Inline references in text, collapsible sources block under the message (Perplexity-style). Clickable for online, text-only for offline.
-  - **Outcome:** sources are visible and clickable
-  - **Verification:** citation → clickable link; collapse/expand block
-  - Tasks: citation parser, collapsible block component, link rendering
-  - **Parallel pair:** S4-07 or S7-01 — frontend component work vs backend service/middleware
+- [ ] **S5-02: Chat polish — citations display + twin profile**
+      Inline references in text, collapsible sources block under the message (Perplexity-style). Clickable for online, text-only for offline. Twin avatar (upload → SeaweedFS) and name in chat header. Note: "public links" require a backend schema extension — defer to a future story.
+  - **Outcome:** sources visible and clickable; twin profile displayed in chat
+  - **Verification:** citation → clickable link; collapse/expand block; avatar visible in chat header
+  - Tasks: citation parser, collapsible block component, link rendering, avatar upload, profile metadata form, display in chat header
+  - **Parallel pair:** S4-05 (Promotions + context assembly) — frontend vs backend, zero file overlap
 
-- [ ] **S5-03: Admin UI — source upload**
-      File upload (drag & drop), source list with ingestion statuses, soft delete.
-  - **Outcome:** owner uploads and views sources through the interface
-  - **Verification:** upload file → see processing progress → status done
-  - Tasks: file upload component, source list, status polling, delete confirmation
-  - **Parallel pair:** S5-04 (Admin snapshots) — separate pages, separate APIs, no shared components
-
-- [ ] **S5-04: Admin UI — snapshot management**
-      Snapshot list, create draft, publish, rollback, draft testing.
-  - **Outcome:** owner manages knowledge versions through the interface
-  - **Verification:** create snapshot → publish → twin responds from it; rollback → previous version
-  - Tasks: snapshot list, publish/rollback buttons, draft test view
-  - **Parallel pair:** S5-03 (Admin source upload) — separate pages, separate APIs, no shared components
-
-- [ ] **S5-05: Admin UI — twin profile**
-      Avatar (upload → SeaweedFS), name. Note: "public links" require a backend schema extension (no profile endpoint or storage for links exists in the current spec) — defer public links to a future story or add a backend story before this one.
-  - **Outcome:** twin profile is configured and displayed in the chat
-  - **Verification:** upload avatar → visible in chat interface
-  - Tasks: avatar upload, profile metadata form, display in chat header
-  - **Parallel pair:** S7-01 (Admin auth) or S7-02 (Rate limiting) — frontend vs backend middleware
+- [ ] **S5-03: Admin UI — knowledge management**
+      Source upload (drag & drop), source list with ingestion statuses, soft delete. Snapshot list, create draft, publish, rollback, draft testing.
+  - **Outcome:** owner manages sources and knowledge versions through the interface
+  - **Verification:** upload file → see processing progress → status done; create snapshot → publish → twin responds; rollback → previous version
+  - Tasks: file upload component, source list, status polling, delete confirmation, snapshot list, publish/rollback buttons, draft test view
+  - **Parallel pair:** S4-06 (Conversation memory) — admin frontend vs backend dialog, zero file overlap
 
 ### Phase 6: Commerce
 
 Phase outcome: full commercial layer — catalog, recommendations, citation integration.
 
-- [ ] **S6-01: Product catalog (backend)**
-      Admin API: CRUD catalog_items. Source ↔ catalog_item linking. When citing a source linked to a product, automatically suggest a purchase link.
-  - **Outcome:** products are linked to sources and appear in citations
-  - **Verification:** citation of a book linked to a product → store link nearby
-  - Tasks: catalog API endpoints, source-catalog linking, citation enrichment
-  - **Parallel pair:** S7-01 or S7-02 — independent backend domains (commerce vs security)
+- [ ] **S6-01: Commerce backend — catalog + recommendations**
+      Admin API: CRUD catalog_items. Source ↔ catalog_item linking. Citation enrichment with purchase links. PROMOTIONS.md + catalog integration for native delivery. Citation takes priority over commercial link. No more than one recommendation per response.
+  - **Outcome:** products linked to sources, appear in citations; twin recommends products naturally in context
+  - **Verification:** citation of linked product → store link; conversation about topic → relevant recommendation; not every response has recommendation
+  - Tasks: catalog API endpoints, source-catalog linking, citation enrichment, promotion-catalog integration, native recommendation prompt, frequency control
+  - **Parallel pair:** S7-01 (API security) — commerce domain vs security middleware, minimal overlap
 
-- [ ] **S6-02a: Admin UI — product catalog**
-      Product catalog CRUD, source ↔ catalog item linking. Depends on S6-01 (backend).
+- [ ] **S6-02: Admin UI — product catalog**
+      Product catalog CRUD, source ↔ catalog item linking. Depends on S6-01 backend.
   - **Outcome:** owner manages products through the interface
   - **Verification:** add product → link to source → citation includes purchase link
   - Tasks: catalog form, source-catalog linking UI
-  - **Parallel pair:** S7-03 (Audit logging) — frontend vs backend, no overlap
-
-- [ ] **S6-03: Native recommendations (end-to-end)**
-      Catalog + PROMOTIONS.md + citation builder. Native delivery. Citation takes priority over commercial link.
-  - **Outcome:** twin recommends products naturally in context
-  - **Verification:** conversation about music → twin mentions a concert; not every response contains a recommendation
-  - Tasks: promotion-catalog integration, native recommendation prompt, frequency control
-  - **Parallel pair:** S7-04 (Monitoring) — prompt/LLM logic vs infra instrumentation
+  - **Parallel pair:** S7-02 (Observability) — frontend vs infra, zero file overlap
 
 ### Phase 7: Operations Layer
 
 Phase outcome: the product is secured, observable, and auditable.
 
-- [ ] **S7-01: Admin API auth**
-      API key (`Authorization: Bearer`). Key from `.env`. Chat API is public.
-  - **Outcome:** admin endpoints are protected
-  - **Verification:** without key → 401; with key → 200
-  - Tasks: auth middleware, key config, error responses, keep admin auth isolated from future visitor identity for channel connectors
-  - **Parallel pair:** any frontend task or S6-01 — standalone middleware, no shared code
+- [ ] **S7-01: API security — auth + rate limiting**
+      Admin API: API key (`Authorization: Bearer`), key from `.env`. Chat API: Redis-based rate limiting, configurable limits. Chat API remains public.
+  - **Outcome:** admin endpoints protected; chat protected from abuse
+  - **Verification:** admin without key → 401; with key → 200; exceed rate limit → 429; after cooldown → ok
+  - Tasks: auth middleware, key config, error responses, rate limit middleware, Redis counters, keep admin auth isolated from future visitor identity for channel connectors
+  - **Parallel pair:** S6-01 (Commerce backend) — security middleware vs commerce domain, minimal overlap
 
-- [ ] **S7-02: Rate limiting**
-      Redis-based for Chat API. Configurable limits.
-  - **Outcome:** chat is protected from abuse
-  - **Verification:** exceed limit → 429; after cooldown → ok
-  - Tasks: rate limit middleware, Redis counters, config
-  - **Parallel pair:** any frontend task or S6-01 — standalone middleware, no shared code
-
-- [ ] **S7-03: Audit logging**
-      Every response → audit_logs: `snapshot_id`, `source_ids`, `config_commit_hash`, `config_content_hash`, timestamp, session_id.
-  - **Outcome:** every response is reproducible
-  - **Verification:** conversation → audit records with full data
-  - Tasks: audit service, log schema, config hash injection
-  - **Parallel pair:** any frontend task or S6-02a — writes to audit_logs table, no overlap with UI/commerce code
-
-- [ ] **S7-04: Monitoring and tracing**
-      Prometheus `/metrics`, Grafana dashboard, OpenTelemetry tracing, correlation ids.
-  - **Outcome:** system is observable
-  - **Verification:** dashboard with metrics; end-to-end request trace
-  - Tasks: metrics middleware, Grafana provisioning, OTel instrumentation
-  - **Parallel pair:** S6-03 or any frontend task — infra-only, touches middleware and Docker, no business logic overlap
+- [ ] **S7-02: Observability — audit logging + monitoring**
+      Audit: every response → audit_logs with `snapshot_id`, `source_ids`, `config_commit_hash`, `config_content_hash`, timestamp, session_id. Monitoring: Prometheus `/metrics`, Grafana dashboard, OpenTelemetry tracing, correlation ids.
+  - **Outcome:** every response reproducible; system observable
+  - **Verification:** conversation → audit records with full data; dashboard with metrics; end-to-end request trace
+  - Tasks: audit service, log schema, config hash injection, metrics middleware, Grafana provisioning, OTel instrumentation
+  - **Parallel pair:** S6-02 (Catalog UI) — infra vs frontend, zero file overlap
 
 ### Phase 8: Evals and Quality
 
@@ -257,28 +216,12 @@ Phase outcome: measured quality, data-driven decisions on upgrade paths.
   - **Outcome:** eval suite can be run and produces a report
   - **Verification:** `run-evals` → report with metrics
   - Tasks: dataset format, eval runner, report generator
-  - **Parallel pair:** any remaining frontend/ops task — eval infra is isolated in `tests/evals/`
 
-- [ ] **S8-02: Retrieval evals**
-      Precision@K, Recall@K, MRR. Baseline for hybrid search.
-  - **Outcome:** retrieval quality is measured
-  - **Verification:** report with retrieval metrics; baseline recorded
-  - Tasks: retrieval eval scenarios, metric computation, baseline snapshot
-  - **Parallel pair:** S8-03 (Answer quality evals) — both need S8-01 but test different dimensions, no shared eval code
-
-- [ ] **S8-03: Answer quality evals**
-      Groundedness, citation accuracy, persona fidelity, refusal quality. LLM-as-judge + manual sampling.
-  - **Outcome:** answer quality is measured across all criteria
-  - **Verification:** report with answer metrics
-  - Tasks: eval prompts per metric, scoring rubric, human review process
-  - **Parallel pair:** S8-02 (Retrieval evals) — both need S8-01 but test different dimensions, no shared eval code
-
-- [ ] **S8-04: Upgrade path decision**
-      Documented decision based on S8-02/S8-03: chunk enrichment, parent-child, BGE-M3.
-  - **Outcome:** data-backed plan for next improvements
-  - **Verification:** decision document supported by data
-  - Tasks: data analysis, cost/benefit, decision doc
-  - **Parallel pair:** none — requires S8-02 + S8-03 results as input
+- [ ] **S8-02: Eval runs + upgrade decision**
+      Retrieval evals: Precision@K, Recall@K, MRR baseline. Answer quality: groundedness, citation accuracy, persona fidelity, refusal quality (LLM-as-judge + manual sampling). Upgrade path decision documented based on results: chunk enrichment, parent-child, BGE-M3.
+  - **Outcome:** retrieval and answer quality measured; data-backed improvement plan
+  - **Verification:** report with retrieval + answer metrics; baseline recorded; decision document supported by data
+  - Tasks: retrieval eval scenarios, metric computation, baseline snapshot, eval prompts per metric, scoring rubric, human review process, data analysis, cost/benefit, decision doc
 
 ### Phase 9: RAG Upgrades (based on eval results)
 
@@ -327,16 +270,8 @@ Phase outcome: twin is available as an agent in the open ecosystem.
 
 Phase outcome: the twin can operate in external messaging and social channels without a standalone ProxyMind registration flow for end users.
 
-- [ ] **S11-01: External visitor identity model**
-      Introduce a visitor identity model for future channel connectors. Resolve or create visitors implicitly from platform identity such as `(channel_connector, external_user_id)`. Keep this separate from admin auth.
-  - **Outcome:** the auth model is ready for external channel users without rewriting admin authentication
-  - **Verification:** architecture and schema support mapping an external identity to a visitor and session without local registration
-  - Tasks: visitor identity entity, external identity mapping, channel metadata on sessions/messages, audit considerations
-  - **Parallel pair:** none — S11-02 directly depends on this schema
-
-- [ ] **S11-02: Channel connectors foundation**
-      Add the integration layer for external chat platforms (Telegram, Facebook, VK, Instagram, TikTok, and similar channels). Normalize inbound/outbound events into the same internal chat flow as the web UI.
-  - **Outcome:** the system has a defined path for adding external channels without changing the core dialogue workflow
-  - **Verification:** connector contract documented; one connector can deliver a normalized message into the chat pipeline
-  - Tasks: connector interface, message normalization, delivery abstraction, connector lifecycle and error handling
-  - **Parallel pair:** none — final task in the plan
+- [ ] **S11-01: External channels — identity + connectors**
+      Visitor identity model: resolve or create visitors implicitly from platform identity such as `(channel_connector, external_user_id)`. Keep separate from admin auth. Integration layer for external chat platforms (Telegram, Facebook, VK, Instagram, TikTok, and similar channels). Normalize inbound/outbound events into the same internal chat flow as the web UI.
+  - **Outcome:** external channels work with implicit visitor identity; system has a defined path for adding channels without changing the core dialogue workflow
+  - **Verification:** connector delivers a normalized message into the chat pipeline; external identity maps to a visitor and session without local registration
+  - Tasks: visitor identity entity, external identity mapping, connector interface, message normalization, delivery abstraction, connector lifecycle and error handling

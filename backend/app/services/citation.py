@@ -61,7 +61,7 @@ def _build_text_citation(title: str, anchor: dict[str, int | str | None]) -> str
 
     if chapter is not None:
         parts.append(str(chapter))
-    elif section is not None:
+    if section is not None:
         parts.append(str(section))
     if page is not None:
         parts.append(f"p. {page}")
@@ -80,6 +80,9 @@ class CitationService:
         source_map: dict[uuid.UUID, SourceInfo],
         max_citations: int,
     ) -> list[Citation]:
+        if max_citations <= 0:
+            return []
+
         citations: list[Citation] = []
         seen_source_ids: set[uuid.UUID] = set()
 

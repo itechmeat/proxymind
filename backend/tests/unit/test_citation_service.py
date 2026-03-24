@@ -199,7 +199,7 @@ class TestTextCitation:
             max_citations=5,
         )
 
-        assert result[0].text_citation == '"Clean Architecture", Chapter 5, p. 42'
+        assert result[0].text_citation == '"Clean Architecture", Chapter 5, Interfaces, p. 42'
 
     def test_title_only(self) -> None:
         source_id = uuid.uuid4()
@@ -242,6 +242,22 @@ class TestTextCitation:
         )
 
         assert result[0].text_citation == '"Design Patterns", Observer'
+
+    def test_zero_or_negative_max_citations_returns_empty(self) -> None:
+        source_id = uuid.uuid4()
+
+        assert CitationService.extract(
+            "[source:1]",
+            [_chunk(source_id)],
+            {source_id: _source_info(source_id)},
+            max_citations=0,
+        ) == []
+        assert CitationService.extract(
+            "[source:1]",
+            [_chunk(source_id)],
+            {source_id: _source_info(source_id)},
+            max_citations=-1,
+        ) == []
 
 
 class TestCitationToDict:

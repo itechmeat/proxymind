@@ -46,7 +46,7 @@ When retrieved chunks are provided with a non-null `source_map`, the system prom
 
 ### Requirement: Prompt chunk format
 
-Retrieved chunks SHALL be formatted in the prompt as `[Source N] (title: "{title}", chapter: "{chapter}", page: {page})` using anchor fields from `source_map`. Anchor fields (title, chapter, page, section, timecode) SHALL be included only when non-null. Retrieval confidence score SHALL NOT be exposed to the LLM in the prompt.
+Retrieved chunks SHALL be formatted in the prompt as `[source:N] (title: "{title}", chapter: "{chapter}", page: {page})` using anchor fields from `source_map`. Anchor fields (title, chapter, page, section, timecode) SHALL be included only when non-null. Retrieval confidence score SHALL NOT be exposed to the LLM in the prompt.
 
 #### Scenario: Chunk with title, chapter, and page
 
@@ -144,9 +144,9 @@ Every citation SHALL include a `text_citation` string regardless of whether a UR
 
 - Base: `"{title}"`
 - If `chapter` is non-null: append `, {chapter}` (raw value — Docling stores the full heading, e.g., "Chapter 5" or "Introduction")
-- If `section` is non-null and `chapter` is absent: append `, {section}`
+- If `section` is non-null: append `, {section}`
 - If `page` is non-null: append `, p. {page}`
-- If `timecode` is non-null: append ` at {timecode}`
+- If `timecode` is non-null: append `at {timecode}` after the assembled citation body
 
 Fields with null values SHALL be omitted from the text citation.
 
@@ -173,8 +173,7 @@ Fields with null values SHALL be omitted from the text citation.
 #### Scenario: Source with both chapter and section
 
 - **WHEN** a citation has title "Book Title", chapter "3", section "Intro", page 10, timecode null
-- **THEN** `text_citation` SHALL be `"Book Title", 3, p. 10`
-- **AND** the section SHALL be omitted because chapter is present
+- **THEN** `text_citation` SHALL be `"Book Title", 3, Intro, p. 10`
 
 ---
 

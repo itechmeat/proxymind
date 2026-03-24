@@ -13,7 +13,7 @@ Chat responses reference knowledge chunks but provide no verifiable source attri
 ## What Changes
 
 - Add `CitationService` — stateless service that parses `[source:N]` markers from LLM output, maps ordinal indices to retrieved chunks, and builds structured citation objects with source metadata and anchor details
-- Update prompt builder — add citation instructions to system prompt, change chunk format from raw UUIDs to `[Source N]` with human-readable title/anchor metadata, remove score from LLM-visible context
+- Update prompt builder — add citation instructions to system prompt, change chunk format to `[source:N]` with human-readable title/anchor metadata, remove score from LLM-visible context
 - Wire citations into streaming pipeline — batch-load source metadata from PG after retrieval, extract citations after LLM stream completes, emit SSE `citations` event before `done`, persist to `Message.citations` JSONB
 - Update idempotent replay — include `citations` event when replaying COMPLETE messages from DB
 - Add `CitationResponse` schema to chat API — expose citations in session history endpoint
@@ -23,9 +23,11 @@ Chat responses reference knowledge chunks but provide no verifiable source attri
 ## Capabilities
 
 ### New Capabilities
+
 - `citation-builder`: Citation marker extraction, source metadata resolution (URL/text), text citation formatting, SSE citations event, prompt citation instructions
 
 ### Modified Capabilities
+
 - `sse-streaming`: Add `citations` event emission (currently reserved but not emitted), update replay to include citations, add `ChatStreamCitations` event type to union
 - `chat-dialogue`: Add `citations` field to `MessageInHistory` and `MessageResponse` schemas, batch-load source metadata in chat flow
 

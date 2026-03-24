@@ -48,7 +48,7 @@
 - [x] 9.1 Add `test_sse_stream_includes_citations_event` to `backend/tests/integration/test_chat_sse.py` — full SSE flow: create session, send message, verify citations event present between tokens and done, verify structure
 - [x] 9.2 Add `test_session_history_includes_citations` to `backend/tests/integration/test_chat_sse.py` — send message with citations, then GET /api/chat/sessions/:id, verify assistant message has `citations` as non-empty list with correct CitationResponse structure
 - [x] 9.3 Add `test_session_history_citations_null_vs_empty` to `backend/tests/integration/test_chat_sse.py` — verify user message has `citations: null`, COMPLETE assistant with no markers has `citations: []`
-- [ ] 9.4 Run full test suite (`cd backend && python -m pytest tests/ -v --timeout=60`) and verify all tests pass
+- [x] 9.4 Run full test suite (`cd backend && python -m pytest tests/ -v --timeout=60`) and verify all tests pass
 
 ## 10. Verification
 

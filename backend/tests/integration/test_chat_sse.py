@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import tempfile
 import time
 import uuid
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import httpx
@@ -56,7 +58,7 @@ async def _create_source(
             source_type=source_type,
             title=title,
             public_url=public_url,
-            file_path=f"/tmp/{source_id}.pdf",
+            file_path=str(Path(tempfile.gettempdir()) / f"{source_id}.pdf"),
             status=SourceStatus.READY,
         )
         session.add(source)

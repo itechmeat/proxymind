@@ -78,6 +78,31 @@ class CitationResponse(BaseModel):
         )
 
 
+_REQUIRED_CITATION_FIELDS = {
+    "index",
+    "source_id",
+    "source_title",
+    "source_type",
+    "text_citation",
+}
+
+
+def _parse_citations(value: list[dict[str, Any]] | None) -> list[CitationResponse] | None:
+    if value is None:
+        return None
+
+    citations: list[CitationResponse] = []
+    for item in value:
+        if not isinstance(item, dict) or not _REQUIRED_CITATION_FIELDS.issubset(item):
+            continue
+        try:
+            citations.append(CitationResponse.from_dict(item))
+        except (TypeError, ValueError):
+            continue
+
+    return citations
+
+
 class MessageResponse(BaseModel):
     message_id: uuid.UUID
     session_id: uuid.UUID
@@ -104,11 +129,7 @@ class MessageResponse(BaseModel):
             role=message.role,
             content=message.content,
             status=message.status,
-            citations=(
-                None
-                if message.citations is None
-                else [CitationResponse.from_dict(citation) for citation in message.citations]
-            ),
+            citations=_parse_citations(message.citations),
             model_name=message.model_name,
             retrieved_chunks_count=retrieved_chunks_count,
             token_count_prompt=message.token_count_prompt,
@@ -133,11 +154,7 @@ class MessageInHistory(BaseModel):
             role=message.role,
             content=message.content,
             status=message.status,
-            citations=(
-                None
-                if message.citations is None
-                else [CitationResponse.from_dict(citation) for citation in message.citations]
-            ),
+            citations=_parse_citations(message.citations),
             model_name=message.model_name,
             created_at=message.created_at,
         )

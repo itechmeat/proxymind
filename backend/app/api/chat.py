@@ -5,7 +5,6 @@ import json
 import time
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import suppress
 from typing import Annotated, NoReturn
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
