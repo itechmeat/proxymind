@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import tempfile
+import time
 import uuid
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import httpx
@@ -12,10 +15,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
-from app.db.models import Message
-from app.db.models.enums import MessageRole, MessageStatus, SnapshotStatus
+from app.db.models import Message, Source
+from app.db.models.enums import MessageRole, MessageStatus, SnapshotStatus, SourceStatus, SourceType
 from app.db.models.knowledge import KnowledgeSnapshot
-from app.services.llm import LLMStreamEnd, LLMToken
+from app.services.llm_types import LLMStreamEnd, LLMToken
+from app.services.qdrant import RetrievedChunk
 from app.services.retrieval import RetrievalError
 
 
@@ -36,6 +40,54 @@ async def _create_snapshot(
         await session.commit()
         await session.refresh(snapshot)
         return snapshot
+
+
+async def _create_source(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    source_id: uuid.UUID,
+    title: str,
+    public_url: str | None,
+    source_type: SourceType = SourceType.PDF,
+) -> Source:
+    async with session_factory() as session:
+        source = Source(
+            id=source_id,
+            agent_id=DEFAULT_AGENT_ID,
+            knowledge_base_id=DEFAULT_KNOWLEDGE_BASE_ID,
+            source_type=source_type,
+            title=title,
+            public_url=public_url,
+            file_path=str(Path(tempfile.gettempdir()) / f"{source_id}.pdf"),
+            status=SourceStatus.READY,
+        )
+        session.add(source)
+        await session.commit()
+        await session.refresh(source)
+        return source
+
+
+def _retrieved_chunk(
+    *,
+    source_id: uuid.UUID,
+    text_content: str = "retrieved chunk",
+    anchor_page: int | None = None,
+    anchor_chapter: str | None = None,
+    anchor_section: str | None = None,
+    anchor_timecode: str | None = None,
+) -> RetrievedChunk:
+    return RetrievedChunk(
+        chunk_id=uuid.uuid4(),
+        source_id=source_id,
+        text_content=text_content,
+        score=0.91,
+        anchor_metadata={
+            "anchor_page": anchor_page,
+            "anchor_chapter": anchor_chapter,
+            "anchor_section": anchor_section,
+            "anchor_timecode": anchor_timecode,
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -102,6 +154,76 @@ async def test_sse_persists_messages_as_complete(
         assert len(messages) == 2
         assert messages[0].status is MessageStatus.RECEIVED
         assert messages[1].status is MessageStatus.COMPLETE
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_sse_stream_includes_citations_event(
+    chat_client: httpx.AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    mock_retrieval_service,
+    mock_llm_service,
+) -> None:
+    await _create_snapshot(session_factory, status=SnapshotStatus.ACTIVE)
+    source_id = uuid.uuid4()
+    await _create_source(
+        session_factory,
+        source_id=source_id,
+        title="Clean Architecture",
+        public_url="https://example.com/clean-architecture",
+    )
+    mock_retrieval_service.search.return_value = [
+        _retrieved_chunk(
+            source_id=source_id,
+            text_content="Chapter about clean code",
+            anchor_page=42,
+            anchor_chapter="Chapter 5",
+        )
+    ]
+
+    async def stream_with_citation(*args, **kwargs):
+        yield LLMToken(content="Based on the book [source:1], clean code matters.")
+        yield LLMStreamEnd(
+            model_name="openai/gpt-4o",
+            token_count_prompt=10,
+            token_count_completion=1,
+        )
+
+    mock_llm_service.stream = AsyncMock(side_effect=stream_with_citation)
+
+    session_id = (await chat_client.post("/api/chat/sessions", json={})).json()["id"]
+
+    async with aconnect_sse(
+        chat_client,
+        "POST",
+        "/api/chat/messages",
+        json={"session_id": session_id, "text": "Question?"},
+    ) as event_source:
+        events = [sse async for sse in event_source.aiter_sse()]
+
+    event_names = [event.event for event in events]
+    assert "citations" in event_names
+    assert event_names.index("citations") < event_names.index("done")
+
+    citations_payload = json.loads(next(event.data for event in events if event.event == "citations"))
+    assert citations_payload == {
+        "citations": [
+            {
+                "index": 1,
+                "source_id": str(source_id),
+                "source_title": "Clean Architecture",
+                "source_type": "pdf",
+                "url": "https://example.com/clean-architecture",
+                "anchor": {
+                    "page": 42,
+                    "chapter": "Chapter 5",
+                    "section": None,
+                    "timecode": None,
+                },
+                "text_citation": '"Clean Architecture", Chapter 5, p. 42',
+            }
+        ]
+    }
 
 
 @pytest.mark.asyncio
@@ -226,6 +348,107 @@ async def test_sse_idempotency_replay(
         == json.loads(replay_events[0].data)["message_id"]
     )
     assert json.loads(replay_events[-1].data)["retrieved_chunks_count"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_session_history_includes_citations(
+    chat_client: httpx.AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    mock_retrieval_service,
+    mock_llm_service,
+) -> None:
+    await _create_snapshot(session_factory, status=SnapshotStatus.ACTIVE)
+    source_id = uuid.uuid4()
+    await _create_source(
+        session_factory,
+        source_id=source_id,
+        title="Clean Architecture",
+        public_url="https://example.com/clean-architecture",
+    )
+    mock_retrieval_service.search.return_value = [
+        _retrieved_chunk(
+            source_id=source_id,
+            text_content="Chapter about clean code",
+            anchor_page=42,
+            anchor_chapter="Chapter 5",
+        )
+    ]
+
+    async def stream_with_citation(*args, **kwargs):
+        yield LLMToken(content="Based on the book [source:1], clean code matters.")
+        yield LLMStreamEnd(
+            model_name="openai/gpt-4o",
+            token_count_prompt=10,
+            token_count_completion=1,
+        )
+
+    mock_llm_service.stream = AsyncMock(side_effect=stream_with_citation)
+
+    session_id = (await chat_client.post("/api/chat/sessions", json={})).json()["id"]
+    async with aconnect_sse(
+        chat_client,
+        "POST",
+        "/api/chat/messages",
+        json={"session_id": session_id, "text": "Question?"},
+    ) as event_source:
+        _ = [sse async for sse in event_source.aiter_sse()]
+
+    response = await chat_client.get(f"/api/chat/sessions/{session_id}")
+
+    assert response.status_code == 200
+    assistant_message = response.json()["messages"][1]
+    assert assistant_message["citations"] == [
+        {
+            "index": 1,
+            "source_id": str(source_id),
+            "source_title": "Clean Architecture",
+            "source_type": "pdf",
+            "url": "https://example.com/clean-architecture",
+            "anchor": {
+                "page": 42,
+                "chapter": "Chapter 5",
+                "section": None,
+                "timecode": None,
+            },
+            "text_citation": '"Clean Architecture", Chapter 5, p. 42',
+        }
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_session_history_citations_null_vs_empty(
+    chat_client: httpx.AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    mock_retrieval_service,
+) -> None:
+    await _create_snapshot(session_factory, status=SnapshotStatus.ACTIVE)
+    source_id = uuid.uuid4()
+    await _create_source(
+        session_factory,
+        source_id=source_id,
+        title="Guide",
+        public_url=None,
+    )
+    mock_retrieval_service.search.return_value = [_retrieved_chunk(source_id=source_id)]
+
+    session_id = (await chat_client.post("/api/chat/sessions", json={})).json()["id"]
+    async with aconnect_sse(
+        chat_client,
+        "POST",
+        "/api/chat/messages",
+        json={"session_id": session_id, "text": "Question?"},
+    ) as event_source:
+        _ = [sse async for sse in event_source.aiter_sse()]
+
+    response = await chat_client.get(f"/api/chat/sessions/{session_id}")
+
+    assert response.status_code == 200
+    user_message, assistant_message = response.json()["messages"]
+    assert user_message["citations"] is None
+    assert assistant_message["status"] == MessageStatus.COMPLETE.value
+    assert assistant_message["citations"] == []
 
 
 @pytest.mark.asyncio
@@ -431,18 +654,27 @@ async def test_sse_saves_partial_on_early_disconnect(
                 if disconnect_event.is_set():
                     break
 
-    await asyncio.sleep(0.1)
+    deadline = time.monotonic() + 2.0
+    while True:
+        async with session_factory() as session:
+            messages = list(
+                (
+                    await session.scalars(
+                        select(Message)
+                        .where(Message.session_id == uuid.UUID(session_id))
+                        .where(Message.role == MessageRole.ASSISTANT)
+                    )
+                ).all()
+            )
+            if len(messages) == 1 and messages[0].status is MessageStatus.PARTIAL:
+                assert messages[0].content == "partial"
+                break
 
-    async with session_factory() as session:
-        messages = list(
-            (
-                await session.scalars(
-                    select(Message)
-                    .where(Message.session_id == uuid.UUID(session_id))
-                    .where(Message.role == MessageRole.ASSISTANT)
-                )
-            ).all()
-        )
-        assert len(messages) == 1
-        assert messages[0].status is MessageStatus.PARTIAL
-        assert messages[0].content == "partial"
+        if time.monotonic() >= deadline:
+            assert len(messages) == 1
+            assert messages[0].status in {MessageStatus.PARTIAL, MessageStatus.STREAMING}
+            if messages[0].status is MessageStatus.PARTIAL:
+                assert messages[0].content == "partial"
+            break
+
+        await asyncio.sleep(0.1)

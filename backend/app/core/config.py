@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     retrieval_top_n: int = Field(default=5, ge=1)
     min_retrieved_chunks: int = Field(default=1, ge=0)
+    max_citations_per_response: int = Field(default=5, ge=1)
     min_dense_similarity: float | None = Field(default=None, ge=0.0, le=1.0)
     sse_heartbeat_interval_seconds: int = Field(default=15, ge=1)
     sse_inter_token_timeout_seconds: int = Field(default=30, ge=1)

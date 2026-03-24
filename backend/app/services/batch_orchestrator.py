@@ -170,11 +170,12 @@ class BatchOrchestrator:
             batch_job.batch_operation_name,
             expected_count=batch_job.request_count or batch_job.item_count or 0,
         )
+        batch_job_id = batch_job.id
         try:
             await self._apply_results(session, batch_job=batch_job, results=results)
         except Exception as error:
             await session.rollback()
-            failed_batch_job = await session.get(BatchJob, batch_job.id)
+            failed_batch_job = await session.get(BatchJob, batch_job_id)
             if failed_batch_job is not None:
                 failed_batch_job.status = BatchStatus.FAILED
                 failed_batch_job.error_message = str(error) or type(error).__name__

@@ -70,6 +70,21 @@ def _existing_postgres_env() -> dict[str, str]:
     }
 
 
+def _wait_for_qdrant(url: str) -> str:
+    deadline = time.time() + 30
+    last_error: Exception | None = None
+    while time.time() < deadline:
+        try:
+            response = httpx.get(f"{url}/collections", timeout=2.0)
+            if response.status_code == 200:
+                return url
+        except Exception as error:  # pragma: no cover - best effort wait loop
+            last_error = error
+        time.sleep(1)
+
+    raise RuntimeError("Qdrant test service did not become ready") from last_error
+
+
 @pytest.fixture(scope="session")
 def postgres_env() -> dict[str, str]:
     if os.environ.get("PYTEST_USE_EXISTING_POSTGRES") == "1":
@@ -226,7 +241,7 @@ def mock_retrieval_service() -> SimpleNamespace:
 
 @pytest.fixture
 def mock_llm_service() -> SimpleNamespace:
-    from app.services.llm import LLMResponse, LLMStreamEnd, LLMToken
+    from app.services.llm_types import LLMResponse, LLMStreamEnd, LLMToken
 
     async def _fake_stream(*args, **kwargs):
         yield LLMToken(content="Assistant")
@@ -281,6 +296,7 @@ def chat_app(
     app.include_router(chat_router)
     app.state.settings = SimpleNamespace(
         min_retrieved_chunks=1,
+        max_citations_per_response=5,
         sse_heartbeat_interval_seconds=15,
         sse_inter_token_timeout_seconds=30,
     )
@@ -333,21 +349,10 @@ async def committed_data_cleanup(
 
 @pytest.fixture(scope="session")
 def qdrant_url() -> str:
+    if os.environ.get("PYTEST_USE_EXISTING_QDRANT") == "1":
+        return _wait_for_qdrant(os.environ["QDRANT_URL"])
+
     with DockerContainer("qdrant/qdrant:v1.17.0").with_exposed_ports(6333) as container:
         host = container.get_container_host_ip()
         port = container.get_exposed_port(6333)
-        url = f"http://{host}:{port}"
-
-        deadline = time.time() + 30
-        last_error: Exception | None = None
-        while time.time() < deadline:
-            try:
-                response = httpx.get(f"{url}/collections", timeout=2.0)
-                if response.status_code == 200:
-                    yield url
-                    return
-            except Exception as error:  # pragma: no cover - best effort wait loop
-                last_error = error
-            time.sleep(1)
-
-        raise RuntimeError("Qdrant test container did not become ready") from last_error
+        yield _wait_for_qdrant(f"http://{host}:{port}")

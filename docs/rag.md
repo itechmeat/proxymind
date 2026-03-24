@@ -195,7 +195,7 @@ The prompt is assembled from multiple layers. Order and priority:
 Described in detail in [docs/spec.md](spec.md#citation-protocol). In brief:
 
 1. The LLM receives chunks with `source_id` and anchor metadata.
-2. The LLM references sources via `[source_id:N]`.
+2. The LLM references retrieved sources via `[source:N]` ordinal markers.
 3. The backend substitutes real URLs (for online sources) or text citations (for offline sources).
 4. The LLM **never** generates URLs on its own.
 

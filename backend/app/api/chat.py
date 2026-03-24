@@ -19,6 +19,7 @@ from app.api.chat_schemas import (
 from app.api.dependencies import get_chat_service, get_sse_settings
 from app.services.chat import (
     ChatService,
+    ChatStreamCitations,
     ChatStreamDone,
     ChatStreamError,
     ChatStreamMeta,
@@ -85,7 +86,7 @@ async def send_message(
     accumulated_content: list[str] = []
 
     def format_event(
-        event: ChatStreamMeta | ChatStreamToken | ChatStreamDone | ChatStreamError,
+        event: ChatStreamMeta | ChatStreamToken | ChatStreamDone | ChatStreamError | ChatStreamCitations,
     ) -> str:
         nonlocal assistant_message_id
         if isinstance(event, ChatStreamMeta):
@@ -101,6 +102,11 @@ async def send_message(
         if isinstance(event, ChatStreamToken):
             accumulated_content.append(event.content)
             return _format_sse("token", {"content": event.content})
+        if isinstance(event, ChatStreamCitations):
+            return _format_sse(
+                "citations",
+                {"citations": [citation.to_dict() for citation in event.citations]},
+            )
         if isinstance(event, ChatStreamDone):
             return _format_sse(
                 "done",

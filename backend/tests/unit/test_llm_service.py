@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.services.llm import LLMError, LLMResponse, LLMService
+from app.services.llm import LLMService
+from app.services.llm_types import LLMError, LLMResponse
 
 
 class FakeCompletion:

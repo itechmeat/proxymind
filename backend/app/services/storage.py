@@ -111,6 +111,8 @@ class StorageService:
 
     async def ensure_storage_root(self) -> None:
         response = await self._http_client.post(self._build_url(""))
+        if getattr(response, "status_code", None) == httpx.codes.CONFLICT:
+            return
         response.raise_for_status()
 
     async def upload(

@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.services.llm import LLMError, LLMService, LLMStreamEnd, LLMToken
+from app.services.llm import LLMService
+from app.services.llm_types import LLMError, LLMStreamEnd, LLMToken
 
 
 class FakeStreamChunk:

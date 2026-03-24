@@ -1,41 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
 from typing import Any
 
 import litellm
 import structlog
 
+from app.services.llm_types import LLMError, LLMResponse, LLMStreamEnd, LLMStreamEvent, LLMToken
+
 ChatMessage = dict[str, str]
 CompletionCallable = Callable[..., Awaitable[Any]]
-
-
-class LLMError(RuntimeError):
-    pass
-
-
-@dataclass(slots=True, frozen=True)
-class LLMResponse:
-    content: str
-    model_name: str | None
-    token_count_prompt: int | None
-    token_count_completion: int | None
-
-
-@dataclass(slots=True, frozen=True)
-class LLMToken:
-    content: str
-
-
-@dataclass(slots=True, frozen=True)
-class LLMStreamEnd:
-    model_name: str | None
-    token_count_prompt: int | None
-    token_count_completion: int | None
-
-
-LLMStreamEvent = LLMToken | LLMStreamEnd
 
 
 class LLMService:

@@ -77,3 +77,20 @@ def test_sse_settings_reject_non_positive_values() -> None:
 
     with pytest.raises(ValidationError):
         Settings(**_base_settings(), sse_inter_token_timeout_seconds=0)
+
+
+def test_max_citations_per_response_default() -> None:
+    settings = Settings(**_base_settings())
+
+    assert settings.max_citations_per_response == 5
+
+
+def test_max_citations_per_response_custom() -> None:
+    settings = Settings(**_base_settings(), max_citations_per_response=10)
+
+    assert settings.max_citations_per_response == 10
+
+
+def test_max_citations_per_response_rejects_non_positive_value() -> None:
+    with pytest.raises(ValidationError):
+        Settings(**_base_settings(), max_citations_per_response=0)

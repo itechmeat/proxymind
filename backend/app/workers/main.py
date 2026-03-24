@@ -14,6 +14,7 @@ from app.workers.tasks import poll_active_batches, process_batch_embed, process_
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
+DEFAULT_EMBEDDING_TASK_TYPE = "RETRIEVAL_DOCUMENT"
 
 
 async def on_startup(ctx: dict[str, Any]) -> None:
@@ -59,7 +60,11 @@ async def on_startup(ctx: dict[str, Any]) -> None:
     batch_embedding_client = BatchEmbeddingClient(
         model=settings.embedding_model,
         dimensions=settings.embedding_dimensions,
-        embedding_task_type=settings.embedding_task_type,
+        embedding_task_type=getattr(
+            settings,
+            "embedding_task_type",
+            DEFAULT_EMBEDDING_TASK_TYPE,
+        ),
         api_key=settings.gemini_api_key,
     )
     batch_orchestrator = BatchOrchestrator(

@@ -6,16 +6,19 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
-from google import genai
-from google.genai import errors as genai_errors
-from google.genai import types
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from app.db.models.enums import BatchStatus
 
+if TYPE_CHECKING:
+    from google import genai
+
 
 def _is_retryable_batch_error(error: BaseException) -> bool:
+    from google.genai import errors as genai_errors
+
     return isinstance(error, genai_errors.ServerError) or (
         isinstance(error, genai_errors.ClientError) and error.code == 429
     )
@@ -73,7 +76,7 @@ class BatchEmbeddingClient:
         dimensions: int,
         embedding_task_type: str = "RETRIEVAL_DOCUMENT",
         api_key: str | None = None,
-        client: genai.Client | None = None,
+        client: Any | None = None,
     ) -> None:
         self._model = model
         self._dimensions = dimensions
@@ -198,6 +201,8 @@ class BatchEmbeddingClient:
         requests: list[BatchEmbeddingRequest],
         display_name: str | None,
     ) -> str:
+        from google.genai import types
+
         # Gemini batch embeddings currently accept one shared EmbedContentBatch with list contents.
         # The Python SDK surface does not expose per-item custom_id fields, so
         # correlation relies on stored chunk_ids order plus Gemini's documented
@@ -224,14 +229,16 @@ class BatchEmbeddingClient:
         wait=wait_exponential(multiplier=1, min=1, max=8),
         reraise=True,
     )
-    def _get_batch_job(self, operation_name: str) -> types.BatchJob:
+    def _get_batch_job(self, operation_name: str) -> Any:
         return self._get_client().batches.get(name=operation_name)
 
-    def _get_client(self) -> genai.Client:
+    def _get_client(self) -> Any:
         if self._client is None:
             with self._client_lock:
                 if self._client is None:
                     if not self._api_key:
                         raise ValueError("GEMINI_API_KEY is required for batch embedding")
+                    from google import genai
+
                     self._client = genai.Client(api_key=self._api_key)
         return self._client

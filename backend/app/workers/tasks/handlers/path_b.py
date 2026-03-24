@@ -18,6 +18,8 @@ from app.workers.tasks.pipeline import (
     mark_persisted_records_failed,
 )
 
+DEFAULT_EMBEDDING_TASK_TYPE = "RETRIEVAL_DOCUMENT"
+
 
 @dataclass(slots=True, frozen=True)
 class PathBResult:
@@ -147,7 +149,11 @@ async def handle_path_b(
 
         vectors = await services.embedding_service.embed_texts(
             [chunk.text_content for chunk in chunk_data],
-            task_type=services.settings.embedding_task_type,
+            task_type=getattr(
+                services.settings,
+                "embedding_task_type",
+                DEFAULT_EMBEDDING_TASK_TYPE,
+            ),
             title=source.title,
         )
         task.progress = 85

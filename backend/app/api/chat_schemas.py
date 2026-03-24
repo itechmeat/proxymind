@@ -45,12 +45,71 @@ class SendMessageRequest(BaseModel):
         return value
 
 
+class AnchorResponse(BaseModel):
+    page: int | None = None
+    chapter: str | None = None
+    section: str | None = None
+    timecode: str | None = None
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any] | None) -> AnchorResponse:
+        return cls.model_validate(value or {})
+
+
+class CitationResponse(BaseModel):
+    index: int
+    source_id: uuid.UUID
+    source_title: str
+    source_type: str
+    url: str | None = None
+    anchor: AnchorResponse
+    text_citation: str
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> CitationResponse:
+        return cls(
+            index=value["index"],
+            source_id=uuid.UUID(str(value["source_id"])),
+            source_title=value["source_title"],
+            source_type=value["source_type"],
+            url=value.get("url"),
+            anchor=AnchorResponse.from_dict(value.get("anchor")),
+            text_citation=value["text_citation"],
+        )
+
+
+_REQUIRED_CITATION_FIELDS = {
+    "index",
+    "source_id",
+    "source_title",
+    "source_type",
+    "text_citation",
+}
+
+
+def _parse_citations(value: list[dict[str, Any]] | None) -> list[CitationResponse] | None:
+    if value is None:
+        return None
+
+    citations: list[CitationResponse] = []
+    for item in value:
+        if not isinstance(item, dict) or not _REQUIRED_CITATION_FIELDS.issubset(item):
+            continue
+        try:
+            citations.append(CitationResponse.from_dict(item))
+        except (TypeError, ValueError):
+            continue
+
+    return citations
+
+
 class MessageResponse(BaseModel):
     message_id: uuid.UUID
     session_id: uuid.UUID
     role: MessageRole
     content: str
     status: MessageStatus
+    citations: list[CitationResponse] | None = None
     model_name: str | None
     retrieved_chunks_count: int
     token_count_prompt: int | None
@@ -70,6 +129,7 @@ class MessageResponse(BaseModel):
             role=message.role,
             content=message.content,
             status=message.status,
+            citations=_parse_citations(message.citations),
             model_name=message.model_name,
             retrieved_chunks_count=retrieved_chunks_count,
             token_count_prompt=message.token_count_prompt,
@@ -79,18 +139,25 @@ class MessageResponse(BaseModel):
 
 
 class MessageInHistory(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     id: uuid.UUID
     role: MessageRole
     content: str
     status: MessageStatus
+    citations: list[CitationResponse] | None = None
     model_name: str | None
     created_at: datetime
 
     @classmethod
     def from_message(cls, message: Message) -> MessageInHistory:
-        return cls.model_validate(message)
+        return cls(
+            id=message.id,
+            role=message.role,
+            content=message.content,
+            status=message.status,
+            citations=_parse_citations(message.citations),
+            model_name=message.model_name,
+            created_at=message.created_at,
+        )
 
 
 class SessionWithMessagesResponse(SessionResponse):
