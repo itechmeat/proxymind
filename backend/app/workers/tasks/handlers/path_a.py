@@ -23,6 +23,8 @@ from app.workers.tasks.pipeline import (
     mark_persisted_records_failed,
 )
 
+DEFAULT_EMBEDDING_TASK_TYPE = "RETRIEVAL_DOCUMENT"
+
 
 @dataclass(slots=True, frozen=True)
 class PathAResult:
@@ -132,7 +134,11 @@ async def handle_path_a(
         vector = await services.embedding_service.embed_file(
             file_bytes,
             mime_type,
-            task_type=services.settings.embedding_task_type,
+            task_type=getattr(
+                services.settings,
+                "embedding_task_type",
+                DEFAULT_EMBEDDING_TASK_TYPE,
+            ),
         )
         task.progress = 85
         await session.commit()

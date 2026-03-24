@@ -167,7 +167,7 @@ Not every message contains references — only where appropriate. Light small ta
 The LLM **never generates URLs on its own**. Core principle:
 
 1. The LLM prompt receives chunks with metadata: `source_id`, `chunk_id`, and chunk anchor metadata (source title, chapter, page, section, timecode — whatever is available from Docling HybridChunker).
-2. The LLM returns a response in Markdown format, referencing sources via `source_id` (e.g., `[source_id:42]`).
+2. The LLM returns a response in Markdown format, referencing retrieved sources via ordinal markers (e.g., `[source:1]`).
 3. The backend constructs the citation based on source and chunk metadata:
    - **Source with a public URL** — a clickable link with anchor details (e.g., _"Book Title, Chapter 3"_ → link to store).
    - **Source without a public URL** — a text citation without a link (e.g., _"Book Title, Chapter 3, p. 42"_). Not clickable but informative.

@@ -1,8 +1,8 @@
 ## Purpose
 
-SSE streaming protocol, event types, heartbeat, inter-token timeout, disconnect handling, idempotency replay, session concurrency guard, and LLM streaming abstraction. Introduced by S4-02.
+Delta spec for S4-03 Citation Builder: activates the `citations` SSE event type reserved in S4-02, adds citation replay to idempotency, and defines the `ChatStreamCitations` event dataclass.
 
-
+## MODIFIED Requirements
 
 ### Requirement: SSE protocol and event types
 
@@ -60,51 +60,6 @@ Each event SHALL be formatted as `event: {type}\ndata: {json}\n\n`. The HTTP sta
 - **WHEN** an LLM error or internal error occurs after streaming has begun
 - **THEN** the system SHALL emit an `error` event with a `detail` field describing the error
 - **AND** the stream SHALL be closed after the error event
-
----
-
-### Requirement: SSE heartbeat mechanism
-
-The system SHALL emit SSE heartbeat comments at a configurable interval (`sse_heartbeat_interval_seconds`, default 15 seconds) to prevent proxy and load-balancer timeouts. The heartbeat SHALL be formatted as `: heartbeat\n\n` (a standard SSE comment, not a named event). The heartbeat timer SHALL reset on each emitted event (heartbeat is only sent during idle periods between events).
-
-#### Scenario: Heartbeat emitted during idle period
-
-- **WHEN** no SSE event has been emitted for `sse_heartbeat_interval_seconds` seconds during an active stream
-- **THEN** the system SHALL emit a `: heartbeat\n\n` SSE comment
-
-#### Scenario: Heartbeat does not interfere with events
-
-- **WHEN** LLM tokens are arriving faster than the heartbeat interval
-- **THEN** no heartbeat comments SHALL be emitted between the token events
-
-#### Scenario: Custom heartbeat interval
-
-- **WHEN** `sse_heartbeat_interval_seconds` is configured to 10
-- **THEN** the heartbeat SHALL be emitted every 10 seconds of idle time instead of the default 15
-
----
-
-### Requirement: Inter-token timeout
-
-The system SHALL enforce a configurable inter-token timeout (`sse_inter_token_timeout_seconds`, default 30 seconds). If no token is received from the LLM within this interval, the system SHALL emit an `error` SSE event, update the assistant message status to FAILED (saving any accumulated content), and close the stream. The timeout deadline SHALL reset on each received LLM token.
-
-#### Scenario: Timeout triggers FAILED status
-
-- **WHEN** the LLM does not emit a token for longer than `sse_inter_token_timeout_seconds`
-- **THEN** the system SHALL emit an `error` event with a detail indicating inter-token timeout
-- **AND** the assistant message status SHALL be updated to FAILED
-- **AND** any accumulated content SHALL be saved to the assistant message
-- **AND** the stream SHALL be closed
-
-#### Scenario: Timeout resets on each token
-
-- **WHEN** the LLM emits tokens with intervals shorter than `sse_inter_token_timeout_seconds`
-- **THEN** the inter-token timeout SHALL NOT trigger
-
-#### Scenario: Custom inter-token timeout
-
-- **WHEN** `sse_inter_token_timeout_seconds` is configured to 60
-- **THEN** the timeout threshold SHALL be 60 seconds instead of the default 30
 
 ---
 
@@ -168,101 +123,7 @@ Replay of a COMPLETE message SHALL be allowed even if another stream is active i
 
 ---
 
-### Requirement: Session concurrency guard
-
-The system SHALL enforce that only one active LLM stream is allowed per session at a time. Before starting a new stream, the system SHALL check if any assistant message in the session has status STREAMING. If found, the endpoint SHALL return HTTP 409 Conflict. The concurrency guard SHALL run after the idempotency check. Replay of a COMPLETE message via idempotency key SHALL bypass the concurrency guard (D14), because replay is read-only.
-
-#### Scenario: Second stream request rejected with 409
-
-- **WHEN** a session has an assistant message with status STREAMING
-- **AND** a new `POST /api/chat/messages` request arrives for the same session without an idempotency key (or with a new idempotency key)
-- **THEN** the response SHALL be 409 Conflict
-
-#### Scenario: First stream request accepted
-
-- **WHEN** a session has no assistant messages with status STREAMING
-- **AND** `POST /api/chat/messages` is called for that session
-- **THEN** the request SHALL proceed with normal stream processing
-
-#### Scenario: Replay bypasses concurrency guard
-
-- **WHEN** a session has an active STREAMING assistant message
-- **AND** a request with an idempotency key matching a COMPLETE assistant message arrives
-- **THEN** the replay SHALL be allowed (not blocked by the concurrency guard)
-
----
-
-### Requirement: Disconnect handling
-
-When the client disconnects during an active SSE stream, the system SHALL detect the disconnection (via `asyncio.CancelledError` or `request.is_disconnected()`), save the accumulated content buffer to the assistant message, update the assistant message status to PARTIAL, and close the stream. No error event SHALL be emitted (the client is already gone).
-
-#### Scenario: Client disconnect saves PARTIAL content
-
-- **WHEN** the client disconnects mid-stream after receiving some token events
-- **THEN** the assistant message status SHALL be updated to PARTIAL
-- **AND** the assistant message content SHALL contain all tokens accumulated up to the point of disconnection
-
-#### Scenario: Client disconnect before any tokens
-
-- **WHEN** the client disconnects after the `meta` event but before any `token` events
-- **THEN** the assistant message status SHALL be updated to PARTIAL
-- **AND** the assistant message content SHALL be empty or null
-
----
-
-### Requirement: LLM streaming via LLMService.stream()
-
-The `LLMService` SHALL provide a `stream()` method alongside the existing `complete()` method. The existing `complete()` method SHALL be preserved unchanged.
-
-**Contract:** `stream(messages, *, temperature=None) -> AsyncIterator[LLMStreamEvent]`
-
-The method SHALL use `litellm.acompletion(..., stream=True, stream_options={"include_usage": True})`. It SHALL yield `LLMToken` events for each non-empty content chunk, and a final `LLMStreamEnd` event with usage statistics (when available from the provider). On provider failure, it SHALL raise `LLMError`.
-
-**Stream event types:**
-- `LLMToken` — dataclass with `content: str`
-- `LLMStreamEnd` — dataclass with `model_name: str | None`, `token_count_prompt: int | None`, `token_count_completion: int | None`
-- `LLMStreamEvent = LLMToken | LLMStreamEnd` (typed union)
-
-#### Scenario: Successful LLM stream yields tokens and end event
-
-- **WHEN** `LLMService.stream()` is called with valid messages
-- **THEN** it SHALL yield one or more `LLMToken` events with non-empty content
-- **AND** the final event SHALL be an `LLMStreamEnd` with model name and token counts (nullable)
-
-#### Scenario: LLM stream error raises LLMError
-
-- **WHEN** the LiteLLM `acompletion(stream=True)` call raises an exception
-- **THEN** the service SHALL log the error via structlog
-- **AND** SHALL raise `LLMError`
-
-#### Scenario: Existing complete() method preserved
-
-- **WHEN** `LLMService` is used after S4-02 implementation
-- **THEN** the `complete()` method SHALL remain available and functional with the same signature and behavior
-
----
-
-### Requirement: SSE configuration settings
-
-The `Settings` class in `app/core/config.py` SHALL include the following new settings:
-
-- `sse_heartbeat_interval_seconds` — integer, default `15`. Controls the interval between SSE heartbeat comments.
-- `sse_inter_token_timeout_seconds` — integer, default `30`. Controls the maximum wait time between LLM tokens before the stream is marked as FAILED.
-
-These settings SHALL be configurable via environment variables (`SSE_HEARTBEAT_INTERVAL_SECONDS`, `SSE_INTER_TOKEN_TIMEOUT_SECONDS`).
-
-#### Scenario: Default SSE configuration values
-
-- **WHEN** no SSE environment variables are set
-- **THEN** `sse_heartbeat_interval_seconds` SHALL default to `15`
-- **AND** `sse_inter_token_timeout_seconds` SHALL default to `30`
-
-#### Scenario: Custom SSE configuration via environment variables
-
-- **WHEN** `SSE_HEARTBEAT_INTERVAL_SECONDS=10` and `SSE_INTER_TOKEN_TIMEOUT_SECONDS=60` are set
-- **THEN** the settings SHALL reflect `sse_heartbeat_interval_seconds=10` and `sse_inter_token_timeout_seconds=60`
-
----
+## ADDED Requirements
 
 ### Requirement: ChatStreamCitations event type
 

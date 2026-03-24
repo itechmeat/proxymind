@@ -20,7 +20,7 @@ from app.db.models.enums import (
 from app.db.models.knowledge import KnowledgeSnapshot
 from app.persona.loader import PersonaContext
 from app.services.chat import ChatService, NoActiveSnapshotError, SessionNotFoundError
-from app.services.llm import LLMError, LLMResponse
+from app.services.llm_types import LLMError, LLMResponse
 from app.services.prompt import NO_CONTEXT_REFUSAL
 from app.services.qdrant import RetrievedChunk
 from app.services.retrieval import RetrievalError

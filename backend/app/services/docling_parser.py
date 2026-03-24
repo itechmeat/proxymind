@@ -4,31 +4,38 @@ import asyncio
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from typing import Any
-
-from docling.chunking import HybridChunker
-from docling.datamodel.base_models import DocumentStream, InputFormat
-from docling.document_converter import DocumentConverter
-from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
-from docling_core.types.doc import DoclingDocument
+from typing import TYPE_CHECKING, Any
 
 from app.db.models.enums import SourceType
 
-# TXT is handled separately via convert_string() because Docling consumes
-# plain text most reliably as Markdown content rather than a binary stream.
-_SOURCE_TYPE_TO_INPUT_FORMAT = {
-    SourceType.MARKDOWN: InputFormat.MD,
-    SourceType.PDF: InputFormat.PDF,
-    SourceType.DOCX: InputFormat.DOCX,
-    SourceType.HTML: InputFormat.HTML,
-}
+if TYPE_CHECKING:
+    from docling.chunking import HybridChunker
+    from docling.datamodel.base_models import DocumentStream, InputFormat
+    from docling.document_converter import DocumentConverter
+    from docling_core.types.doc import DoclingDocument
 
-_INPUT_FORMAT_SUFFIX = {
-    InputFormat.MD: ".md",
-    InputFormat.PDF: ".pdf",
-    InputFormat.DOCX: ".docx",
-    InputFormat.HTML: ".html",
-}
+def _input_format_for_source_type(source_type: SourceType) -> Any | None:
+    from docling.datamodel.base_models import InputFormat
+
+    # TXT is handled separately via convert_string() because Docling consumes
+    # plain text most reliably as Markdown content rather than a binary stream.
+    return {
+        SourceType.MARKDOWN: InputFormat.MD,
+        SourceType.PDF: InputFormat.PDF,
+        SourceType.DOCX: InputFormat.DOCX,
+        SourceType.HTML: InputFormat.HTML,
+    }.get(source_type)
+
+
+def _suffix_for_input_format(input_format: Any) -> str:
+    from docling.datamodel.base_models import InputFormat
+
+    return {
+        InputFormat.MD: ".md",
+        InputFormat.PDF: ".pdf",
+        InputFormat.DOCX: ".docx",
+        InputFormat.HTML: ".html",
+    }[input_format]
 
 
 @dataclass(slots=True, frozen=True)
@@ -47,9 +54,14 @@ class DoclingParser:
         self,
         *,
         chunk_max_tokens: int,
-        converter: DocumentConverter | None = None,
-        chunker: HybridChunker | None = None,
+        converter: Any | None = None,
+        chunker: Any | None = None,
     ) -> None:
+        from docling.chunking import HybridChunker
+        from docling.datamodel.base_models import InputFormat
+        from docling.document_converter import DocumentConverter
+        from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
+
         self._converter = converter or DocumentConverter(
             allowed_formats=[
                 InputFormat.MD,
@@ -85,8 +97,10 @@ class DoclingParser:
         content: bytes,
         filename: str,
         source_type: SourceType,
-    ) -> DoclingDocument | None:
-        input_format = _SOURCE_TYPE_TO_INPUT_FORMAT.get(source_type)
+    ) -> Any | None:
+        from docling.datamodel.base_models import DocumentStream, InputFormat
+
+        input_format = _input_format_for_source_type(source_type)
 
         if input_format is InputFormat.MD:
             stream = DocumentStream(
@@ -115,7 +129,7 @@ class DoclingParser:
 
         raise ValueError(f"Unsupported source type for DoclingParser: {source_type.value}")
 
-    def _chunk_document(self, document: DoclingDocument) -> list[ChunkData]:
+    def _chunk_document(self, document: Any) -> list[ChunkData]:
         chunk_data: list[ChunkData] = []
         for chunk in self._chunker.chunk(document):
             text_content = chunk.text.strip()
@@ -138,9 +152,9 @@ class DoclingParser:
         return chunk_data
 
     @staticmethod
-    def _normalize_stream_name(filename: str, input_format: InputFormat) -> str:
+    def _normalize_stream_name(filename: str, input_format: Any) -> str:
         path = Path(filename)
-        expected_suffix = _INPUT_FORMAT_SUFFIX[input_format]
+        expected_suffix = _suffix_for_input_format(input_format)
         if path.suffix.lower() == expected_suffix:
             return path.name
         return f"{path.stem or 'document'}{expected_suffix}"

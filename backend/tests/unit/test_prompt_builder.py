@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 
 from app.persona.loader import PersonaContext
+from app.services.citation import SourceInfo
 from app.persona.safety import SYSTEM_SAFETY_POLICY
 from app.services.prompt import NO_CONTEXT_REFUSAL, build_chat_prompt
 from app.services.qdrant import RetrievedChunk
@@ -23,6 +24,29 @@ def _chunk(text: str, *, source_id: uuid.UUID | None = None, score: float = 0.9)
     )
 
 
+def _chunk_with_anchor(
+    text: str,
+    *,
+    source_id: uuid.UUID | None = None,
+    anchor_page: int | None = None,
+    anchor_chapter: str | None = None,
+    anchor_section: str | None = None,
+    anchor_timecode: str | None = None,
+) -> RetrievedChunk:
+    return RetrievedChunk(
+        chunk_id=uuid.uuid4(),
+        source_id=source_id or uuid.uuid4(),
+        text_content=text,
+        score=0.9,
+        anchor_metadata={
+            "anchor_page": anchor_page,
+            "anchor_chapter": anchor_chapter,
+            "anchor_section": anchor_section,
+            "anchor_timecode": anchor_timecode,
+        },
+    )
+
+
 def _persona(
     *,
     identity: str = "I am the twin.",
@@ -35,6 +59,21 @@ def _persona(
         behavior=behavior,
         config_commit_hash="commit-sha",
         config_content_hash="content-sha",
+    )
+
+
+def _source_info(
+    source_id: uuid.UUID,
+    *,
+    title: str = "Test Source",
+    public_url: str | None = None,
+    source_type: str = "pdf",
+) -> SourceInfo:
+    return SourceInfo(
+        id=source_id,
+        title=title,
+        public_url=public_url,
+        source_type=source_type,
     )
 
 
@@ -133,3 +172,79 @@ def test_build_chat_prompt_omits_context_block_for_empty_chunks() -> None:
         },
         {"role": "user", "content": "Question:\nOnly question"},
     ]
+
+
+def test_citation_instructions_present_when_chunks_and_source_map() -> None:
+    source_id = uuid.uuid4()
+    messages = build_chat_prompt(
+        "query",
+        [_chunk("Context body", source_id=source_id)],
+        _persona(),
+        {source_id: _source_info(source_id)},
+    )
+
+    system_message = messages[0]["content"]
+    assert "[source:N]" in system_message
+    assert "Do not generate URLs or links." in system_message
+    assert "at most 5" not in system_message
+
+
+def test_citation_instructions_present_when_source_map_is_empty_dict() -> None:
+    messages = build_chat_prompt("query", [_chunk("Context body")], _persona(), {})
+
+    assert "[source:N]" in messages[0]["content"]
+
+
+def test_citation_instructions_absent_when_source_map_none() -> None:
+    messages = build_chat_prompt("query", [_chunk("Context body")], _persona())
+
+    assert "[source:N]" not in messages[0]["content"]
+
+
+def test_chunk_format_with_source_map() -> None:
+    source_id = uuid.uuid4()
+    messages = build_chat_prompt(
+        "query",
+        [
+            _chunk(
+                "Context body",
+                source_id=source_id,
+                score=0.9876,
+            )
+        ],
+        _persona(),
+        {
+            source_id: _source_info(source_id, title="Clean Architecture"),
+        },
+    )
+
+    user_message = messages[1]["content"]
+    assert "[source:1]" in user_message
+    assert 'title: "Clean Architecture"' in user_message
+    assert "score=" not in user_message
+    assert "0.9876" not in user_message
+
+
+def test_chunk_format_includes_anchor_metadata_when_available() -> None:
+    source_id = uuid.uuid4()
+    messages = build_chat_prompt(
+        "query",
+        [
+            _chunk_with_anchor(
+                "Context body",
+                source_id=source_id,
+                anchor_page=7,
+                anchor_chapter="Chapter 5",
+                anchor_section="Interfaces",
+            )
+        ],
+        _persona(),
+        {
+            source_id: _source_info(source_id, title="Clean Architecture"),
+        },
+    )
+
+    user_message = messages[1]["content"]
+    assert 'chapter: "Chapter 5"' in user_message
+    assert 'section: "Interfaces"' in user_message
+    assert "page: 7" in user_message

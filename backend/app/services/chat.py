@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import inspect
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import structlog
 from sqlalchemy import select
@@ -10,14 +12,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
-from app.db.models import Message, Session
+from app.db.models import Message, Session, Source
 from app.db.models.enums import MessageRole, MessageStatus, SessionChannel, SessionStatus
 from app.persona.loader import PersonaContext
-from app.services.llm import LLMService, LLMToken
+from app.services.citation import Citation, CitationService, SourceInfo
+from app.services.llm_types import LLMToken
 from app.services.prompt import NO_CONTEXT_REFUSAL, build_chat_prompt
 from app.services.qdrant import RetrievedChunk
-from app.services.retrieval import RetrievalService
-from app.services.snapshot import SnapshotService
+
+if TYPE_CHECKING:
+    from app.services.llm import LLMService
+    from app.services.retrieval import RetrievalService
+    from app.services.snapshot import SnapshotService
 
 FAILED_ASSISTANT_CONTENT = "Failed to generate assistant response."
 
@@ -69,7 +75,14 @@ class ChatStreamError:
     detail: str
 
 
-ChatStreamEvent = ChatStreamMeta | ChatStreamToken | ChatStreamDone | ChatStreamError
+@dataclass(slots=True, frozen=True)
+class ChatStreamCitations:
+    citations: list[Citation]
+
+
+ChatStreamEvent = (
+    ChatStreamMeta | ChatStreamToken | ChatStreamDone | ChatStreamError | ChatStreamCitations
+)
 
 
 @dataclass(slots=True, frozen=True)
@@ -88,6 +101,7 @@ class ChatService:
         llm_service: LLMService,
         persona_context: PersonaContext,
         min_retrieved_chunks: int,
+        max_citations_per_response: int = 5,
     ) -> None:
         self._session = session
         self._snapshot_service = snapshot_service
@@ -95,6 +109,7 @@ class ChatService:
         self._llm_service = llm_service
         self._persona_context = persona_context
         self._min_retrieved_chunks = min_retrieved_chunks
+        self._max_citations_per_response = max_citations_per_response
         self._logger = structlog.get_logger(__name__)
 
     async def create_session(
@@ -164,6 +179,7 @@ class ChatService:
                     status=MessageStatus.COMPLETE,
                     snapshot_id=snapshot_id,
                     source_ids=[],
+                    citations=[],
                     parent_message_id=user_message.id,
                     config_commit_hash=self._persona_context.config_commit_hash,
                     config_content_hash=self._persona_context.config_content_hash,
@@ -188,10 +204,22 @@ class ChatService:
                 snapshot_id=str(snapshot_id),
                 retrieved_chunks_count=len(retrieved_chunks),
             )
-            llm_response = await self._llm_service.complete(
-                build_chat_prompt(text, retrieved_chunks, self._persona_context)
-            )
             source_ids = self._deduplicate_source_ids(retrieved_chunks)
+            source_map = await self._load_source_map(source_ids)
+            llm_response = await self._llm_service.complete(
+                build_chat_prompt(
+                    text,
+                    retrieved_chunks,
+                    self._persona_context,
+                    source_map=source_map,
+                )
+            )
+            citations = CitationService.extract(
+                llm_response.content,
+                retrieved_chunks,
+                source_map,
+                self._max_citations_per_response,
+            )
             assistant_message = await self._persist_message(
                 chat_session,
                 role=MessageRole.ASSISTANT,
@@ -199,6 +227,7 @@ class ChatService:
                 status=MessageStatus.COMPLETE,
                 snapshot_id=snapshot_id,
                 source_ids=source_ids,
+                citations=[citation.to_dict() for citation in citations],
                 model_name=llm_response.model_name,
                 token_count_prompt=llm_response.token_count_prompt,
                 token_count_completion=llm_response.token_count_completion,
@@ -315,6 +344,7 @@ class ChatService:
                 status=MessageStatus.COMPLETE,
                 snapshot_id=snapshot_id,
                 source_ids=[],
+                citations=[],
                 parent_message_id=user_message.id,
                 config_commit_hash=self._persona_context.config_commit_hash,
                 config_content_hash=self._persona_context.config_content_hash,
@@ -334,6 +364,7 @@ class ChatService:
                 snapshot_id=snapshot_id,
             )
             yield ChatStreamToken(content=NO_CONTEXT_REFUSAL)
+            yield ChatStreamCitations(citations=[])
             yield ChatStreamDone(
                 token_count_prompt=None,
                 token_count_completion=None,
@@ -343,6 +374,7 @@ class ChatService:
             return
 
         source_ids = self._deduplicate_source_ids(retrieved_chunks)
+        source_map = await self._load_source_map(source_ids)
         assistant_message = await self._persist_message(
             chat_session,
             role=MessageRole.ASSISTANT,
@@ -359,19 +391,35 @@ class ChatService:
         )
 
         content_buffer: list[str] = []
-        prompt = build_chat_prompt(text, retrieved_chunks, self._persona_context)
+        prompt = build_chat_prompt(
+            text,
+            retrieved_chunks,
+            self._persona_context,
+            source_map=source_map,
+        )
         try:
-            async for event in self._llm_service.stream(prompt):
+            stream = self._llm_service.stream(prompt)
+            if inspect.isawaitable(stream):
+                stream = await stream
+
+            async for event in stream:
                 if isinstance(event, LLMToken):
                     content_buffer.append(event.content)
                     yield ChatStreamToken(content=event.content)
                     continue
 
                 assistant_message.content = "".join(content_buffer)
+                citations = CitationService.extract(
+                    assistant_message.content,
+                    retrieved_chunks,
+                    source_map,
+                    self._max_citations_per_response,
+                )
                 assistant_message.status = MessageStatus.COMPLETE
                 assistant_message.model_name = event.model_name
                 assistant_message.token_count_prompt = event.token_count_prompt
                 assistant_message.token_count_completion = event.token_count_completion
+                assistant_message.citations = [citation.to_dict() for citation in citations]
                 assistant_message.config_commit_hash = self._persona_context.config_commit_hash
                 assistant_message.config_content_hash = self._persona_context.config_content_hash
                 await self._session.commit()
@@ -384,6 +432,7 @@ class ChatService:
                     config_commit_hash=self._persona_context.config_commit_hash,
                     config_content_hash=self._persona_context.config_content_hash,
                 )
+                yield ChatStreamCitations(citations=citations)
                 yield ChatStreamDone(
                     token_count_prompt=event.token_count_prompt,
                     token_count_completion=event.token_count_completion,
@@ -487,6 +536,7 @@ class ChatService:
         token_count_completion: int | None = None,
         idempotency_key: str | None = None,
         parent_message_id: uuid.UUID | None = None,
+        citations: list[dict[str, object]] | None = None,
         config_commit_hash: str | None = None,
         config_content_hash: str | None = None,
     ) -> Message:
@@ -500,6 +550,7 @@ class ChatService:
             idempotency_key=idempotency_key,
             snapshot_id=snapshot_id,
             source_ids=source_ids,
+            citations=citations,
             model_name=model_name,
             token_count_prompt=token_count_prompt,
             token_count_completion=token_count_completion,
@@ -562,11 +613,24 @@ class ChatService:
                 snapshot_id=snapshot_id,
             )
             yield ChatStreamToken(content=assistant_message.content)
+            required_citation_fields = {
+                "index",
+                "source_id",
+                "source_title",
+                "source_type",
+                "text_citation",
+            }
+            replay_citations = [
+                Citation.from_dict(citation)
+                for citation in (assistant_message.citations or [])
+                if required_citation_fields.issubset(citation)
+            ]
+            yield ChatStreamCitations(citations=replay_citations)
             yield ChatStreamDone(
                 token_count_prompt=assistant_message.token_count_prompt,
                 token_count_completion=assistant_message.token_count_completion,
                 model_name=assistant_message.model_name,
-                retrieved_chunks_count=None,
+                retrieved_chunks_count=len(assistant_message.source_ids or []),
             )
 
         return replay()
@@ -596,3 +660,28 @@ class ChatService:
             seen.add(chunk.source_id)
             source_ids.append(chunk.source_id)
         return source_ids
+
+    async def _load_source_map(self, source_ids: list[uuid.UUID]) -> dict[uuid.UUID, SourceInfo]:
+        if not source_ids:
+            return {}
+
+        rows = await self._session.execute(
+            select(
+                Source.id,
+                Source.title,
+                Source.public_url,
+                Source.source_type,
+            ).where(
+                Source.id.in_(source_ids),
+                Source.deleted_at.is_(None),
+            )
+        )
+        return {
+            row.id: SourceInfo(
+                id=row.id,
+                title=row.title,
+                public_url=row.public_url,
+                source_type=row.source_type.value,
+            )
+            for row in rows
+        }

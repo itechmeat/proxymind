@@ -4,9 +4,9 @@ import asyncio
 import io
 from dataclasses import dataclass
 from time import monotonic
+from typing import Any
 
 import structlog
-from google import genai
 from google.genai import types
 
 logger = structlog.get_logger(__name__)
@@ -14,12 +14,12 @@ logger = structlog.get_logger(__name__)
 
 @dataclass(slots=True, frozen=True)
 class PreparedFilePart:
-    part: types.Part
+    part: object
     uploaded_file_name: str | None
 
 
 async def prepare_file_part(
-    client: genai.Client,
+    client: Any,
     file_bytes: bytes,
     mime_type: str,
     *,
@@ -44,7 +44,7 @@ async def prepare_file_part(
 
 
 async def _wait_until_active(
-    client: genai.Client,
+    client: Any,
     file_name: str,
     *,
     poll_interval: float = 1.0,
@@ -63,7 +63,7 @@ async def _wait_until_active(
         await asyncio.sleep(poll_interval)
 
 
-async def cleanup_uploaded_file(client: genai.Client, file_name: str | None) -> None:
+async def cleanup_uploaded_file(client: Any, file_name: str | None) -> None:
     if file_name is None:
         return
     try:

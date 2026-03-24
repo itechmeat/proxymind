@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import uuid
 from typing import Annotated
 
@@ -9,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
 from app.persona.loader import PersonaContext
-from app.services.chat import ChatService
 from app.services.embedding import EmbeddingService
 from app.services.llm import LLMService
 from app.services.qdrant import QdrantService
@@ -17,6 +14,7 @@ from app.services.retrieval import RetrievalService
 from app.services.snapshot import SnapshotService
 from app.services.source import SourceService, TaskEnqueuer
 from app.services.storage import StorageService
+from app.services.chat import ChatService
 
 
 def get_storage_service(request: Request) -> StorageService:
@@ -106,4 +104,5 @@ def get_chat_service(
         llm_service=llm_service,
         persona_context=persona_context,
         min_retrieved_chunks=request.app.state.settings.min_retrieved_chunks,
+        max_citations_per_response=request.app.state.settings.max_citations_per_response,
     )

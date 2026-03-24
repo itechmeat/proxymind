@@ -22,6 +22,21 @@ async def test_ensure_storage_root_posts_directory_root() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ensure_storage_root_accepts_existing_directory() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/sources/"
+        return httpx.Response(409, request=request)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="http://storage.local",
+    ) as client:
+        service = StorageService(client, "/sources/")
+        await service.ensure_storage_root()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("base_path", "object_key", "expected_path"),
     [

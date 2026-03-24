@@ -13,8 +13,10 @@ from app.db.models import Message
 from app.db.models.enums import MessageRole, MessageStatus, SnapshotStatus
 from app.db.models.knowledge import KnowledgeSnapshot
 from app.persona.loader import PersonaContext
+from app.services.citation import SourceInfo
 from app.services.chat import (
     ChatService,
+    ChatStreamCitations,
     ChatStreamDone,
     ChatStreamError,
     ChatStreamMeta,
@@ -24,7 +26,7 @@ from app.services.chat import (
     NoActiveSnapshotError,
     SessionNotFoundError,
 )
-from app.services.llm import LLMError, LLMStreamEnd, LLMToken
+from app.services.llm_types import LLMError, LLMStreamEnd, LLMToken
 from app.services.prompt import NO_CONTEXT_REFUSAL
 from app.services.qdrant import RetrievedChunk
 from app.services.snapshot import SnapshotService
@@ -52,6 +54,10 @@ def _chunk(
     *,
     source_id: uuid.UUID | None = None,
     text_content: str = "retrieved chunk",
+    anchor_page: int | None = None,
+    anchor_chapter: str | None = None,
+    anchor_section: str | None = None,
+    anchor_timecode: str | None = None,
 ) -> RetrievedChunk:
     return RetrievedChunk(
         chunk_id=uuid.uuid4(),
@@ -59,10 +65,10 @@ def _chunk(
         text_content=text_content,
         score=0.91,
         anchor_metadata={
-            "anchor_page": None,
-            "anchor_chapter": None,
-            "anchor_section": None,
-            "anchor_timecode": None,
+            "anchor_page": anchor_page,
+            "anchor_chapter": anchor_chapter,
+            "anchor_section": anchor_section,
+            "anchor_timecode": anchor_timecode,
         },
     )
 
@@ -85,6 +91,7 @@ def _make_service(
     stream_tokens: tuple[str, ...] = ("Hello", " world"),
     stream_error: Exception | None = None,
     min_retrieved_chunks: int = 1,
+    max_citations_per_response: int = 5,
 ) -> tuple[ChatService, SimpleNamespace, SimpleNamespace]:
     retrieval_service = SimpleNamespace(search=AsyncMock())
     if isinstance(retrieval_result, Exception):
@@ -105,6 +112,7 @@ def _make_service(
         llm_service=llm_service,
         persona_context=persona_context,
         min_retrieved_chunks=min_retrieved_chunks,
+        max_citations_per_response=max_citations_per_response,
     )
     return service, retrieval_service, llm_service
 
@@ -161,6 +169,44 @@ async def test_stream_answer_yields_meta_tokens_done(
 
 
 @pytest.mark.asyncio
+async def test_stream_answer_emits_citations_event(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    source_id = uuid.uuid4()
+    chunk = _chunk(
+        source_id=source_id,
+        text_content="Chapter about clean code",
+        anchor_page=42,
+        anchor_chapter="Chapter 5",
+    )
+    source_info = SourceInfo(
+        id=source_id,
+        title="Clean Architecture",
+        public_url=None,
+        source_type="pdf",
+    )
+    service, _, _ = _make_service(
+        db_session,
+        persona_context=persona_context,
+        retrieval_result=[chunk],
+        stream_tokens=("Based on the book [source:1], clean code matters.",),
+    )
+    service._load_source_map = AsyncMock(return_value={source_id: source_info})
+    session = await service.create_session()
+
+    events = await _collect_events(service, session_id=session.id, text="question")
+
+    citation_events = [event for event in events if isinstance(event, ChatStreamCitations)]
+    assert len(citation_events) == 1
+    assert len(citation_events[0].citations) == 1
+    assert citation_events[0].citations[0].source_title == "Clean Architecture"
+    event_types = [type(event).__name__ for event in events]
+    assert event_types.index("ChatStreamCitations") < event_types.index("ChatStreamDone")
+
+
+@pytest.mark.asyncio
 async def test_stream_answer_persists_complete_message(
     db_session: AsyncSession,
     persona_context: PersonaContext,
@@ -203,6 +249,9 @@ async def test_stream_answer_refusal_when_no_chunks(
         "".join(event.content for event in events if isinstance(event, ChatStreamToken))
         == NO_CONTEXT_REFUSAL
     )
+    citation_events = [event for event in events if isinstance(event, ChatStreamCitations)]
+    assert len(citation_events) == 1
+    assert citation_events[0].citations == []
     llm_service.stream.assert_not_called()
 
 
@@ -275,6 +324,59 @@ async def test_stream_answer_idempotency_replays_complete(
     assert len([event for event in replay_events if isinstance(event, ChatStreamMeta)]) == 1
     assert [event.content for event in replay_events if isinstance(event, ChatStreamToken)] == [
         "original"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_idempotent_replay_includes_citations_event(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    source_id = uuid.uuid4()
+    source_info = SourceInfo(
+        id=source_id,
+        title="Test Source",
+        public_url=None,
+        source_type="pdf",
+    )
+    service, _, _ = _make_service(
+        db_session,
+        persona_context=persona_context,
+        retrieval_result=[
+            _chunk(
+                source_id=source_id,
+                anchor_page=42,
+                anchor_chapter="Chapter 5",
+            )
+        ],
+        stream_tokens=("Answer [source:1].",),
+    )
+    service._load_source_map = AsyncMock(return_value={source_id: source_info})
+    session = await service.create_session()
+
+    first_events = await _collect_events(
+        service,
+        session_id=session.id,
+        text="Q?",
+        idempotency_key="key-1",
+    )
+    assert any(isinstance(event, ChatStreamCitations) for event in first_events)
+
+    replay_events = await _collect_events(
+        service,
+        session_id=session.id,
+        text="Q?",
+        idempotency_key="key-1",
+    )
+
+    citation_events = [event for event in replay_events if isinstance(event, ChatStreamCitations)]
+    assert len(citation_events) == 1
+    assert citation_events[0].citations == [
+        citation
+        for event in first_events
+        if isinstance(event, ChatStreamCitations)
+        for citation in event.citations
     ]
 
 

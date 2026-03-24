@@ -46,7 +46,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "wget -qO- http://localhost:9333/cluster/healthz || exit 1",
+          "wget -qO- http://127.0.0.1:9333/cluster/healthz || exit 1",
         ]
       interval: 15s
       timeout: 10s

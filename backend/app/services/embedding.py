@@ -3,16 +3,19 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
-from google import genai
-from google.genai import errors as genai_errors
-from google.genai import types
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from app.services.gemini_file_transfer import cleanup_uploaded_file, prepare_file_part
 
+if TYPE_CHECKING:
+    from google import genai
+
 
 def _is_retryable_embedding_error(error: BaseException) -> bool:
+    from google.genai import errors as genai_errors
+
     return isinstance(error, genai_errors.ServerError) or (
         isinstance(error, genai_errors.ClientError) and error.code == 429
     )
@@ -26,7 +29,7 @@ class EmbeddingService:
         dimensions: int,
         batch_size: int,
         api_key: str | None = None,
-        client: genai.Client | None = None,
+        client: Any | None = None,
         file_upload_threshold_bytes: int = 10 * 1024 * 1024,
     ) -> None:
         self._model = model
@@ -117,7 +120,9 @@ class EmbeddingService:
         batch: list[str],
         task_type: str,
         title: str | None,
-    ) -> types.EmbedContentResponse:
+    ) -> Any:
+        from google.genai import types
+
         config = types.EmbedContentConfig(
             task_type=task_type,
             output_dimensionality=self._dimensions,
@@ -137,10 +142,12 @@ class EmbeddingService:
     )
     def _embed_file_part(
         self,
-        file_part: types.Part,
+        file_part: object,
         mime_type: str,
         task_type: str,
-    ) -> types.EmbedContentResponse:
+    ) -> Any:
+        from google.genai import types
+
         config = types.EmbedContentConfig(
             task_type=task_type,
             output_dimensionality=self._dimensions,
@@ -161,11 +168,13 @@ class EmbeddingService:
             )
         return values
 
-    def _get_client(self) -> genai.Client:
+    def _get_client(self) -> Any:
         if self._client is None:
             with self._client_lock:
                 if self._client is None:
                     if not self._api_key:
                         raise ValueError("GEMINI_API_KEY is required for embedding generation")
+                    from google import genai
+
                     self._client = genai.Client(api_key=self._api_key)
         return self._client

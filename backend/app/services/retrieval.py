@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import uuid
+from typing import TYPE_CHECKING
 
 import structlog
 
 from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
-from app.services.embedding import EmbeddingService
 from app.services.qdrant import QdrantService, RetrievedChunk
+
+if TYPE_CHECKING:
+    from app.services.embedding import EmbeddingService
 
 
 class RetrievalError(RuntimeError):
