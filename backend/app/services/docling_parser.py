@@ -9,10 +9,7 @@ from typing import TYPE_CHECKING, Any
 from app.db.models.enums import SourceType
 
 if TYPE_CHECKING:
-    from docling.chunking import HybridChunker
-    from docling.datamodel.base_models import DocumentStream, InputFormat
-    from docling.document_converter import DocumentConverter
-    from docling_core.types.doc import DoclingDocument
+    pass
 
 def _input_format_for_source_type(source_type: SourceType) -> Any | None:
     from docling.datamodel.base_models import InputFormat

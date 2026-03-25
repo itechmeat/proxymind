@@ -3,8 +3,8 @@ from __future__ import annotations
 import uuid
 
 from app.persona.loader import PersonaContext
-from app.services.citation import SourceInfo
 from app.persona.safety import SYSTEM_SAFETY_POLICY
+from app.services.citation import SourceInfo
 from app.services.prompt import NO_CONTEXT_REFUSAL, build_chat_prompt
 from app.services.qdrant import RetrievedChunk
 

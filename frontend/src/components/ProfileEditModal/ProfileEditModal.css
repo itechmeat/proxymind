@@ -1,0 +1,161 @@
+.profile-edit-modal__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background:
+    radial-gradient(circle at top, oklch(0.85 0.08 90 / 0.2), transparent 55%),
+    oklch(0.14 0.02 250 / 0.56);
+  backdrop-filter: blur(10px);
+}
+
+.profile-edit-modal__content {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 81;
+  width: min(92vw, 32rem);
+  transform: translate(-50%, -50%);
+  border: 1px solid color-mix(in oklab, var(--border) 82%, white 18%);
+  border-radius: 1.6rem;
+  padding: 1.4rem;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--card) 94%, white 6%),
+    color-mix(in oklab, var(--card) 98%, oklch(0.97 0.01 95) 2%)
+  );
+  box-shadow: 0 40px 110px -56px oklch(0.12 0.01 250 / 0.7);
+}
+
+.profile-edit-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.profile-edit-modal__title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+
+.profile-edit-modal__description {
+  margin: 0.35rem 0 0;
+  color: var(--muted-foreground);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.profile-edit-modal__close {
+  border: 1px solid color-mix(in oklab, var(--border) 80%, white 20%);
+  border-radius: 999px;
+  padding: 0.5rem;
+  background: color-mix(in oklab, var(--card) 90%, white 10%);
+  color: var(--foreground);
+}
+
+.profile-edit-modal__body {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.2rem;
+}
+
+.profile-edit-modal__avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.profile-edit-modal__avatar {
+  border: 1px solid color-mix(in oklab, var(--border) 84%, white 16%);
+  box-shadow: 0 22px 44px -34px oklch(0.18 0 0 / 0.45);
+}
+
+.profile-edit-modal__avatar-trigger {
+  display: inline-flex;
+  min-height: 5.75rem;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed color-mix(in oklab, var(--primary) 34%, var(--border) 66%);
+  border-radius: 1.2rem;
+  padding: 1rem;
+  background: linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--primary) 10%, white 90%),
+    color-mix(in oklab, var(--card) 90%, white 10%)
+  );
+  color: var(--foreground);
+  font-weight: 600;
+  text-align: center;
+}
+
+.profile-edit-modal__avatar-trigger:hover {
+  border-color: color-mix(in oklab, var(--primary) 46%, var(--border) 54%);
+}
+
+.profile-edit-modal__field {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.profile-edit-modal__label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.profile-edit-modal__input {
+  width: 100%;
+  border: 1px solid color-mix(in oklab, var(--border) 84%, white 16%);
+  border-radius: 1rem;
+  padding: 0.8rem 0.95rem;
+  background: color-mix(in oklab, var(--background) 86%, white 14%);
+  color: var(--foreground);
+}
+
+.profile-edit-modal__input:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--primary) 40%, white 60%);
+  outline-offset: 2px;
+}
+
+.profile-edit-modal__error {
+  margin: -0.1rem 0 0;
+  color: color-mix(in oklab, var(--destructive) 78%, black 22%);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.profile-edit-modal__actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.profile-edit-modal__actions-right {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  flex: 1;
+}
+
+@media (max-width: 640px) {
+  .profile-edit-modal__content {
+    padding: 1.15rem;
+  }
+
+  .profile-edit-modal__avatar-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .profile-edit-modal__actions {
+    flex-direction: column-reverse;
+  }
+
+  .profile-edit-modal__actions-right {
+    width: 100%;
+  }
+}

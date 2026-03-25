@@ -10,7 +10,7 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 from app.services.gemini_file_transfer import cleanup_uploaded_file, prepare_file_part
 
 if TYPE_CHECKING:
-    from google import genai
+    pass
 
 
 def _is_retryable_embedding_error(error: BaseException) -> bool:

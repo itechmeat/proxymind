@@ -205,7 +205,9 @@ async def test_sse_stream_includes_citations_event(
     assert "citations" in event_names
     assert event_names.index("citations") < event_names.index("done")
 
-    citations_payload = json.loads(next(event.data for event in events if event.event == "citations"))
+    citations_payload = json.loads(
+        next(event.data for event in events if event.event == "citations")
+    )
     assert citations_payload == {
         "citations": [
             {

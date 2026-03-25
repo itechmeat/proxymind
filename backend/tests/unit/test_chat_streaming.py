@@ -13,7 +13,6 @@ from app.db.models import Message
 from app.db.models.enums import MessageRole, MessageStatus, SnapshotStatus
 from app.db.models.knowledge import KnowledgeSnapshot
 from app.persona.loader import PersonaContext
-from app.services.citation import SourceInfo
 from app.services.chat import (
     ChatService,
     ChatStreamCitations,
@@ -26,6 +25,7 @@ from app.services.chat import (
     NoActiveSnapshotError,
     SessionNotFoundError,
 )
+from app.services.citation import SourceInfo
 from app.services.llm_types import LLMError, LLMStreamEnd, LLMToken
 from app.services.prompt import NO_CONTEXT_REFUSAL
 from app.services.qdrant import RetrievedChunk

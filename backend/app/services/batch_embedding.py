@@ -13,7 +13,7 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 from app.db.models.enums import BatchStatus
 
 if TYPE_CHECKING:
-    from google import genai
+    pass
 
 
 def _is_retryable_batch_error(error: BaseException) -> bool:

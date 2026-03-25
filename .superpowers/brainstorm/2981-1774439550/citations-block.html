@@ -1,0 +1,127 @@
+<h2>Citations block: collapsed vs expanded</h2>
+<p class="subtitle">How should the sources block look under assistant messages?</p>
+
+<div class="cards">
+  <!-- Option A: Compact pill row -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 24px; background: #1a1a2e;">
+      <!-- Mock message -->
+      <div style="background: #2a2a3e; border-radius: 12px; padding: 16px; margin-bottom: 12px; font-size: 13px; color: #e0e0e0; line-height: 1.6;">
+        The Stoic philosophers emphasized that happiness comes from within, not from external circumstances<sup style="color: #7c8aff; font-weight: 600; cursor: pointer;">1</sup>. Marcus Aurelius wrote extensively about this in his personal journals<sup style="color: #7c8aff; font-weight: 600; cursor: pointer;">2</sup>, while Seneca approached the topic through his letters<sup style="color: #7c8aff; font-weight: 600; cursor: pointer;">3</sup>.
+      </div>
+      <!-- Collapsed state: pill row -->
+      <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+        <span style="font-size: 11px; color: #888; margin-right: 4px;">Sources:</span>
+        <span style="background: #2a2a3e; border: 1px solid #3a3a4e; border-radius: 12px; padding: 2px 10px; font-size: 11px; color: #aaa; display: inline-flex; align-items: center; gap: 4px;">
+          <span style="color: #7c8aff; font-weight: 600;">1</span> Meditations
+        </span>
+        <span style="background: #2a2a3e; border: 1px solid #3a3a4e; border-radius: 12px; padding: 2px 10px; font-size: 11px; color: #aaa; display: inline-flex; align-items: center; gap: 4px;">
+          <span style="color: #7c8aff; font-weight: 600;">2</span> Marcus Aurelius Bio
+        </span>
+        <span style="background: #2a2a3e; border: 1px solid #3a3a4e; border-radius: 12px; padding: 2px 10px; font-size: 11px; color: #aaa; display: inline-flex; align-items: center; gap: 4px;">
+          <span style="color: #7c8aff; font-weight: 600;">3</span> Letters to Lucilius
+        </span>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A: Compact pill row (always visible)</h3>
+      <p>Sources shown as small pills below the message. No expand/collapse. Compact, always visible. Clicking a pill scrolls or opens link.</p>
+    </div>
+  </div>
+
+  <!-- Option B: Collapsible block (Perplexity-style) -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 24px; background: #1a1a2e;">
+      <!-- Mock message -->
+      <div style="background: #2a2a3e; border-radius: 12px; padding: 16px; margin-bottom: 12px; font-size: 13px; color: #e0e0e0; line-height: 1.6;">
+        The Stoic philosophers emphasized that happiness comes from within, not from external circumstances<sup style="color: #7c8aff; font-weight: 600; cursor: pointer;">1</sup>. Marcus Aurelius wrote extensively about this in his personal journals<sup style="color: #7c8aff; font-weight: 600; cursor: pointer;">2</sup>, while Seneca approached the topic through his letters<sup style="color: #7c8aff; font-weight: 600; cursor: pointer;">3</sup>.
+      </div>
+      <!-- Collapsed toggle -->
+      <div style="margin-bottom: 12px;">
+        <div style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: #888; font-size: 12px;">
+          <span style="font-size: 10px;">&#9654;</span> <span>3 sources</span>
+        </div>
+      </div>
+      <!-- Expanded state -->
+      <div style="border: 1px solid #3a3a4e; border-radius: 10px; overflow: hidden;">
+        <div style="display: flex; align-items: center; gap: 6px; padding: 10px 14px; cursor: pointer; color: #ccc; font-size: 12px; border-bottom: 1px solid #3a3a4e; background: #252538;">
+          <span style="font-size: 10px;">&#9660;</span> <span style="font-weight: 500;">3 sources</span>
+        </div>
+        <div style="padding: 0;">
+          <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #2a2a3e; font-size: 12px;">
+            <span style="color: #7c8aff; font-weight: 600; min-width: 16px;">1</span>
+            <div>
+              <div style="color: #e0e0e0; font-weight: 500;">"Meditations", Chapter 5</div>
+              <div style="color: #888; font-size: 11px; margin-top: 2px;">Book &middot; p. 42</div>
+            </div>
+          </div>
+          <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #2a2a3e; font-size: 12px;">
+            <span style="color: #7c8aff; font-weight: 600; min-width: 16px;">2</span>
+            <div>
+              <div style="color: #5eaaff; font-weight: 500; text-decoration: underline; cursor: pointer;">"Marcus Aurelius: A Life"</div>
+              <div style="color: #888; font-size: 11px; margin-top: 2px;">Article &middot; example.com</div>
+            </div>
+          </div>
+          <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; font-size: 12px;">
+            <span style="color: #7c8aff; font-weight: 600; min-width: 16px;">3</span>
+            <div>
+              <div style="color: #e0e0e0; font-weight: 500;">"Letters to Lucilius", Letter 9</div>
+              <div style="color: #888; font-size: 11px; margin-top: 2px;">Book &middot; Section 3</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B: Collapsible block (Perplexity-style)</h3>
+      <p>Collapsed by default showing "N sources". Expands to a detailed list with title, anchor info, and clickable links for online sources. Keeps the message area clean.</p>
+    </div>
+  </div>
+
+  <!-- Option C: Hybrid -->
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 24px; background: #1a1a2e;">
+      <!-- Mock message -->
+      <div style="background: #2a2a3e; border-radius: 12px; padding: 16px; margin-bottom: 12px; font-size: 13px; color: #e0e0e0; line-height: 1.6;">
+        The Stoic philosophers emphasized that happiness comes from within, not from external circumstances<sup style="color: #7c8aff; font-weight: 600; cursor: pointer;">1</sup>. Marcus Aurelius wrote extensively about this in his personal journals<sup style="color: #7c8aff; font-weight: 600; cursor: pointer;">2</sup>, while Seneca approached the topic through his letters<sup style="color: #7c8aff; font-weight: 600; cursor: pointer;">3</sup>.
+      </div>
+      <!-- Numbered circles row + expand -->
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <div style="display: flex; gap: 4px;">
+          <span style="width: 22px; height: 22px; border-radius: 50%; background: #2a2a3e; border: 1px solid #3a3a4e; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #7c8aff; font-weight: 600; cursor: pointer;" title="Meditations, Chapter 5">1</span>
+          <span style="width: 22px; height: 22px; border-radius: 50%; background: #2a2a3e; border: 1px solid #3a3a4e; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #7c8aff; font-weight: 600; cursor: pointer;" title="Marcus Aurelius: A Life">2</span>
+          <span style="width: 22px; height: 22px; border-radius: 50%; background: #2a2a3e; border: 1px solid #3a3a4e; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #7c8aff; font-weight: 600; cursor: pointer;" title="Letters to Lucilius">3</span>
+        </div>
+        <span style="color: #888; font-size: 11px; cursor: pointer; text-decoration: underline;">Show details</span>
+      </div>
+      <!-- Expanded detail (shown below) -->
+      <div style="margin-top: 10px; border: 1px solid #3a3a4e; border-radius: 10px; overflow: hidden;">
+        <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #2a2a3e; font-size: 12px;">
+          <span style="color: #7c8aff; font-weight: 600; min-width: 16px;">1</span>
+          <div>
+            <div style="color: #e0e0e0; font-weight: 500;">"Meditations", Chapter 5</div>
+            <div style="color: #888; font-size: 11px; margin-top: 2px;">Book &middot; p. 42</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #2a2a3e; font-size: 12px;">
+          <span style="color: #7c8aff; font-weight: 600; min-width: 16px;">2</span>
+          <div>
+            <div style="color: #5eaaff; font-weight: 500; text-decoration: underline; cursor: pointer;">"Marcus Aurelius: A Life"</div>
+            <div style="color: #888; font-size: 11px; margin-top: 2px;">Article &middot; example.com</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; font-size: 12px;">
+          <span style="color: #7c8aff; font-weight: 600; min-width: 16px;">3</span>
+          <div>
+            <div style="color: #e0e0e0; font-weight: 500;">"Letters to Lucilius", Letter 9</div>
+            <div style="color: #888; font-size: 11px; margin-top: 2px;">Book &middot; Section 3</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C: Hybrid (circles + expandable detail)</h3>
+      <p>Numbered circles always visible as a compact row (hover shows title). "Show details" expands the full list. Best of both: quick scan + deep info on demand.</p>
+    </div>
+  </div>
+</div>

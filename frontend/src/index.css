@@ -1,56 +1,78 @@
+@import "tailwindcss";
+
 :root {
-  --text: #4d4b52;
-  --text-h: #111015;
-  --bg: #f6f0e7;
-  --border: #d8cfc2;
-  --accent: #d55b16;
-  --shadow:
-    rgba(17, 16, 21, 0.12) 0 24px 50px -24px,
-    rgba(17, 16, 21, 0.08) 0 12px 24px -18px;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --radius: 0.625rem;
+}
 
-  --sans: "Avenir Next", "Segoe UI", sans-serif;
-  --heading: "Iowan Old Style", "Palatino Linotype", serif;
-  --mono: ui-monospace, Consolas, monospace;
+@theme inline {
+  --font-sans: "Avenir Next", "Segoe UI", sans-serif;
+  --font-serif: "Iowan Old Style", "Palatino Linotype", serif;
+  --font-mono: "Berkeley Mono", "SFMono-Regular", monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
 
-  font: 18px / 145% var(--sans);
-  letter-spacing: 0.18px;
-  color: var(--text);
-  background: var(--bg);
+* {
+  border-color: var(--border);
+}
+
+html {
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
-}
-
-#root {
-  min-height: 100svh;
 }
 
 body {
   margin: 0;
+  min-height: 100dvh;
+  font-family: var(--font-sans);
   background:
     radial-gradient(
       circle at top left,
-      rgba(213, 91, 22, 0.18),
-      transparent 30%
+      oklch(0.92 0.012 95 / 0.88),
+      transparent 35%
     ),
-    linear-gradient(180deg, #f7f1e9 0%, #efe4d5 100%);
+    linear-gradient(180deg, oklch(0.994 0 0) 0%, oklch(0.972 0.002 95) 100%);
+  color: var(--foreground);
 }
 
-h1 {
-  font-family: var(--heading);
-  font-weight: 700;
-  color: var(--text-h);
-  font-size: clamp(2.5rem, 6vw, 4.5rem);
-  line-height: 0.95;
-  letter-spacing: -0.04em;
-  margin: 0 0 20px;
-}
-
-p {
-  margin: 0;
+#root {
+  min-height: 100dvh;
 }
