@@ -43,6 +43,7 @@ def _settings() -> SimpleNamespace:
         redis_port=6379,
         persona_dir="/persona",
         config_dir="/config",
+        promotions_file_path="/config/PROMOTIONS.md",
     )
 
 
@@ -243,6 +244,7 @@ async def test_lifespan_loads_persona_context(
         assert test_app.state.persona_context.behavior == "Test behavior"
         assert len(test_app.state.persona_context.config_content_hash) == 64
         assert test_app.state.persona_context.config_commit_hash != ""
+        assert test_app.state.promotions_service is not None
 
 
 @pytest.mark.asyncio

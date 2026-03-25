@@ -18,8 +18,6 @@ DEFAULT_EMBEDDING_TASK_TYPE = "RETRIEVAL_DOCUMENT"
 
 
 async def on_startup(ctx: dict[str, Any]) -> None:
-    from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
-
     from app.services.batch_embedding import BatchEmbeddingClient
     from app.services.batch_orchestrator import BatchOrchestrator
     from app.services.docling_parser import DoclingParser
@@ -28,6 +26,7 @@ async def on_startup(ctx: dict[str, Any]) -> None:
     from app.services.qdrant import QdrantService
     from app.services.snapshot import SnapshotService
     from app.services.storage import StorageService
+    from app.services.token_counter import ApproximateTokenizer
 
     logger.info("worker.startup.begin")
     engine = create_database_engine(settings)
@@ -71,10 +70,7 @@ async def on_startup(ctx: dict[str, Any]) -> None:
         batch_client=batch_embedding_client,
         qdrant_service=qdrant_service,
     )
-    tokenizer = HuggingFaceTokenizer.from_pretrained(
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
-        max_tokens=settings.chunk_max_tokens,
-    )
+    tokenizer = ApproximateTokenizer()
     ctx["db_engine"] = engine
     ctx["session_factory"] = create_session_factory(engine)
     ctx["settings"] = settings

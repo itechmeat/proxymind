@@ -7,15 +7,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
 from app.persona.loader import PersonaContext
+from app.services.chat import ChatService
+from app.services.context_assembler import ContextAssembler
 from app.services.embedding import EmbeddingService
 from app.services.llm import LLMService
-from app.services.query_rewrite import QueryRewriteService
+from app.services.promotions import PromotionsService
 from app.services.qdrant import QdrantService
+from app.services.query_rewrite import QueryRewriteService
 from app.services.retrieval import RetrievalService
 from app.services.snapshot import SnapshotService
 from app.services.source import SourceService, TaskEnqueuer
 from app.services.storage import StorageService
-from app.services.chat import ChatService
 
 
 def get_storage_service(request: Request) -> StorageService:
@@ -84,6 +86,26 @@ def get_persona_context(request: Request) -> PersonaContext:
     return request.app.state.persona_context
 
 
+def get_promotions_service(request: Request) -> PromotionsService:
+    return request.app.state.promotions_service
+
+
+def get_context_assembler(
+    request: Request,
+    persona_context: Annotated[PersonaContext, Depends(get_persona_context)],
+    promotions_service: Annotated[PromotionsService, Depends(get_promotions_service)],
+) -> ContextAssembler:
+    settings = request.app.state.settings
+    return ContextAssembler(
+        persona_context=persona_context,
+        promotions_service=promotions_service,
+        retrieval_context_budget=settings.retrieval_context_budget,
+        max_citations=settings.max_citations_per_response,
+        min_retrieved_chunks=settings.min_retrieved_chunks,
+        max_promotions_per_response=settings.max_promotions_per_response,
+    )
+
+
 def get_sse_settings(request: Request) -> dict[str, int]:
     settings = request.app.state.settings
     return {
@@ -101,7 +123,7 @@ def get_chat_service(
     query_rewrite_service: Annotated[
         QueryRewriteService, Depends(get_query_rewrite_service)
     ],
-    persona_context: Annotated[PersonaContext, Depends(get_persona_context)],
+    context_assembler: Annotated[ContextAssembler, Depends(get_context_assembler)],
 ) -> ChatService:
     from app.services.chat import ChatService
 
@@ -111,7 +133,7 @@ def get_chat_service(
         retrieval_service=retrieval_service,
         llm_service=llm_service,
         query_rewrite_service=query_rewrite_service,
-        persona_context=persona_context,
+        context_assembler=context_assembler,
         min_retrieved_chunks=request.app.state.settings.min_retrieved_chunks,
         max_citations_per_response=request.app.state.settings.max_citations_per_response,
     )

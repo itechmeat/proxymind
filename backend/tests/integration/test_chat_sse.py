@@ -12,16 +12,23 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 import pytest_asyncio
-from httpx_sse import aconnect_sse
 from fastapi import FastAPI
+from httpx_sse import aconnect_sse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
 from app.db.models import Message, Source
-from app.db.models.enums import MessageRole, MessageStatus, SnapshotStatus, SourceStatus, SourceType
+from app.db.models.enums import (
+    MessageRole,
+    MessageStatus,
+    SnapshotStatus,
+    SourceStatus,
+    SourceType,
+)
 from app.db.models.knowledge import KnowledgeSnapshot
 from app.services.llm_types import LLMStreamEnd, LLMToken
+from app.services.promotions import PromotionsService
 from app.services.qdrant import RetrievedChunk
 from app.services.retrieval import RetrievalError
 
@@ -128,6 +135,8 @@ def rewriting_chat_app(
     app.state.settings = SimpleNamespace(
         min_retrieved_chunks=1,
         max_citations_per_response=5,
+        retrieval_context_budget=4096,
+        max_promotions_per_response=1,
         sse_heartbeat_interval_seconds=15,
         sse_inter_token_timeout_seconds=30,
     )
@@ -142,6 +151,7 @@ def rewriting_chat_app(
         config_commit_hash="test-commit",
         config_content_hash="test-content-hash",
     )
+    app.state.promotions_service = PromotionsService(promotions_text="")
     return app
 
 
@@ -267,7 +277,8 @@ async def test_sse_stream_includes_citations_event(
     assert "citations" in event_names
     assert event_names.index("citations") < event_names.index("done")
 
-    citations_payload = json.loads(next(event.data for event in events if event.event == "citations"))
+    citations_event = next(event for event in events if event.event == "citations")
+    citations_payload = json.loads(citations_event.data)
     assert citations_payload == {
         "citations": [
             {

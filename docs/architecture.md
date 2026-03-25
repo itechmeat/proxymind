@@ -25,7 +25,7 @@ graph TB
     Worker --> SeaweedFS
     Worker -->|embeddings| GeminiEmb[Gemini Embedding 2]
     Worker -->|batch ops| GeminiBatch[Gemini Batch API]
-    Worker -->|parsing| Docling[Docling]
+    Worker -->|advanced parsing fallback| DocumentAI[Google Cloud Document AI]
 
     API -->|LLM calls| LiteLLM[LiteLLM → LLM Provider]
     API --> Qdrant
@@ -46,8 +46,9 @@ graph LR
 
     subgraph Knowledge Circuit
         Ingestion[Ingestion API]
-        Parser[Docling Parser]
-        Chunker[HybridChunker]
+        Parser[Lightweight Parser Stack]
+        Chunker[Lightweight Chunker]
+        ExternalParser[Document AI Fallback]
         Embedder[Gemini Embedding 2]
         Snapshot[Snapshot Manager]
     end
@@ -82,7 +83,7 @@ This has one important architectural consequence: **admin authentication and vis
 
 ### Knowledge circuit
 
-Runs asynchronously, does not block chat. Two-tier parsing:
+Runs asynchronously, does not block chat. Routing policy: local-first, external-on-complexity.
 
 1. Owner uploads a source via Admin API.
 2. File is saved to SeaweedFS, metadata to PostgreSQL.
@@ -96,7 +97,8 @@ Runs asynchronously, does not block chat. Two-tier parsing:
         - **Video** — transcript + visual description via Gemini LLM.
      2. **Gemini Embedding 2** — generates an embedding directly from the file (multimodal input).
         Worker saves: `text_content` (required textual context for LLM during retrieval), anchor metadata (filename, format, duration/page count), link to the file in SeaweedFS. During retrieval, `text_content` is passed to the LLM; citations are formed from anchor metadata.
-   - **Path B (Docling)** — for everything else: long PDFs, DOCX, HTML, Markdown, TXT. Docling parses, HybridChunker splits into chunks with anchor metadata (page, chapter, section). Gemini Embedding 2 generates embeddings from chunk text.
+   - **Path B (lightweight local)** — default path for Markdown, TXT, HTML, DOCX, and text-based PDFs when lightweight extraction is sufficient. Local parsers extract text and structure, the lightweight chunker builds normalized chunks with anchor metadata, and Gemini Embedding 2 generates embeddings from chunk text.
+   - **Path C (Document AI fallback)** — used only when local extraction is insufficient: scanned PDFs, complex tables, complex reading order, or other layout-heavy documents. Worker sends the file to Google Cloud Document AI, normalizes the parsed output into the same local chunk contract, and then continues through the standard embedding and indexing pipeline.
 5. For bulk operations (book uploads, reindex) worker uses **Gemini Batch API** (−50% cost, SLO ≤24h). For individual files — interactive API.
 
 **Batch API lifecycle within the task system:**
@@ -209,7 +211,7 @@ sequenceDiagram
     participant M as SeaweedFS
     participant R as Redis
     participant W as arq Worker
-    participant D as Docling
+    participant DAI as Document AI
     participant GL as Gemini LLM
     participant GE as Gemini Embedding 2
     participant Q as Qdrant
@@ -223,16 +225,20 @@ sequenceDiagram
 
     R->>W: ingestion task
     W->>M: download file
-    W->>W: determine path (A: Gemini native / B: Docling)
+    W->>W: determine path (A: Gemini native / B: local lightweight / C: Document AI fallback)
 
     alt Path A: native format within limits
         W->>GL: GenerateContent (extract text_content from file)
         GL-->>W: text_content
         W->>GE: embedding directly from file
         GE-->>W: vector
-    else Path B: Docling
-        W->>D: parsing + HybridChunker
-        D-->>W: chunks with metadata (text_content + anchors)
+    else Path B: local lightweight
+        W->>W: parse + chunk locally
+        W->>GE: embedding requests (chunk text)
+        GE-->>W: vectors
+    else Path C: Document AI fallback
+        W->>DAI: parse layout / OCR / tables
+        DAI-->>W: normalized chunks with metadata
         W->>GE: embedding requests (chunk text)
         GE-->>W: vectors
     end
@@ -292,6 +298,8 @@ All business entities and their lifecycle. OAuth built-in. Tables contain tenant
 ### Qdrant — vector retrieval
 
 Chunks with embeddings and payload metadata. Payload indexes on frequently filtered fields. Collection organization (single or separate) — decision deferred until first evals.
+
+Qdrant remains local and is the canonical retrieval store. External Google services are used only for processing, never as the primary knowledge store.
 
 ### SeaweedFS — object storage
 

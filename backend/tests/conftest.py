@@ -23,6 +23,7 @@ from app.core.config import get_settings
 from app.core.constants import DEFAULT_AGENT_ID
 from app.db.engine import create_database_engine, create_session_factory
 from app.db.models import Agent
+from app.services.promotions import PromotionsService
 from app.services.storage import StorageService
 
 pytest_plugins = ("pytest_asyncio",)
@@ -308,6 +309,8 @@ def chat_app(
     app.state.settings = SimpleNamespace(
         min_retrieved_chunks=1,
         max_citations_per_response=5,
+        retrieval_context_budget=4096,
+        max_promotions_per_response=1,
         sse_heartbeat_interval_seconds=15,
         sse_inter_token_timeout_seconds=30,
     )
@@ -322,6 +325,7 @@ def chat_app(
         config_commit_hash="test-commit-sha",
         config_content_hash="test-content-hash",
     )
+    app.state.promotions_service = PromotionsService(promotions_text="")
     return app
 
 

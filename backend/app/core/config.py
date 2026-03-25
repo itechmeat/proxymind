@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     retrieval_top_n: int = Field(default=5, ge=1)
     min_retrieved_chunks: int = Field(default=1, ge=0)
     max_citations_per_response: int = Field(default=5, ge=1)
+    retrieval_context_budget: int = Field(default=4096, ge=1)
+    max_promotions_per_response: int = Field(default=1, ge=0)
     min_dense_similarity: float | None = Field(default=None, ge=0.0, le=1.0)
     sse_heartbeat_interval_seconds: int = Field(default=15, ge=1)
     sse_inter_token_timeout_seconds: int = Field(default=30, ge=1)
@@ -63,6 +65,7 @@ class Settings(BaseSettings):
     rewrite_history_messages: int = Field(default=10, ge=1)
     persona_dir: str = Field(default=str(REPO_ROOT / "persona"))
     config_dir: str = Field(default=str(REPO_ROOT / "config"))
+    promotions_file_path: str = Field(default=str(REPO_ROOT / "config" / "PROMOTIONS.md"))
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000

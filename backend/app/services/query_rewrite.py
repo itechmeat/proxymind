@@ -6,10 +6,11 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import structlog
 
+from app.services.token_counter import CHARS_PER_TOKEN
+
 if TYPE_CHECKING:
     from app.services.llm import LLMService
 
-CHARS_PER_TOKEN = 3
 SYSTEM_PROMPT_RESERVE_TOKENS = 200
 
 REWRITE_SYSTEM_PROMPT = (
@@ -101,7 +102,7 @@ class QueryRewriteService:
                 self._llm_service.complete(prompt, temperature=self._temperature),
                 timeout=self._timeout_ms / 1000,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._logger.warning(
                 "query_rewrite.timeout",
                 **self._log_kwargs(timeout_ms=self._timeout_ms, session_id=session_id),
@@ -164,7 +165,10 @@ class QueryRewriteService:
 
     @staticmethod
     def _build_prompt(history: list[MessageLike], query: str) -> list[dict[str, str]]:
-        history_lines = [f"{message.role.value.capitalize()}: {message.content}" for message in history]
+        history_lines = [
+            f"{message.role.value.capitalize()}: {message.content}"
+            for message in history
+        ]
         history_text = "\n".join(history_lines)
         user_content = f"Conversation history:\n{history_text}\n\nCurrent message: {query}"
         return [

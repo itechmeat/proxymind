@@ -20,8 +20,10 @@ from app.db.models.enums import (
 from app.db.models.knowledge import KnowledgeSnapshot
 from app.persona.loader import PersonaContext
 from app.services.chat import ChatService, NoActiveSnapshotError, SessionNotFoundError
+from app.services.context_assembler import ContextAssembler
 from app.services.llm_types import LLMError, LLMResponse
 from app.services.prompt import NO_CONTEXT_REFUSAL
+from app.services.promotions import PromotionsService
 from app.services.query_rewrite import RewriteResult
 from app.services.qdrant import RetrievedChunk
 from app.services.retrieval import RetrievalError
@@ -93,6 +95,14 @@ def _make_service(
         return RewriteResult(query=rewritten_query, is_rewritten=True, original_query=query)
 
     rewrite_service = SimpleNamespace(rewrite=AsyncMock(side_effect=_rewrite))
+    context_assembler = ContextAssembler(
+        persona_context=persona_context,
+        promotions_service=PromotionsService(promotions_text=""),
+        retrieval_context_budget=4096,
+        max_citations=5,
+        min_retrieved_chunks=min_retrieved_chunks,
+        max_promotions_per_response=1,
+    )
 
     service = ChatService(
         session=db_session,
@@ -100,7 +110,7 @@ def _make_service(
         retrieval_service=retrieval_service,
         llm_service=llm_service,
         query_rewrite_service=rewrite_service,
-        persona_context=persona_context,
+        context_assembler=context_assembler,
         min_retrieved_chunks=min_retrieved_chunks,
     )
     return service, retrieval_service, llm_service
@@ -187,6 +197,9 @@ async def test_answer_saves_assistant_response_with_chunks(
     messages = await _message_rows(db_session, chat_session.id)
     assert [message.role for message in messages] == [MessageRole.USER, MessageRole.ASSISTANT]
     assert messages[1].status is MessageStatus.COMPLETE
+    assert messages[1].content_type_spans == [
+        {"start": 0, "end": len("Grounded answer"), "type": "inference"}
+    ]
     session_row = await db_session.get(Session, chat_session.id)
     assert session_row is not None
     assert session_row.message_count == 2
@@ -213,6 +226,7 @@ async def test_answer_returns_refusal_without_llm_when_no_chunks(
     assert result.assistant_message.status is MessageStatus.COMPLETE
     assert result.assistant_message.snapshot_id == active_snapshot.id
     assert result.assistant_message.source_ids == []
+    assert result.assistant_message.content_type_spans is None
     retrieval_service.search.assert_awaited_once()
     llm_service.complete.assert_not_awaited()
 

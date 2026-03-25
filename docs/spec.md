@@ -42,13 +42,15 @@ This separation ensures resilience: chat does not depend on heavy indexing, and 
 
 ### AI and data processing
 
-| Tool                  | Min. version                            | Role                                                             |
-| --------------------- | --------------------------------------- | ---------------------------------------------------------------- |
-| Gemini Embedding 2    | `gemini-embedding-2-preview` (model ID) | Multimodal embeddings (text, PDF, images, audio, video)          |
-| Docling               | 2.80.0+                                 | Document parsing: PDF, DOCX, HTML, Markdown, TXT, audio          |
-| Docling HybridChunker | included in Docling 2.80.0+             | Structure-aware chunking with metadata preservation              |
-| Gemini Batch API      | v1                                      | Batch processing: embeddings, text extraction, evals (−50% cost) |
-| Deepgram              | API v1 + model ID                       | Audio transcription (later stages)                               |
+> Local ML runtime policy: the project MUST remain deployable on a cheap VPS without local GPU/ML stacks. Installing local ML frameworks or heavyweight inference runtimes is strictly forbidden in project environments and Docker images. This includes `torch`, `torchvision`, `transformers`, CUDA runtime packages, OCR/vision ML stacks, and similar dependencies. When older documents mention local Docling/ML-based processing, this policy overrides them until those references are cleaned up.
+
+| Tool                     | Min. version                            | Role                                                                       |
+| ------------------------ | --------------------------------------- | -------------------------------------------------------------------------- |
+| Gemini Embedding 2       | `gemini-embedding-2-preview` (model ID) | Multimodal embeddings (text, PDF, images, audio, video)                    |
+| Google Cloud Document AI | API v1                                  | Advanced document parsing, OCR, layout, and tables as an external fallback |
+| Lightweight parser stack | internal                                | Local parsing/chunking for Markdown, TXT, HTML, DOCX, and text-based PDFs  |
+| Gemini Batch API         | v1                                      | Batch processing: embeddings, text extraction, evals (−50% cost)           |
+| Deepgram                 | API v1 + model ID                       | Audio transcription (later stages)                                         |
 
 ### Frontend
 
@@ -78,7 +80,7 @@ Logical data layers:
 - **Source** — where data came from (book, blog, channel, podcast). Can optionally reference a product card in the catalog. An optional public URL is specified at upload time — only for publicly accessible materials. Sources without a public URL are part of the non-linked knowledge base.
 - **Document** — a specific content unit.
 - **Document version** — a version of the document after an update.
-- **Chunk** — an indexable fragment, produced by Docling HybridChunker.
+- **Chunk** — an indexable fragment, produced by the normalized parsing and chunking pipeline.
 - **Embedding profile** — model, dimensions, task type, pass date, pipeline version.
 - **Knowledge snapshot** — a published set of versions that the twin responds from.
 
@@ -86,22 +88,35 @@ The twin responds only from the active published snapshot. Drafts can be tested 
 
 ## Ingestion pipeline
 
-Two-tier parsing:
+Routing policy: **local-first, external-on-complexity**.
 
-**1. Gemini Embedding 2 directly** — for native formats within limits:
+The system keeps storage, retrieval, and business state local, while offloading only heavy processing to external services.
+
+**Path A — Gemini native path** for supported multimodal inputs within model limits:
 
 - PDF ≤ 6 pages
 - Images (PNG, JPEG) — up to 6 files per request
 - Audio (MP3, WAV) — up to 80 sec
 - Video (MP4) — up to 120 sec
 
-**2. Docling** — for everything else:
+**Path B — lightweight local parsing path** by default for text-centric documents:
 
-- Long PDFs (> 6 pages) — parsing + HybridChunker
-- DOCX, HTML, Markdown, TXT
-- Long audio/video are currently rejected in the worker. Docling-based Path B for audio/video is deferred until the ASR path is wired in a later story.
+- Markdown, TXT
+- HTML
+- DOCX
+- Text-based PDFs, including longer PDFs when lightweight extraction is sufficient
 
-**Chunking:** Docling HybridChunker — structure-aware, tokenization-aware, preserves headings and metadata. Configurable chunk size for the 8192-token window of Gemini Embedding 2.
+**Path C — external document intelligence fallback** for complex cases:
+
+- Scanned PDFs
+- PDFs with complex layout, tables, or poor reading order
+- DOCX / HTML documents where local extraction is insufficient
+
+Google Cloud Document AI is the preferred external fallback for Path C. It is used as a compute service only; parsed output is normalized into the local chunk contract before persistence and indexing.
+
+Long audio/video are currently rejected outside Path A limits. Any future fallback for these formats MUST remain external and MUST NOT introduce local ML runtimes.
+
+**Chunking:** structure-aware, lightweight, and non-ML in the base installation. Local chunking MUST preserve headings and metadata where available. External parsing results MUST be normalized into the same chunk model (`text_content`, token count, chunk index, anchors) before persistence. Configurable chunk size targets the 8192-token window of Gemini Embedding 2.
 
 Heavy operations (parsing, chunking, embeddings, reindex) run in background workers via arq + Redis. FastAPI does not perform ingestion in the request cycle.
 
@@ -166,7 +181,7 @@ Not every message contains references — only where appropriate. Light small ta
 
 The LLM **never generates URLs on its own**. Core principle:
 
-1. The LLM prompt receives chunks with metadata: `source_id`, `chunk_id`, and chunk anchor metadata (source title, chapter, page, section, timecode — whatever is available from Docling HybridChunker).
+1. The LLM prompt receives chunks with metadata: `source_id`, `chunk_id`, and chunk anchor metadata (source title, chapter, page, section, timecode — whatever is available from the normalized parsing pipeline).
 2. The LLM returns a response in Markdown format, referencing retrieved sources via ordinal markers (e.g., `[source:1]`).
 3. The backend constructs the citation based on source and chunk metadata:
    - **Source with a public URL** — a clickable link with anchor details (e.g., _"Book Title, Chapter 3"_ → link to store).
@@ -245,6 +260,7 @@ Language is set at deploy time via `.env` and applied to all language-dependent 
 
 - **Reasoning model (LLM)** — any provider (OpenAI, Anthropic, Google, open-source). Abstracted via LiteLLM.
 - **Embeddings** — tied to Gemini Embedding 2 at launch. Switching providers requires full reindexing.
+- **Document processing** — lightweight local parsing by default, with external heavy processing through Google Cloud Document AI as a fallback for complex documents.
 - **Transcription** — Deepgram (later stages). At launch — upload of pre-made transcripts.
 
 ## Tenant-ready model

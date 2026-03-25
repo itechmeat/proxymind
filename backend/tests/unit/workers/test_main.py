@@ -77,10 +77,7 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
         lambda **_kwargs: gemini_content_service,
     )
     monkeypatch.setattr("app.services.snapshot.SnapshotService", lambda: object())
-    monkeypatch.setattr(
-        "docling_core.transforms.chunker.tokenizer.huggingface.HuggingFaceTokenizer.from_pretrained",
-        lambda **_kwargs: tokenizer,
-    )
+    monkeypatch.setattr("app.services.token_counter.ApproximateTokenizer", lambda: tokenizer)
 
     await main.on_startup(ctx)
 
