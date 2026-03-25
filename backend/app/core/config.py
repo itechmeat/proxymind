@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote_plus
 
 from pydantic import Field, computed_field, model_validator
@@ -80,6 +81,25 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_empty_optional_strings(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        normalized = dict(data)
+        for field_name in (
+            "gemini_api_key",
+            "llm_api_key",
+            "llm_api_base",
+            "rewrite_llm_model",
+            "rewrite_llm_api_key",
+            "rewrite_llm_api_base",
+        ):
+            if normalized.get(field_name) == "":
+                normalized[field_name] = None
+        return normalized
 
     @model_validator(mode="after")
     def validate_retrieval_settings(self) -> Settings:

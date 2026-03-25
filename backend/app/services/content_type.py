@@ -1,38 +1,16 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 
 from app.services.promotions import Promotion
 
 _CITATION_PATTERN = re.compile(r"\[source:\d+\]")
 _WORD_PATTERN = re.compile(r"[^\W_]+(?:[-'’][^\W_]+)*", re.UNICODE)
-_COMMON_ABBREVIATIONS = {"mr", "mrs", "ms", "dr", "prof", "sr", "jr", "vs", "etc", "e.g", "i.e"}
-_STOPWORDS = {
-    "a",
-    "an",
-    "and",
-    "are",
-    "as",
-    "at",
-    "be",
-    "by",
-    "for",
-    "from",
-    "in",
-    "is",
-    "it",
-    "of",
-    "on",
-    "or",
-    "the",
-    "to",
-    "with",
-    "you",
-    "your",
-    "today",
-    "now",
-}
+_MIN_PROMO_KEYWORD_LENGTH = 2
+_MIN_DISTINCT_PROMO_MATCHES = 2
+_MIN_LONG_PROMO_KEYWORD_LENGTH = 5
 
 
 @dataclass(slots=True, frozen=True)
@@ -90,37 +68,32 @@ def _split_sentences(text: str) -> list[tuple[int, int]]:
 def _is_sentence_boundary(text: str, index: int) -> bool:
     next_index = index + 1
     if next_index < len(text) and not text[next_index].isspace():
-        if (
+        return not (
             text[index] == "."
             and index > 0
             and text[index - 1].isdigit()
             and text[next_index].isdigit()
-        ):
-            return False
-        return False
-    if text[index] != ".":
-        return True
-
-    prefix = text[:index].rstrip()
-    match = re.search(r"([A-Za-z]+)$", prefix)
-    if match is None:
-        return True
-    return match.group(1).lower() not in _COMMON_ABBREVIATIONS
+        )
+    return True
 
 
 def _classify_sentence(sentence: str, promo_keywords: set[str]) -> str:
     if _CITATION_PATTERN.search(sentence):
         return "fact"
-    if promo_keywords and len(_sentence_keywords(sentence) & promo_keywords) >= 2:
+    if promo_keywords and len(_sentence_keywords(sentence) & promo_keywords) >= _MIN_DISTINCT_PROMO_MATCHES:
         return "promo"
     return "inference"
 
 
 def _extract_promo_keywords(promotions: list[Promotion]) -> set[str]:
-    keywords: set[str] = set()
+    keyword_counts: Counter[str] = Counter()
     for promotion in promotions:
-        keywords.update(_significant_words(f"{promotion.title} {promotion.body}"))
-    return keywords
+        keyword_counts.update(_significant_words(f"{promotion.title} {promotion.body}"))
+    return {
+        keyword
+        for keyword, count in keyword_counts.items()
+        if count > 1 or len(keyword) >= _MIN_LONG_PROMO_KEYWORD_LENGTH
+    }
 
 
 def _sentence_keywords(sentence: str) -> set[str]:
@@ -129,7 +102,7 @@ def _sentence_keywords(sentence: str) -> set[str]:
 
 def _significant_words(text: str) -> list[str]:
     words = [match.group(0).lower() for match in _WORD_PATTERN.finditer(text)]
-    return [word for word in words if len(word) >= 2 and word not in _STOPWORDS]
+    return [word for word in words if len(word) >= _MIN_PROMO_KEYWORD_LENGTH]
 
 
 def _merge_adjacent(spans: list[ContentTypeSpan]) -> list[ContentTypeSpan]:

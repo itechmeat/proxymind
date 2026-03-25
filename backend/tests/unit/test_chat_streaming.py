@@ -96,6 +96,7 @@ def _make_service(
     min_retrieved_chunks: int = 1,
     max_citations_per_response: int = 5,
     rewritten_query: str | None = None,
+    rewrite_error: Exception | None = None,
 ) -> tuple[ChatService, SimpleNamespace, SimpleNamespace]:
     retrieval_service = SimpleNamespace(search=AsyncMock())
     if isinstance(retrieval_result, Exception):
@@ -110,6 +111,8 @@ def _make_service(
         llm_service.stream.return_value = _fake_stream(*stream_tokens)
 
     async def _rewrite(query, history, **kwargs):
+        if rewrite_error is not None:
+            raise rewrite_error
         if rewritten_query is None:
             return RewriteResult(query=query, is_rewritten=False, original_query=query)
         return RewriteResult(query=rewritten_query, is_rewritten=True, original_query=query)
@@ -333,6 +336,29 @@ async def test_stream_answer_yields_error_on_llm_failure(
 
     assert len([event for event in events if isinstance(event, ChatStreamError)]) == 1
     messages = await _message_rows(db_session, session.id)
+    assert messages[1].status is MessageStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_stream_answer_persists_failed_assistant_when_rewrite_raises(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    service, retrieval_service, llm_service = _make_service(
+        db_session,
+        persona_context=persona_context,
+        rewrite_error=RuntimeError("rewrite exploded"),
+    )
+    session = await service.create_session()
+
+    with pytest.raises(RuntimeError, match="rewrite exploded"):
+        await _collect_events(service, session_id=session.id, text="Q?")
+
+    retrieval_service.search.assert_not_awaited()
+    llm_service.stream.assert_not_called()
+    messages = await _message_rows(db_session, session.id)
+    assert [message.role for message in messages] == [MessageRole.USER, MessageRole.ASSISTANT]
     assert messages[1].status is MessageStatus.FAILED
 
 

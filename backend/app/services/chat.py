@@ -171,10 +171,9 @@ class ChatService:
             snapshot_id=str(snapshot_id),
         )
 
-        search_query = await self._do_rewrite(text, chat_session, user_message)
-
         retrieved_chunks: list[RetrievedChunk] = []
         try:
+            search_query = await self._do_rewrite(text, chat_session, user_message)
             retrieved_chunks = await self._retrieval_service.search(
                 search_query,
                 snapshot_id=snapshot_id,
@@ -334,10 +333,9 @@ class ChatService:
                 idempotency_key=idempotency_key,
             )
 
-        search_query = await self._do_rewrite(text, chat_session, user_message)
-
         retrieved_chunks: list[RetrievedChunk] = []
         try:
+            search_query = await self._do_rewrite(text, chat_session, user_message)
             retrieved_chunks = await self._retrieval_service.search(
                 search_query,
                 snapshot_id=snapshot_id,

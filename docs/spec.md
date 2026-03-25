@@ -92,19 +92,19 @@ Routing policy: **local-first, external-on-complexity**.
 
 The system keeps storage, retrieval, and business state local, while offloading only heavy processing to external services.
 
-**Path A — Gemini native path** for supported multimodal inputs within model limits:
+**Path A — Gemini native path** for supported multimodal inputs within model limits when the router explicitly prefers native Gemini handling:
 
-- PDF ≤ 6 pages
 - Images (PNG, JPEG) — up to 6 files per request
 - Audio (MP3, WAV) — up to 80 sec
 - Video (MP4) — up to 120 sec
+- Short PDFs only when native multimodal handling is preferred over lightweight text extraction
 
 **Path B — lightweight local parsing path** by default for text-centric documents:
 
 - Markdown, TXT
 - HTML
 - DOCX
-- Text-based PDFs, including longer PDFs when lightweight extraction is sufficient
+- Text-based PDFs of any length when lightweight extraction is sufficient, including short PDFs
 
 **Path C — external document intelligence fallback** for complex cases:
 

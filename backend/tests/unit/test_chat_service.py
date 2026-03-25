@@ -76,6 +76,7 @@ def _make_service(
     llm_result: LLMResponse | Exception | None = None,
     min_retrieved_chunks: int = 1,
     rewritten_query: str | None = None,
+    rewrite_error: Exception | None = None,
 ) -> tuple[ChatService, SimpleNamespace, SimpleNamespace]:
     retrieval_service = SimpleNamespace(search=AsyncMock())
     if isinstance(retrieval_result, Exception):
@@ -90,6 +91,8 @@ def _make_service(
         llm_service.complete.return_value = llm_result
 
     async def _rewrite(query, history, **kwargs):
+        if rewrite_error is not None:
+            raise rewrite_error
         if rewritten_query is None:
             return RewriteResult(query=query, is_rewritten=False, original_query=query)
         return RewriteResult(query=rewritten_query, is_rewritten=True, original_query=query)
@@ -553,3 +556,26 @@ async def test_answer_continues_when_rewrite_persistence_fails(
     assert [message.role for message in messages] == [MessageRole.USER, MessageRole.ASSISTANT]
     assert messages[0].rewritten_query is None
     assert messages[1].status is MessageStatus.COMPLETE
+
+
+@pytest.mark.asyncio
+async def test_answer_persists_failed_assistant_when_rewrite_raises(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    service, retrieval_service, llm_service = _make_service(
+        db_session,
+        persona_context=persona_context,
+        rewrite_error=RuntimeError("rewrite exploded"),
+    )
+    chat_session = await service.create_session()
+
+    with pytest.raises(RuntimeError, match="rewrite exploded"):
+        await service.answer(session_id=chat_session.id, text="Question?")
+
+    retrieval_service.search.assert_not_awaited()
+    llm_service.complete.assert_not_awaited()
+    messages = await _message_rows(db_session, chat_session.id)
+    assert [message.role for message in messages] == [MessageRole.USER, MessageRole.ASSISTANT]
+    assert messages[1].status is MessageStatus.FAILED

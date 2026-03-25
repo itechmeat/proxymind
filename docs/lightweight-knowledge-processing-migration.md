@@ -110,6 +110,9 @@ Minimum normalized chunk contract:
 - `anchor_page`
 - `anchor_chapter`
 - `anchor_section`
+- `anchor_timecode`
+
+`anchor_timecode` remains part of the contract for time-based media so citations for audio and video keep precise temporal locations after normalization.
 
 Provider-specific response shapes MUST NOT leak into domain models or retrieval logic.
 

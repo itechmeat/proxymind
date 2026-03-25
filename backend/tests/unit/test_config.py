@@ -126,6 +126,23 @@ def test_rewrite_history_messages_rejects_non_positive() -> None:
         Settings(**_base_settings(), rewrite_history_messages=0)
 
 
+def test_empty_optional_provider_strings_are_normalized_to_none() -> None:
+    settings = Settings(
+        **_base_settings(),
+        llm_api_key="",
+        llm_api_base="",
+        rewrite_llm_model="",
+        rewrite_llm_api_key="",
+        rewrite_llm_api_base="",
+    )
+
+    assert settings.llm_api_key is None
+    assert settings.llm_api_base is None
+    assert settings.rewrite_llm_model is None
+    assert settings.rewrite_llm_api_key is None
+    assert settings.rewrite_llm_api_base is None
+
+
 def test_max_citations_per_response_default() -> None:
     settings = Settings(**_base_settings())
 

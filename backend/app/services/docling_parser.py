@@ -13,9 +13,11 @@ from pypdf import PdfReader
 
 from app.db.models.enums import SourceType
 
-from app.services.token_counter import ApproximateTokenizer
+from app.services.token_counter import ApproximateTokenizer, CHARS_PER_TOKEN
 
 _WORD_NAMESPACE = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+_MAX_DOCX_XML_BYTES = 8 * 1024 * 1024
+_MAX_DOCX_XML_COMPRESSION_RATIO = 100
 
 
 @dataclass(slots=True, frozen=True)
@@ -80,6 +82,8 @@ class _HTMLBlockParser(HTMLParser):
 
     def handle_data(self, data: str) -> None:
         if self._skip_depth:
+            return
+        if self._active_heading_level is None and self._active_block_tag is None:
             return
         self._buffer.append(data)
 
@@ -212,17 +216,44 @@ class DoclingParser:
             block_text = _normalize_whitespace(block.text)
             if not block_text:
                 continue
-            block_tokens = self._tokenizer.count_tokens(block_text)
-            if current_parts and current_tokens + block_tokens > self._chunk_max_tokens:
-                flush()
-            if not current_parts:
-                current_headings = block.headings
-                current_anchor_page = block.anchor_page
-            current_parts.append(block_text)
-            current_tokens += block_tokens
+            for fragment in self._split_block_text(block_text):
+                fragment_tokens = self._tokenizer.count_tokens(fragment)
+                if current_parts and current_tokens + fragment_tokens > self._chunk_max_tokens:
+                    flush()
+                if not current_parts:
+                    current_headings = block.headings
+                    current_anchor_page = block.anchor_page
+                current_parts.append(fragment)
+                current_tokens += fragment_tokens
 
         flush()
         return chunk_data
+
+    def _split_block_text(self, text: str) -> list[str]:
+        if self._tokenizer.count_tokens(text) <= self._chunk_max_tokens:
+            return [text]
+
+        max_chars = max(CHARS_PER_TOKEN, self._chunk_max_tokens * CHARS_PER_TOKEN)
+        fragments: list[str] = []
+        start = 0
+
+        while start < len(text):
+            end = min(len(text), start + max_chars)
+            if end < len(text):
+                split_at = text.rfind(" ", start, end)
+                if split_at <= start:
+                    split_at = end
+            else:
+                split_at = end
+
+            fragment = text[start:split_at].strip()
+            if fragment:
+                fragments.append(fragment)
+            start = split_at
+            while start < len(text) and text[start].isspace():
+                start += 1
+
+        return fragments
 
     @staticmethod
     def _parse_markdown(text: str) -> list[_ParsedBlock]:
@@ -274,7 +305,14 @@ class DoclingParser:
     def _parse_docx(content: bytes) -> list[_ParsedBlock]:
         try:
             with ZipFile(BytesIO(content)) as archive:
-                document_xml = archive.read("word/document.xml")
+                document_info = archive.getinfo("word/document.xml")
+                _validate_zip_member(
+                    document_info.file_size,
+                    document_info.compress_size,
+                    max_size=_MAX_DOCX_XML_BYTES,
+                    max_ratio=_MAX_DOCX_XML_COMPRESSION_RATIO,
+                )
+                document_xml = archive.read(document_info)
         except (BadZipFile, KeyError) as error:
             raise ValueError("Invalid DOCX file") from error
 
@@ -349,3 +387,16 @@ def _split_text_blocks(text: str) -> list[str]:
 
 def _normalize_whitespace(text: str) -> str:
     return " ".join(text.split())
+
+
+def _validate_zip_member(
+    file_size: int,
+    compressed_size: int,
+    *,
+    max_size: int,
+    max_ratio: int,
+) -> None:
+    if file_size > max_size:
+        raise ValueError("DOCX file is too large to parse safely")
+    if compressed_size > 0 and (file_size / compressed_size) > max_ratio:
+        raise ValueError("DOCX file compression ratio is too high")

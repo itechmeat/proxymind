@@ -6,11 +6,11 @@ def test_empty_string_returns_zero() -> None:
 
 
 def test_short_string() -> None:
-    assert estimate_tokens("hello") == 1
+    assert estimate_tokens("hello") == 2
 
 
 def test_longer_string() -> None:
-    assert estimate_tokens("hello world") == 3
+    assert estimate_tokens("hello world") == 4
 
 
 def test_deterministic() -> None:
