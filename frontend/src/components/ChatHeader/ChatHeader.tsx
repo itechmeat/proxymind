@@ -1,5 +1,6 @@
 import { Settings } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -55,6 +56,9 @@ export function ChatHeader({
 
         {adminMode ? (
           <div className="chat-header__actions">
+            <Button asChild type="button" variant="outline">
+              <Link to="/admin">Admin</Link>
+            </Button>
             <Button
               aria-label={strings.profileSettings}
               onClick={onOpenSettings}

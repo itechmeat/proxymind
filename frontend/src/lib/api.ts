@@ -25,7 +25,7 @@ export function buildApiUrl(pathname: string) {
   return `${appConfig.apiUrl}${pathname}`;
 }
 
-async function parseJsonResponse<T>(response: Response): Promise<T> {
+export async function parseJsonResponse<T>(response: Response): Promise<T> {
   if (response.ok) {
     return (await response.json()) as T;
   }
@@ -33,9 +33,11 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
   let detail = strings.requestFailed(response.status);
 
   try {
-    const body = (await response.json()) as { detail?: string };
-    if (body.detail) {
+    const body = (await response.json()) as { detail?: unknown };
+    if (typeof body.detail === "string" && body.detail.trim()) {
       detail = body.detail;
+    } else if (Array.isArray(body.detail) && body.detail.length > 0) {
+      detail = JSON.stringify(body.detail[0]);
     }
   } catch {
     // Ignore non-JSON errors and surface the status-based fallback message.

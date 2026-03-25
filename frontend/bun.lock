@@ -6,6 +6,7 @@
       "name": "frontend",
       "dependencies": {
         "@ai-sdk/react": "^3.0.140",
+        "@radix-ui/react-alert-dialog": "^1.1.15",
         "@tailwindcss/vite": "^4.2.2",
         "ai": "^6.0.138",
         "class-variance-authority": "^0.7.1",
