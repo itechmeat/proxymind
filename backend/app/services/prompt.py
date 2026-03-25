@@ -13,7 +13,8 @@ if TYPE_CHECKING:
 NO_CONTEXT_REFUSAL = "I could not find an answer to that in the knowledge base."
 
 CITATION_INSTRUCTIONS = """## Citation Instructions
-When your answer is based on the knowledge context below, cite sources using [source:N] where N is the source number.
+When your answer is based on the knowledge context below,
+cite sources using [source:N] where N is the source number.
 - Place citations inline, immediately after the relevant statement.
 - Do not generate URLs or links. Only use source numbers provided.
 - Cite only the most relevant sources for knowledge-based facts.

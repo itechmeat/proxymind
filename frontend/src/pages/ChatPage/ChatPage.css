@@ -1,0 +1,130 @@
+.chat-page {
+  position: relative;
+  min-height: 100dvh;
+  overflow: clip;
+  background:
+    radial-gradient(circle at top, oklch(0.99 0.012 95 / 0.78), transparent 40%),
+    linear-gradient(180deg, oklch(0.998 0 0) 0%, oklch(0.972 0.004 95) 100%);
+}
+
+.chat-page__glow {
+  position: absolute;
+  inset: auto;
+  width: 22rem;
+  height: 22rem;
+  border-radius: 999px;
+  filter: blur(56px);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.chat-page__glow--warm {
+  top: -8rem;
+  left: -6rem;
+  background: oklch(0.92 0.035 85 / 0.95);
+}
+
+.chat-page__glow--cool {
+  right: -7rem;
+  bottom: 6rem;
+  background: oklch(0.91 0.03 220 / 0.75);
+}
+
+.chat-page__shell {
+  position: relative;
+  z-index: 1;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-page__body {
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-page__loading {
+  width: min(100%, 54rem);
+  height: 100%;
+  margin: 0 auto;
+  display: grid;
+  align-content: center;
+  gap: 1rem;
+  padding: 1.5rem 1rem 8rem;
+  box-sizing: border-box;
+}
+
+.chat-page__loading-card {
+  height: 6rem;
+  border-radius: 1.8rem;
+  background: linear-gradient(
+    110deg,
+    color-mix(in oklab, var(--card) 92%, white 8%) 8%,
+    color-mix(in oklab, var(--secondary) 85%, white 15%) 18%,
+    color-mix(in oklab, var(--card) 92%, white 8%) 33%
+  );
+  background-size: 220% 100%;
+  border: 1px solid color-mix(in oklab, var(--border) 84%, white 16%);
+  box-shadow: 0 26px 48px -38px oklch(0.18 0 0 / 0.45);
+  animation: chat-page-sheen 1.6s linear infinite;
+}
+
+.chat-page__status-card {
+  width: min(100%, 32rem);
+  margin: auto;
+  padding: 1.5rem;
+  border: 1px solid color-mix(in oklab, var(--border) 84%, white 16%);
+  border-radius: 1.8rem;
+  background: color-mix(in oklab, var(--card) 92%, white 8%);
+  box-shadow: 0 26px 48px -38px oklch(0.18 0 0 / 0.45);
+  text-align: center;
+}
+
+.chat-page__status-title {
+  margin: 0;
+  font-size: 1.125rem;
+  line-height: 1.4;
+  color: var(--foreground);
+}
+
+.chat-page__status-detail {
+  margin: 0.75rem 0 1.25rem;
+  color: color-mix(in oklab, var(--foreground) 72%, white 28%);
+}
+
+.chat-page__loading-card--wide {
+  width: min(100%, 38rem);
+}
+
+.chat-page__loading-card--narrow {
+  width: min(100%, 26rem);
+  justify-self: end;
+}
+
+@keyframes chat-page-sheen {
+  from {
+    background-position: 100% 0;
+  }
+
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .chat-page__glow {
+    width: 16rem;
+    height: 16rem;
+    filter: blur(44px);
+  }
+
+  .chat-page__glow--warm {
+    top: -5rem;
+    left: -5rem;
+  }
+
+  .chat-page__glow--cool {
+    right: -5rem;
+    bottom: 8rem;
+  }
+}

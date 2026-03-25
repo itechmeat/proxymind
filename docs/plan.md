@@ -150,14 +150,14 @@ Phase outcome: full-featured dialog with persona, citations, memory, promotions.
 
 Phase outcome: full-featured web interface for visitors and the owner.
 
-- [ ] **S5-01: Chat UI**
+- [*] **S5-01: Chat UI**
       React + Vite + Bun. Chat interface: input field, message feed, SSE streaming, twin avatar and name.
   - **Outcome:** visitor can chat with the twin in the browser
   - **Verification:** open → send message → streaming response → history on refresh
   - Tasks: chat layout, SSE client, message rendering, session persistence
   - **Parallel pair:** S4-04 (Query rewriting) — pure frontend vs pure backend, zero file overlap
 
-- [ ] **S5-02: Chat polish — citations display + twin profile**
+- [x] **S5-02: Chat polish — citations display + twin profile**
       Inline references in text, collapsible sources block under the message (Perplexity-style). Clickable for online, text-only for offline. Twin avatar (upload → SeaweedFS) and name in chat header. Note: "public links" require a backend schema extension — defer to a future story.
   - **Outcome:** sources visible and clickable; twin profile displayed in chat
   - **Verification:** citation → clickable link; collapse/expand block; avatar visible in chat header

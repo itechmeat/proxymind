@@ -10,7 +10,7 @@ from app.db.models.enums import SourceType
 from app.services.gemini_file_transfer import cleanup_uploaded_file, prepare_file_part
 
 if TYPE_CHECKING:
-    from google import genai
+    pass
 
 EXTRACTION_PROMPTS = {
     SourceType.PDF: (

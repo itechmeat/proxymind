@@ -1,0 +1,23 @@
+.citation-ref {
+  cursor: pointer;
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: #818cf8;
+  font: inherit;
+  font-size: 0.72em;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  vertical-align: super;
+}
+
+.citation-ref:hover {
+  color: #6366f1;
+}
+
+.citation-ref:focus-visible {
+  outline: 2px solid color-mix(in oklab, #818cf8 80%, white 20%);
+  outline-offset: 2px;
+  border-radius: 999px;
+}

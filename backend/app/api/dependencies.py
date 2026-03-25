@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
 from app.persona.loader import PersonaContext
+from app.services.chat import ChatService
 from app.services.embedding import EmbeddingService
 from app.services.llm import LLMService
 from app.services.qdrant import QdrantService
@@ -14,7 +15,6 @@ from app.services.retrieval import RetrievalService
 from app.services.snapshot import SnapshotService
 from app.services.source import SourceService, TaskEnqueuer
 from app.services.storage import StorageService
-from app.services.chat import ChatService
 
 
 def get_storage_service(request: Request) -> StorageService:
