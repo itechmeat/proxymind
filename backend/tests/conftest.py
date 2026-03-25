@@ -266,6 +266,16 @@ def mock_llm_service() -> SimpleNamespace:
 
 
 @pytest.fixture
+def mock_rewrite_service() -> SimpleNamespace:
+    from app.services.query_rewrite import RewriteResult
+
+    async def _no_rewrite(query, history, **kwargs):
+        return RewriteResult(query=query, is_rewritten=False, original_query=query)
+
+    return SimpleNamespace(rewrite=AsyncMock(side_effect=_no_rewrite))
+
+
+@pytest.fixture
 def sample_retrieved_chunk() -> object:
     from app.services.qdrant import RetrievedChunk
 
@@ -288,6 +298,7 @@ def chat_app(
     session_factory: async_sessionmaker[AsyncSession],
     mock_retrieval_service: SimpleNamespace,
     mock_llm_service: SimpleNamespace,
+    mock_rewrite_service: SimpleNamespace,
 ) -> FastAPI:
     from app.api.chat import router as chat_router
     from app.persona.loader import PersonaContext
@@ -303,6 +314,7 @@ def chat_app(
     app.state.session_factory = session_factory
     app.state.retrieval_service = mock_retrieval_service
     app.state.llm_service = mock_llm_service
+    app.state.query_rewrite_service = mock_rewrite_service
     app.state.persona_context = PersonaContext(
         identity="Test twin identity",
         soul="Test twin soul",

@@ -93,5 +93,6 @@ class Message(PrimaryKeyMixin, TimestampMixin, Base):
     model_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     config_commit_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     config_content_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    rewritten_query: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     session: Mapped[Session] = relationship(back_populates="messages")

@@ -28,6 +28,7 @@ from app.services.chat import (
 )
 from app.services.llm_types import LLMError, LLMStreamEnd, LLMToken
 from app.services.prompt import NO_CONTEXT_REFUSAL
+from app.services.query_rewrite import RewriteResult
 from app.services.qdrant import RetrievedChunk
 from app.services.snapshot import SnapshotService
 
@@ -92,6 +93,7 @@ def _make_service(
     stream_error: Exception | None = None,
     min_retrieved_chunks: int = 1,
     max_citations_per_response: int = 5,
+    rewritten_query: str | None = None,
 ) -> tuple[ChatService, SimpleNamespace, SimpleNamespace]:
     retrieval_service = SimpleNamespace(search=AsyncMock())
     if isinstance(retrieval_result, Exception):
@@ -105,11 +107,19 @@ def _make_service(
     else:
         llm_service.stream.return_value = _fake_stream(*stream_tokens)
 
+    async def _rewrite(query, history, **kwargs):
+        if rewritten_query is None:
+            return RewriteResult(query=query, is_rewritten=False, original_query=query)
+        return RewriteResult(query=rewritten_query, is_rewritten=True, original_query=query)
+
+    rewrite_service = SimpleNamespace(rewrite=AsyncMock(side_effect=_rewrite))
+
     service = ChatService(
         session=db_session,
         snapshot_service=SnapshotService(session=db_session),
         retrieval_service=retrieval_service,
         llm_service=llm_service,
+        query_rewrite_service=rewrite_service,
         persona_context=persona_context,
         min_retrieved_chunks=min_retrieved_chunks,
         max_citations_per_response=max_citations_per_response,
@@ -253,6 +263,37 @@ async def test_stream_answer_refusal_when_no_chunks(
     assert len(citation_events) == 1
     assert citation_events[0].citations == []
     llm_service.stream.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_llm_prompt_uses_original_query_when_rewrite_occurs(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    service, retrieval_service, llm_service = _make_service(
+        db_session,
+        persona_context=persona_context,
+        retrieval_result=[_chunk()],
+        stream_tokens=("answer",),
+        rewritten_query="expanded query",
+    )
+    session = await service.create_session()
+    captured_prompt_text: dict[str, str] = {}
+
+    def _capture_prompt(text, retrieved_chunks, persona, *, source_map):
+        captured_prompt_text["text"] = text
+        return [{"role": "user", "content": text}]
+
+    chat_module = __import__("app.services.chat", fromlist=["build_chat_prompt"])
+    monkeypatch.setattr(chat_module, "build_chat_prompt", _capture_prompt)
+
+    await _collect_events(service, session_id=session.id, text="original question")
+
+    retrieval_service.search.assert_awaited_once_with("expanded query", snapshot_id=session.snapshot_id)
+    llm_service.stream.assert_called_once()
+    assert captured_prompt_text["text"] == "original question"
 
 
 @pytest.mark.asyncio

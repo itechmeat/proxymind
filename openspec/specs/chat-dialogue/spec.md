@@ -1,6 +1,6 @@
 ## Purpose
 
-Chat session lifecycle, message send/receive, retrieval-augmented response generation, LLM integration, prompt assembly, and SSE streaming (S4-02). Introduced by S2-04.
+Chat session lifecycle, message send/receive, retrieval-augmented response generation, LLM integration, prompt assembly, SSE streaming (S4-02), and query rewriting (S4-04). Introduced by S2-04.
 
 ### Requirement: Session creation via POST /api/chat/sessions
 
@@ -27,9 +27,11 @@ The system SHALL provide a `POST /api/chat/sessions` endpoint that creates a new
 
 ### Requirement: Message send via POST /api/chat/messages
 
-The system SHALL provide a `POST /api/chat/messages` endpoint that accepts `session_id` (UUID), `text` (non-empty string), and an optional `idempotency_key` (string, client-generated) in the `SendMessageRequest`. The endpoint SHALL save the user message with `role=user`, `status=received`, and `idempotency_key` (when provided), then perform retrieval against the session's active snapshot, assemble a prompt using the retrieval context and the loaded `PersonaContext`, and stream the assistant's response as SSE (`text/event-stream; charset=utf-8`) with status 200.
+The system SHALL provide a `POST /api/chat/messages` endpoint that accepts `session_id` (UUID), `text` (non-empty string), and an optional `idempotency_key` (string, client-generated) in the `SendMessageRequest`. The endpoint SHALL save the user message with `role=user`, `status=received`, and `idempotency_key` (when provided), then perform query rewriting (S4-04), then perform retrieval against the session's active snapshot, assemble a prompt using the retrieval context and the loaded `PersonaContext`, and stream the assistant's response as SSE (`text/event-stream; charset=utf-8`) with status 200.
 
-The `ChatService` SHALL provide a `stream_answer()` method alongside the existing `answer()` method. The existing `answer()` method SHALL be preserved (used by tests and non-streaming internal calls such as query rewriting in S4-04). The `stream_answer()` method SHALL receive `PersonaContext` and pass it to `build_chat_prompt(query, chunks, persona)` for system message assembly that includes the safety policy and persona layers.
+After the user message is persisted, the system SHALL load conversation history for the session, then call `QueryRewriteService.rewrite()` with the user's query text and the loaded history. The retrieval step SHALL use the rewritten query (or the original query if rewriting was skipped or failed). The main LLM prompt assembly SHALL use the original user query text — not the rewritten query. When rewriting produces a different query, the `rewritten_query` column on the user message SHALL be updated with the rewritten text.
+
+The `ChatService` SHALL provide a `stream_answer()` method alongside the existing `answer()` method. The existing `answer()` method SHALL be preserved (used by tests and non-streaming internal calls). Both methods SHALL include the query rewriting step. The `stream_answer()` method SHALL receive `PersonaContext` and pass it to `build_chat_prompt(query, chunks, persona)` for system message assembly that includes the safety policy and persona layers.
 
 The assistant message SHALL be created with `role=assistant`, `status=streaming`, and `parent_message_id` set to the user message's `id` before the first SSE event is emitted. Upon successful completion, the assistant message SHALL be updated to `status=complete` with `content`, `model_name`, token counts (`token_count_prompt`, `token_count_completion`), deduplicated `source_ids` from retrieved chunks, and audit hashes (`config_commit_hash`, `config_content_hash` from `PersonaContext`).
 
@@ -92,6 +94,99 @@ On every response — both the LLM-generated response path (`chat.assistant_comp
 
 - **WHEN** `ChatService` is used after S4-02 implementation
 - **THEN** the `answer()` method SHALL remain available and functional with the same signature and behavior
+
+#### Scenario: Rewritten query used for retrieval, original for prompt
+
+- **WHEN** a user sends "Tell me more about the second one" in a session with prior history
+- **AND** query rewriting reformulates the query to "Tell me more about Sergey's book Deep Learning in Practice"
+- **THEN** the retrieval step SHALL search using "Tell me more about Sergey's book Deep Learning in Practice"
+- **AND** the main LLM prompt SHALL contain the original query "Tell me more about the second one"
+
+#### Scenario: First message skips rewriting
+
+- **WHEN** the first message in a session is sent
+- **THEN** query rewriting SHALL be skipped (no history available)
+- **AND** the retrieval step SHALL use the original query text
+- **AND** `rewritten_query` on the user message SHALL remain `NULL`
+
+#### Scenario: Rewrite failure does not block the chat flow
+
+- **WHEN** the query rewrite LLM call times out or raises an error
+- **THEN** the retrieval step SHALL proceed with the original query text
+- **AND** the assistant response SHALL be generated normally
+- **AND** `rewritten_query` on the user message SHALL remain `NULL`
+
+#### Scenario: Rewritten query persisted on user message
+
+- **WHEN** query rewriting succeeds and produces a different query
+- **THEN** the `rewritten_query` column on the user message record SHALL be updated with the rewritten text
+- **AND** the update SHALL occur before the retrieval step
+
+---
+
+### Requirement: ChatService constructor
+
+The `ChatService` constructor SHALL accept a `query_rewrite_service` parameter of type `QueryRewriteService`. This dependency SHALL be injected via the existing dependency injection mechanism in `api/dependencies.py`. The `QueryRewriteService` SHALL be initialized during application lifespan startup. Introduced by S4-04.
+
+#### Scenario: ChatService requires QueryRewriteService
+
+- **WHEN** `ChatService` is instantiated
+- **THEN** it SHALL require a `query_rewrite_service` parameter
+- **AND** SHALL store it for use during message processing
+
+#### Scenario: QueryRewriteService wired via dependency injection
+
+- **WHEN** the `get_chat_service()` dependency is resolved
+- **THEN** it SHALL provide a `QueryRewriteService` instance to the `ChatService` constructor
+
+---
+
+### Requirement: rewritten_query column on messages table
+
+The `messages` table SHALL have a `rewritten_query` column of type nullable TEXT. This column SHALL be populated only for user messages (`role=user`) when query rewriting occurs and produces a different query. The column SHALL be `NULL` when: the message is the first in a session (no history), rewriting is disabled, rewriting fails or times out, or the message is an assistant message. Introduced by S4-04.
+
+#### Scenario: Rewritten query stored for user message
+
+- **WHEN** a user message triggers successful query rewriting
+- **THEN** the `rewritten_query` column SHALL contain the LLM-reformulated query text
+
+#### Scenario: NULL for first message in session
+
+- **WHEN** the first message is sent in a new session (no prior history)
+- **THEN** the `rewritten_query` column SHALL be `NULL`
+
+#### Scenario: NULL for assistant messages
+
+- **WHEN** an assistant message is persisted
+- **THEN** the `rewritten_query` column SHALL be `NULL`
+
+#### Scenario: NULL when rewrite fails
+
+- **WHEN** query rewriting times out or raises an error
+- **THEN** the `rewritten_query` column on the user message SHALL remain `NULL`
+
+---
+
+### Requirement: Conversation history loading
+
+The `ChatService` SHALL provide a `_load_history()` method (or equivalent) that loads session messages for the rewrite context. The method SHALL load all messages in the session excluding the current user message, ordered by `created_at` ascending. Only messages with status RECEIVED (user messages) or COMPLETE (assistant messages) SHALL be included. Messages with status STREAMING, PARTIAL, or FAILED SHALL be excluded. Introduced by S4-04.
+
+#### Scenario: History loaded excluding current message
+
+- **WHEN** a session has 4 prior messages and the user sends a 5th message
+- **THEN** `_load_history()` SHALL return the 4 prior messages
+- **AND** the current (5th) user message SHALL NOT be included
+
+#### Scenario: Only RECEIVED and COMPLETE messages included
+
+- **WHEN** a session has 3 messages: user (RECEIVED), assistant (COMPLETE), and assistant (FAILED)
+- **THEN** `_load_history()` SHALL return 2 messages (the RECEIVED user message and the COMPLETE assistant message)
+- **AND** the FAILED assistant message SHALL be excluded
+
+#### Scenario: Empty history for first message
+
+- **WHEN** the first message is sent in a new session
+- **THEN** `_load_history()` SHALL return an empty list
 
 ---
 

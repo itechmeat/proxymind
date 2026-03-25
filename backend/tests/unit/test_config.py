@@ -79,6 +79,53 @@ def test_sse_settings_reject_non_positive_values() -> None:
         Settings(**_base_settings(), sse_inter_token_timeout_seconds=0)
 
 
+def test_rewrite_settings_defaults() -> None:
+    settings = Settings(**_base_settings())
+
+    assert settings.rewrite_enabled is True
+    assert settings.rewrite_llm_model is None
+    assert settings.rewrite_llm_api_key is None
+    assert settings.rewrite_llm_api_base is None
+    assert settings.rewrite_temperature == 0.1
+    assert settings.rewrite_timeout_ms == 3000
+    assert settings.rewrite_token_budget == 2048
+    assert settings.rewrite_history_messages == 10
+
+
+def test_rewrite_settings_custom() -> None:
+    settings = Settings(
+        **_base_settings(),
+        rewrite_enabled=False,
+        rewrite_llm_model="gemini/gemini-2.0-flash",
+        rewrite_temperature=0.0,
+        rewrite_timeout_ms=5000,
+        rewrite_token_budget=1024,
+        rewrite_history_messages=5,
+    )
+
+    assert settings.rewrite_enabled is False
+    assert settings.rewrite_llm_model == "gemini/gemini-2.0-flash"
+    assert settings.rewrite_temperature == 0.0
+    assert settings.rewrite_timeout_ms == 5000
+    assert settings.rewrite_token_budget == 1024
+    assert settings.rewrite_history_messages == 5
+
+
+def test_rewrite_timeout_rejects_non_positive() -> None:
+    with pytest.raises(ValidationError):
+        Settings(**_base_settings(), rewrite_timeout_ms=0)
+
+
+def test_rewrite_token_budget_rejects_non_positive() -> None:
+    with pytest.raises(ValidationError):
+        Settings(**_base_settings(), rewrite_token_budget=0)
+
+
+def test_rewrite_history_messages_rejects_non_positive() -> None:
+    with pytest.raises(ValidationError):
+        Settings(**_base_settings(), rewrite_history_messages=0)
+
+
 def test_max_citations_per_response_default() -> None:
     settings = Settings(**_base_settings())
 

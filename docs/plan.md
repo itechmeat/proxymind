@@ -125,7 +125,7 @@ Phase outcome: full-featured dialog with persona, citations, memory, promotions.
   - **Verification:** response with citation → correct URL; offline source → "Book, chapter N, p. M"
   - Tasks: citation prompt instructions, source_id extraction, URL/text substitution, SSE citation event
 
-- [ ] **S4-04: Query rewriting**
+- [x] **S4-04: Query rewriting**
       LLM-based reformulation with history context. Fail-open on timeout. Token budget.
   - **Outcome:** multi-turn dialog yields relevant retrieval
   - **Verification:** "tell me more" → reformulated → better retrieval; timeout → fallback to original

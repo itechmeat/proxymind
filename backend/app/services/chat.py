@@ -22,6 +22,7 @@ from app.services.qdrant import RetrievedChunk
 
 if TYPE_CHECKING:
     from app.services.llm import LLMService
+    from app.services.query_rewrite import QueryRewriteService
     from app.services.retrieval import RetrievalService
     from app.services.snapshot import SnapshotService
 
@@ -99,6 +100,7 @@ class ChatService:
         snapshot_service: SnapshotService,
         retrieval_service: RetrievalService,
         llm_service: LLMService,
+        query_rewrite_service: QueryRewriteService,
         persona_context: PersonaContext,
         min_retrieved_chunks: int,
         max_citations_per_response: int = 5,
@@ -107,6 +109,7 @@ class ChatService:
         self._snapshot_service = snapshot_service
         self._retrieval_service = retrieval_service
         self._llm_service = llm_service
+        self._query_rewrite_service = query_rewrite_service
         self._persona_context = persona_context
         self._min_retrieved_chunks = min_retrieved_chunks
         self._max_citations_per_response = max_citations_per_response
@@ -162,9 +165,14 @@ class ChatService:
             snapshot_id=str(snapshot_id),
         )
 
+        search_query = await self._do_rewrite(text, chat_session, user_message)
+
         retrieved_chunks: list[RetrievedChunk] = []
         try:
-            retrieved_chunks = await self._retrieval_service.search(text, snapshot_id=snapshot_id)
+            retrieved_chunks = await self._retrieval_service.search(
+                search_query,
+                snapshot_id=snapshot_id,
+            )
             self._logger.info(
                 "chat.retrieval_completed",
                 session_id=str(chat_session.id),
@@ -313,9 +321,14 @@ class ChatService:
                 idempotency_key=idempotency_key,
             )
 
+        search_query = await self._do_rewrite(text, chat_session, user_message)
+
         retrieved_chunks: list[RetrievedChunk] = []
         try:
-            retrieved_chunks = await self._retrieval_service.search(text, snapshot_id=snapshot_id)
+            retrieved_chunks = await self._retrieval_service.search(
+                search_query,
+                snapshot_id=snapshot_id,
+            )
             self._logger.info(
                 "chat.retrieval_completed",
                 session_id=str(chat_session.id),
@@ -562,6 +575,52 @@ class ChatService:
         await self._session.commit()
         await self._session.refresh(message)
         return message
+
+    async def _load_history(
+        self,
+        session_id: uuid.UUID,
+        exclude_message_id: uuid.UUID,
+    ) -> list[Message]:
+        result = await self._session.execute(
+            select(Message)
+            .where(
+                Message.session_id == session_id,
+                Message.id != exclude_message_id,
+                Message.status.in_([MessageStatus.RECEIVED, MessageStatus.COMPLETE]),
+            )
+            .order_by(Message.created_at)
+        )
+        return list(result.scalars().all())
+
+    async def _do_rewrite(
+        self,
+        text: str,
+        chat_session: Session,
+        user_message: Message,
+    ) -> str:
+        history = await self._load_history(chat_session.id, exclude_message_id=user_message.id)
+        rewrite_result = await self._query_rewrite_service.rewrite(
+            text,
+            history,
+            session_id=str(chat_session.id),
+        )
+        if rewrite_result.is_rewritten:
+            user_message_id = str(user_message.id)
+            user_message.rewritten_query = rewrite_result.query
+            try:
+                await self._session.commit()
+                await self._session.refresh(user_message)
+            except Exception as error:
+                await self._session.rollback()
+                await self._session.refresh(chat_session)
+                await self._session.refresh(user_message)
+                self._logger.warning(
+                    "chat.rewrite_persist_failed",
+                    error=error.__class__.__name__,
+                    session_id=str(chat_session.id),
+                    user_message_id=user_message_id,
+                )
+        return rewrite_result.query
 
     async def _check_idempotency(
         self,

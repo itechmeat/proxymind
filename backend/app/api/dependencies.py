@@ -9,6 +9,7 @@ from app.db.session import get_session
 from app.persona.loader import PersonaContext
 from app.services.embedding import EmbeddingService
 from app.services.llm import LLMService
+from app.services.query_rewrite import QueryRewriteService
 from app.services.qdrant import QdrantService
 from app.services.retrieval import RetrievalService
 from app.services.snapshot import SnapshotService
@@ -71,6 +72,10 @@ def get_llm_service(request: Request) -> LLMService:
     return request.app.state.llm_service
 
 
+def get_query_rewrite_service(request: Request) -> QueryRewriteService:
+    return request.app.state.query_rewrite_service
+
+
 def get_retrieval_service(request: Request) -> RetrievalService:
     return request.app.state.retrieval_service
 
@@ -93,6 +98,9 @@ def get_chat_service(
     snapshot_service: Annotated[SnapshotService, Depends(get_snapshot_service)],
     retrieval_service: Annotated[RetrievalService, Depends(get_retrieval_service)],
     llm_service: Annotated[LLMService, Depends(get_llm_service)],
+    query_rewrite_service: Annotated[
+        QueryRewriteService, Depends(get_query_rewrite_service)
+    ],
     persona_context: Annotated[PersonaContext, Depends(get_persona_context)],
 ) -> ChatService:
     from app.services.chat import ChatService
@@ -102,6 +110,7 @@ def get_chat_service(
         snapshot_service=snapshot_service,
         retrieval_service=retrieval_service,
         llm_service=llm_service,
+        query_rewrite_service=query_rewrite_service,
         persona_context=persona_context,
         min_retrieved_chunks=request.app.state.settings.min_retrieved_chunks,
         max_citations_per_response=request.app.state.settings.max_citations_per_response,
