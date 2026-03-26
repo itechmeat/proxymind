@@ -80,6 +80,8 @@ class TextChunker:
             block_text = normalize_whitespace(block.text)
             if not block_text:
                 continue
+            if current_parts and block.headings != current_headings:
+                flush()
             for fragment in self._split_block_text(block_text):
                 fragment_tokens = self._tokenizer.count_tokens(fragment)
                 if current_parts and current_tokens + fragment_tokens > self._chunk_max_tokens:

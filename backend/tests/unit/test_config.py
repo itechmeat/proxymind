@@ -146,9 +146,17 @@ def test_empty_optional_provider_strings_are_normalized_to_none() -> None:
 def test_document_ai_partial_configuration_is_rejected() -> None:
     with pytest.raises(
         ValidationError,
-        match="DOCUMENT_AI_PROCESSOR_ID is required when DOCUMENT_AI_PROJECT_ID is set",
+        match="DOCUMENT_AI_PROJECT_ID and DOCUMENT_AI_PROCESSOR_ID must either both be set or both be empty",
     ):
         Settings(**_base_settings(), document_ai_project_id="project")
+
+
+def test_document_ai_processor_without_project_is_rejected() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="DOCUMENT_AI_PROJECT_ID and DOCUMENT_AI_PROCESSOR_ID must either both be set or both be empty",
+    ):
+        Settings(**_base_settings(), document_ai_processor_id="processor")
 
 
 def test_document_ai_enabled_when_project_and_processor_are_set() -> None:

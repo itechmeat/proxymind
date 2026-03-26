@@ -36,6 +36,7 @@ from app.workers.tasks.pipeline import (
 )
 
 logger = structlog.get_logger(__name__)
+_VALID_PROCESSING_HINTS = frozenset({"auto", "external"})
 
 
 def _load_pipeline_services(ctx: dict[str, Any]) -> PipelineServices:
@@ -242,7 +243,7 @@ async def _run_ingestion_pipeline(
     await session.commit()
 
     file_metadata = inspect_file(file_bytes, source.source_type)
-    processing_hint = (task.result_metadata or {}).get("processing_hint", "auto")
+    processing_hint = _normalize_processing_hint(task)
     path_decision = determine_path(
         source.source_type,
         file_metadata,
@@ -316,6 +317,23 @@ async def _run_ingestion_pipeline(
         )
 
     return result
+
+
+def _normalize_processing_hint(task: BackgroundTask) -> str:
+    result_metadata = task.result_metadata
+    if not isinstance(result_metadata, dict):
+        return "auto"
+
+    processing_hint = result_metadata.get("processing_hint")
+    if processing_hint in _VALID_PROCESSING_HINTS:
+        return processing_hint
+    if processing_hint is not None:
+        logger.warning(
+            "worker.ingestion.invalid_processing_hint",
+            task_id=str(task.id),
+            processing_hint=processing_hint,
+        )
+    return "auto"
 
 
 async def _finalize_skip_embedding(

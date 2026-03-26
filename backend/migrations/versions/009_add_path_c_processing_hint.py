@@ -26,4 +26,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("document_versions", "processing_hint")
+    raise NotImplementedError(
+        "Revision 009 is irreversible because processing_path_enum may already contain persisted path_c values"
+    )

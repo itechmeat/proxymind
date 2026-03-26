@@ -17,19 +17,40 @@ def _layout(start: int, end: int) -> SimpleNamespace:
     return SimpleNamespace(text_anchor=SimpleNamespace(text_segments=[_segment(start, end)]))
 
 
-def _document(*texts: str) -> SimpleNamespace:
+def _make_document(
+    *,
+    texts: tuple[str, ...],
+    paragraphs: tuple[int, ...] | None = None,
+    tables: tuple[int, ...] | None = None,
+    blocks: tuple[int, ...] | None = None,
+) -> SimpleNamespace:
     joined = "\n".join(texts)
     cursor = 0
-    paragraphs = []
+    offsets: list[tuple[int, int]] = []
     for text in texts:
         start = cursor
         end = start + len(text)
-        paragraphs.append(SimpleNamespace(layout=_layout(start, end)))
+        offsets.append((start, end))
         cursor = end + 1
+
+    def _items(indexes: tuple[int, ...] | None) -> list[SimpleNamespace]:
+        return [SimpleNamespace(layout=_layout(*offsets[index])) for index in (indexes or ())]
+
     return SimpleNamespace(
         text=joined,
-        pages=[SimpleNamespace(page_number=1, paragraphs=paragraphs)],
+        pages=[
+            SimpleNamespace(
+                page_number=1,
+                paragraphs=_items(paragraphs if paragraphs is not None else tuple(range(len(texts)))),
+                tables=_items(tables),
+                blocks=_items(blocks),
+            )
+        ],
     )
+
+
+def _document(*texts: str) -> SimpleNamespace:
+    return _make_document(texts=texts)
 
 
 class _FakeClient:
@@ -185,3 +206,48 @@ async def test_document_ai_parser_keeps_short_all_caps_content() -> None:
     assert len(chunks) == 1
     assert chunks[0].text_content == "NOTE Alpha beta gamma"
     assert chunks[0].anchor_chapter is None
+
+
+@pytest.mark.asyncio
+async def test_document_ai_parser_includes_tables_without_duplicate_layouts() -> None:
+    client = _FakeClient(
+        [
+            _make_document(
+                texts=("INTRODUCTION", "Alpha beta gamma", "Revenue: 1000."),
+                paragraphs=(0, 1),
+                tables=(2,),
+                blocks=(1, 2),
+            )
+        ]
+    )
+    parser = DocumentAIParser(
+        project_id="project",
+        location="us",
+        processor_id="processor",
+        chunk_max_tokens=50,
+        client=client,
+    )
+
+    chunks = await parser.parse_and_chunk(b"pdf", "report.pdf", SourceType.PDF)
+
+    assert len(chunks) == 1
+    assert chunks[0].text_content == "Alpha beta gamma Revenue: 1000."
+    assert chunks[0].anchor_chapter == "INTRODUCTION"
+
+
+@pytest.mark.asyncio
+async def test_document_ai_parser_fallback_does_not_invent_page_number() -> None:
+    client = _FakeClient([SimpleNamespace(text="Recovered text", pages=[])])
+    parser = DocumentAIParser(
+        project_id="project",
+        location="us",
+        processor_id="processor",
+        chunk_max_tokens=50,
+        client=client,
+    )
+
+    chunks = await parser.parse_and_chunk(b"pdf", "report.pdf", SourceType.PDF)
+
+    assert len(chunks) == 1
+    assert chunks[0].text_content == "Recovered text"
+    assert chunks[0].anchor_page is None

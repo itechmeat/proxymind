@@ -111,9 +111,11 @@ class Settings(BaseSettings):
     def validate_retrieval_settings(self) -> Settings:
         if self.min_retrieved_chunks > self.retrieval_top_n:
             raise ValueError("MIN_RETRIEVED_CHUNKS must be less than or equal to RETRIEVAL_TOP_N")
-        if self.document_ai_project_id and not self.document_ai_processor_id:
+        has_document_ai_project = self.document_ai_project_id is not None
+        has_document_ai_processor = self.document_ai_processor_id is not None
+        if has_document_ai_project != has_document_ai_processor:
             raise ValueError(
-                "DOCUMENT_AI_PROCESSOR_ID is required when DOCUMENT_AI_PROJECT_ID is set"
+                "DOCUMENT_AI_PROJECT_ID and DOCUMENT_AI_PROCESSOR_ID must either both be set or both be empty"
             )
         if 60 % self.batch_poll_interval_seconds != 0:
             raise ValueError(

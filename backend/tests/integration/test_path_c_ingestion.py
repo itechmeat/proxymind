@@ -255,3 +255,34 @@ async def test_path_a_fallback_preserves_external_hint_and_dispatches_to_path_c(
     assert version.processing_path is ProcessingPath.PATH_C
     ctx["document_processor"].parse_and_chunk.assert_not_awaited()  # type: ignore[attr-defined]
     ctx["document_ai_parser"].parse_and_chunk.assert_awaited_once()  # type: ignore[union-attr, attr-defined]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_invalid_processing_hint_defaults_to_auto(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    _, task_id = await _seed_pdf_task(
+        session_factory,
+        filename="invalid-hint.pdf",
+        result_metadata={"processing_hint": "bogus"},
+    )
+    ctx = _ctx(
+        session_factory,
+        file_bytes=(FIXTURES_DIR / "sample.pdf").read_bytes(),
+        path_b_chunks=[ChunkData("local text", 2, 0, 1, None, None)],
+        path_c_chunks=None,
+        path_a_max_pdf_pages=1,
+    )
+
+    await ingestion.process_ingestion(ctx, str(task_id))
+
+    async with session_factory() as session:
+        task = await session.get(BackgroundTask, task_id)
+        version = await session.scalar(select(DocumentVersion))
+
+    assert task is not None
+    assert version is not None
+    assert task.status is BackgroundTaskStatus.COMPLETE
+    assert version.processing_path is ProcessingPath.PATH_B
+    assert version.processing_hint == "auto"

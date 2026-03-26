@@ -1,8 +1,8 @@
 ## ADDED Requirements
 
-### Requirement: DoclingParser service for document parsing and chunking
+### Requirement: LightweightParser service for document parsing and chunking
 
-The system SHALL provide a `DoclingParser` service at `app/services/docling_parser.py` that accepts raw file bytes, a filename, and a source type, and returns a list of `ChunkData` instances. The service SHALL use Docling `DocumentConverter` for parsing and `HybridChunker` for structure-aware chunking. Docling is CPU-bound; all calls to Docling SHALL be wrapped in `asyncio.to_thread()` to avoid blocking the event loop. The service SHALL support MD and TXT source types in S2-02 scope.
+The system SHALL provide a `LightweightParser` service at `app/services/lightweight_parser.py` that accepts raw file bytes, a filename, and a source type, and returns a list of `ChunkData` instances. The service SHALL implement the local lightweight parsing path for `MD`, `TXT`, `PDF`, `DOCX`, and `HTML` sources using the existing per-format parsers. CPU-bound parsing work SHALL be wrapped in `asyncio.to_thread()` to avoid blocking the event loop. The `LightweightParser` SHALL satisfy the shared `DocumentProcessor` contract used by the ingestion pipeline.
 
 #### Scenario: Parse a Markdown file with headings into chunks
 
@@ -27,9 +27,9 @@ The system SHALL provide a `DoclingParser` service at `app/services/docling_pars
 
 ---
 
-### Requirement: HybridChunker configuration
+### Requirement: TextChunker configuration
 
-The `HybridChunker` SHALL be configured with `max_tokens` sourced from the `chunk_max_tokens` setting (default 1024). The chunker SHALL preserve heading hierarchy and section metadata from the Docling parse result. Chunks SHALL NOT exceed the configured `max_tokens` limit. Consecutive small sections under the same heading SHALL be merged into a single chunk when they fit within the token limit.
+The shared `TextChunker` SHALL be configured with `max_tokens` sourced from the `chunk_max_tokens` setting (default 1024). The chunker SHALL preserve heading hierarchy and section metadata from parsed blocks. Chunks SHALL NOT exceed the configured `max_tokens` limit. Consecutive small sections under the same heading SHALL be merged into a single chunk when they fit within the token limit, and a heading change SHALL flush the current chunk boundary before the next section starts.
 
 #### Scenario: No chunk exceeds the configured max_tokens
 
@@ -45,7 +45,7 @@ The `HybridChunker` SHALL be configured with `max_tokens` sourced from the `chun
 
 ### Requirement: ChunkData dataclass
 
-The system SHALL define a `ChunkData` dataclass with the following fields: `text_content` (str), `token_count` (int), `chunk_index` (int), `anchor_page` (int or None), `anchor_chapter` (str or None), `anchor_section` (str or None). The `chunk_index` field SHALL be a zero-based sequential index assigned by DoclingParser. This dataclass is the contract between DoclingParser and downstream pipeline stages (including the Qdrant payload where `chunk_index` is required).
+The system SHALL define a `ChunkData` dataclass with the following fields: `text_content` (str), `token_count` (int), `chunk_index` (int), `anchor_page` (int or None), `anchor_chapter` (str or None), `anchor_section` (str or None). The `chunk_index` field SHALL be a zero-based sequential index assigned by the parser and shared `TextChunker`. This dataclass is the contract between `DocumentProcessor` implementations and downstream pipeline stages, including the Qdrant payload where `chunk_index` is required.
 
 #### Scenario: ChunkData fields are accessible
 
@@ -55,7 +55,7 @@ The system SHALL define a `ChunkData` dataclass with the following fields: `text
 
 #### Scenario: Chunk indices are sequential
 
-- **WHEN** DoclingParser produces multiple chunks from a document
+- **WHEN** a `DocumentProcessor` implementation produces multiple chunks from a document
 - **THEN** chunk indices SHALL be sequential starting from 0 (0, 1, 2, ...)
 
 ---
@@ -96,7 +96,7 @@ The `EmbeddingService` SHALL batch texts into groups of up to `embedding_batch_s
 
 ### Requirement: Tenacity retry on embedding API calls
 
-Each batch embedding API call SHALL be wrapped with tenacity retry. The retry SHALL trigger on HTTP 429 (rate limit) and 5xx errors. The retry strategy SHALL use exponential backoff with `multiplier=1`, `min=1`, `max=8`, and a maximum of 3 attempts. Docling parse calls SHALL NOT be retried (deterministic failures do not benefit from retry).
+Each batch embedding API call SHALL be wrapped with tenacity retry. The retry SHALL trigger on HTTP 429 (rate limit) and 5xx errors. The retry strategy SHALL use exponential backoff with `multiplier=1`, `min=1`, `max=8`, and a maximum of 3 attempts. Lightweight local parse calls SHALL NOT be retried because deterministic parsing failures do not benefit from retry.
 
 #### Scenario: Transient 429 error is retried
 
@@ -108,9 +108,9 @@ Each batch embedding API call SHALL be wrapped with tenacity retry. The retry SH
 - **WHEN** the Gemini API returns 5xx on all 3 attempts
 - **THEN** the embedding call SHALL raise an exception after exhausting retries
 
-#### Scenario: Docling parse failure is not retried
+#### Scenario: Lightweight parse failure is not retried
 
-- **WHEN** Docling `DocumentConverter` raises an exception during parsing
+- **WHEN** the lightweight local parser raises an exception during parsing
 - **THEN** the exception SHALL propagate immediately without retry
 
 ---

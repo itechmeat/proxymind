@@ -55,7 +55,7 @@ def test_chunker_preserves_first_block_anchor_metadata() -> None:
     chunks = chunker.chunk_blocks(
         [
             ParsedBlock(text="alpha", headings=("Chapter 1", "Section A"), anchor_page=3),
-            ParsedBlock(text="beta", headings=("Chapter 1", "Section B"), anchor_page=4),
+            ParsedBlock(text="beta", headings=("Chapter 1", "Section A"), anchor_page=4),
         ]
     )
 
@@ -63,3 +63,20 @@ def test_chunker_preserves_first_block_anchor_metadata() -> None:
     assert chunks[0].anchor_page == 3
     assert chunks[0].anchor_chapter == "Chapter 1"
     assert chunks[0].anchor_section == "Section A"
+
+
+def test_chunker_flushes_when_heading_hierarchy_changes() -> None:
+    chunker = TextChunker(chunk_max_tokens=20)
+
+    chunks = chunker.chunk_blocks(
+        [
+            ParsedBlock(text="alpha", headings=("Chapter 1", "Section A"), anchor_page=3),
+            ParsedBlock(text="beta", headings=("Chapter 1", "Section B"), anchor_page=4),
+        ]
+    )
+
+    assert len(chunks) == 2
+    assert chunks[0].anchor_page == 3
+    assert chunks[0].anchor_section == "Section A"
+    assert chunks[1].anchor_page == 4
+    assert chunks[1].anchor_section == "Section B"

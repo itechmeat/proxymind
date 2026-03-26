@@ -78,14 +78,8 @@ class DocumentAIParser:
 
         for page in getattr(document, "pages", []):
             page_number = int(getattr(page, "page_number", 0) or 0) or None
-            paragraphs = list(getattr(page, "paragraphs", []))
-            layouts = paragraphs or list(getattr(page, "blocks", []))
 
-            for item in layouts:
-                layout = getattr(item, "layout", None)
-                if layout is None:
-                    continue
-
+            for layout in self._iter_page_layouts(page):
                 text = normalize_whitespace(self._extract_anchor_text(document_text, layout.text_anchor))
                 if not text:
                     continue
@@ -122,7 +116,28 @@ class DocumentAIParser:
         if not fallback_text:
             return []
 
-        return [ParsedBlock(text=fallback_text, headings=(), anchor_page=1)]
+        return [ParsedBlock(text=fallback_text, headings=(), anchor_page=None)]
+
+    @classmethod
+    def _iter_page_layouts(cls, page: Any) -> list[Any]:
+        layouts: list[Any] = []
+        seen_signatures: set[tuple[tuple[int, int], ...]] = set()
+
+        for field_name in ("paragraphs", "tables", "blocks"):
+            for item in getattr(page, field_name, []) or []:
+                layout = getattr(item, "layout", None)
+                if layout is None:
+                    continue
+
+                signature = cls._layout_signature(getattr(layout, "text_anchor", None))
+                if signature is not None:
+                    if signature in seen_signatures:
+                        continue
+                    seen_signatures.add(signature)
+
+                layouts.append(layout)
+
+        return layouts
 
     @staticmethod
     def _extract_anchor_text(document_text: str, text_anchor: Any) -> str:
@@ -135,6 +150,17 @@ class DocumentAIParser:
                 continue
             parts.append(document_text[start_index:end_index])
         return "".join(parts)
+
+    @staticmethod
+    def _layout_signature(text_anchor: Any) -> tuple[tuple[int, int], ...] | None:
+        segments = list(getattr(text_anchor, "text_segments", []) or [])
+        signature = tuple(
+            (int(getattr(segment, "start_index", 0) or 0), int(getattr(segment, "end_index", 0) or 0))
+            for segment in segments
+            if int(getattr(segment, "end_index", 0) or 0)
+            > int(getattr(segment, "start_index", 0) or 0)
+        )
+        return signature or None
 
     @staticmethod
     def _heading_level(text: str) -> int | None:

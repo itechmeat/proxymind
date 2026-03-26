@@ -145,8 +145,8 @@ Phase outcome: full-featured dialog with persona, citations, memory, promotions.
   - **Verification:** Docling and local ML stacks are absent from runtime dependencies; supported text-centric formats still ingest successfully through the lightweight path; complex documents route through the external fallback; Qdrant payloads and citations remain compatible
   - Tasks: provider-agnostic document processing interface, Document AI adapter, routing rules, normalized chunk contract validation, dependency cleanup, regression coverage for local path and external fallback
 
-- [ ] **S4-07: Conversation memory**
-      Dialog history + summary for long conversations. Trimming when token budget exceeded. Session management.
+- [-] **S4-07: Conversation memory**
+  Dialog history + summary for long conversations. Trimming when token budget exceeded. Session management.
   - **Outcome:** long conversations retain context
   - **Verification:** 20+ messages → context preserved; summary generated when limit reached
   - Tasks: history window, summary generation trigger, token budget integration

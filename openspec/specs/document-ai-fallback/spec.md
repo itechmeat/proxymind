@@ -140,11 +140,11 @@ The `DocumentAIParser` SHALL be configured via the following environment variabl
 
 | Variable                   | Default    | Required    | Description                                                             |
 | -------------------------- | ---------- | ----------- | ----------------------------------------------------------------------- |
-| `DOCUMENT_AI_PROJECT_ID`   | -- (unset) | No          | Google Cloud project ID. Unset = Path C disabled                        |
+| `DOCUMENT_AI_PROJECT_ID`   | -- (unset) | Conditional | Google Cloud project ID. Must be set together with `DOCUMENT_AI_PROCESSOR_ID` |
 | `DOCUMENT_AI_LOCATION`     | `us`       | No          | Document AI processor region                                            |
-| `DOCUMENT_AI_PROCESSOR_ID` | -- (unset) | Conditional | Layout Parser processor ID. Required if `DOCUMENT_AI_PROJECT_ID` is set |
+| `DOCUMENT_AI_PROCESSOR_ID` | -- (unset) | Conditional | Layout Parser processor ID. Must be set together with `DOCUMENT_AI_PROJECT_ID` |
 
-If `DOCUMENT_AI_PROJECT_ID` is set but `DOCUMENT_AI_PROCESSOR_ID` is not, the system SHALL raise a configuration error at startup. The `google-cloud-documentai` package SHALL be the only Document AI dependency -- no local ML runtimes.
+If either `DOCUMENT_AI_PROJECT_ID` or `DOCUMENT_AI_PROCESSOR_ID` is set without the other, the system SHALL raise a configuration error at startup. The `google-cloud-documentai` package SHALL be the only Document AI dependency -- no local ML runtimes.
 
 #### Scenario: Valid configuration with all variables set
 
@@ -162,6 +162,12 @@ If `DOCUMENT_AI_PROJECT_ID` is set but `DOCUMENT_AI_PROCESSOR_ID` is not, the sy
 
 - **WHEN** `DOCUMENT_AI_PROJECT_ID` is set
 - **AND** `DOCUMENT_AI_PROCESSOR_ID` is not set
+- **THEN** the system SHALL raise a configuration error during startup
+
+#### Scenario: Missing project ID with processor ID raises startup error
+
+- **WHEN** `DOCUMENT_AI_PROCESSOR_ID` is set
+- **AND** `DOCUMENT_AI_PROJECT_ID` is not set
 - **THEN** the system SHALL raise a configuration error during startup
 
 ---

@@ -54,8 +54,6 @@ async def handle_path_b(
             source.file_path.rsplit("/", maxsplit=1)[-1],
             source.source_type,
         )
-        if not chunk_data:
-            raise ValueError("Parsed document produced no chunks")
 
         if _is_suspected_scan(
             chunk_data,
@@ -80,6 +78,9 @@ async def handle_path_b(
                     source_id=str(source.id),
                     page_count=file_metadata.page_count,
                 )
+
+        if not chunk_data:
+            raise ValueError("Parsed document produced no chunks")
 
         task.progress = 40
         await session.commit()

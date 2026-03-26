@@ -28,6 +28,10 @@ from app.workers.tasks.pipeline import BatchSubmittedResult, PipelineServices
 
 async def _seed_source_and_task(
     session_factory: async_sessionmaker[AsyncSession],
+    *,
+    source_type: SourceType = SourceType.MARKDOWN,
+    filename: str = "doc.md",
+    mime_type: str = "text/markdown",
 ) -> tuple[uuid.UUID, uuid.UUID]:
     source_id = uuid.uuid7()
     task_id = uuid.uuid7()
@@ -36,11 +40,11 @@ async def _seed_source_and_task(
             id=source_id,
             agent_id=DEFAULT_AGENT_ID,
             knowledge_base_id=DEFAULT_KNOWLEDGE_BASE_ID,
-            source_type=SourceType.MARKDOWN,
+            source_type=source_type,
             title="Path B source",
-            file_path=f"{DEFAULT_AGENT_ID}/{source_id}/doc.md",
+            file_path=f"{DEFAULT_AGENT_ID}/{source_id}/{filename}",
             file_size_bytes=256,
-            mime_type="text/markdown",
+            mime_type=mime_type,
             status=SourceStatus.PENDING,
         )
         task = BackgroundTask(
@@ -72,6 +76,7 @@ def _chunk_data(count: int) -> list[ChunkData]:
 def _services(
     *,
     chunk_count: int,
+    document_ai_enabled: bool = False,
     batch_orchestrator: object | None = None,
 ) -> PipelineServices:
     return PipelineServices(
@@ -79,7 +84,9 @@ def _services(
         document_processor=SimpleNamespace(
             parse_and_chunk=AsyncMock(return_value=_chunk_data(chunk_count))
         ),
-        document_ai_parser=None,
+        document_ai_parser=(
+            None if not document_ai_enabled else SimpleNamespace(parse_and_chunk=AsyncMock())
+        ),
         embedding_service=SimpleNamespace(
             model="gemini-embedding-2-preview",
             dimensions=3,
@@ -103,7 +110,7 @@ def _services(
         path_a_max_audio_duration_sec=80,
         path_a_max_video_duration_sec=120,
         path_c_min_chars_per_page=50,
-        document_ai_enabled=False,
+        document_ai_enabled=document_ai_enabled,
         batch_orchestrator=batch_orchestrator,
     )
 
@@ -269,6 +276,41 @@ async def test_handle_path_b_marks_records_failed_when_batch_job_creation_fails(
     assert version.status is DocumentVersionStatus.FAILED
     assert chunks
     assert all(chunk.status is ChunkStatus.FAILED for chunk in chunks)
+
+
+@pytest.mark.asyncio
+async def test_handle_path_b_reroutes_empty_scan_results_to_path_c(
+    monkeypatch: pytest.MonkeyPatch,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id, task_id = await _seed_source_and_task(
+        session_factory,
+        source_type=SourceType.PDF,
+        filename="scan.pdf",
+        mime_type="application/pdf",
+    )
+    services = _services(chunk_count=0, document_ai_enabled=True)
+    sentinel_result = object()
+    handle_path_c = AsyncMock(return_value=sentinel_result)
+    monkeypatch.setattr("app.workers.tasks.handlers.path_c.handle_path_c", handle_path_c)
+
+    async with session_factory() as session:
+        source = await session.get(Source, source_id)
+        task = await session.get(BackgroundTask, task_id)
+        assert source is not None
+        assert task is not None
+
+        result = await handle_path_b(
+            session,
+            task,
+            source,
+            b"pdf-bytes",
+            FileMetadata(page_count=2, duration_seconds=None, file_size_bytes=14),
+            services,
+        )
+
+    assert result is sentinel_result
+    handle_path_c.assert_awaited_once()
 
 
 def test_is_suspected_scan_returns_false_without_page_count() -> None:
