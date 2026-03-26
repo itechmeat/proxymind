@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useToast } from "@/hooks/useToast";
 import { testDraftSnapshot } from "@/lib/admin-api";
+import { translate } from "@/lib/i18n";
 import type { DraftTestResponse, RetrievalMode } from "@/types/admin";
 
 export function useDraftTest() {
@@ -33,7 +34,7 @@ export function useDraftTest() {
         const message =
           error instanceof Error
             ? error.message
-            : "Failed to test draft snapshot";
+            : translate("admin.draftTest.failed");
         pushToast({ message, tone: "error" });
         throw error;
       } finally {

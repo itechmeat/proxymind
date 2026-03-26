@@ -44,6 +44,7 @@ describe("SnapshotCard", () => {
     await user.click(screen.getByRole("button", { name: /^publish$/i }));
     await user.click(screen.getByRole("button", { name: /^publish$/i }));
 
+    expect(onPublish).toHaveBeenCalledTimes(1);
     expect(onPublish).toHaveBeenCalledWith("draft-1", false);
   });
 });

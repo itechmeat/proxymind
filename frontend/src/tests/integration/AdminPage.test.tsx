@@ -29,12 +29,16 @@ function getRequestUrl(input: RequestInfo | URL) {
 }
 
 describe("Admin routes integration", () => {
+  let originalAdminMode: boolean;
+
   beforeEach(() => {
+    originalAdminMode = appConfig.adminMode;
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
   });
 
   afterEach(() => {
+    appConfig.adminMode = originalAdminMode;
     vi.unstubAllGlobals();
   });
 

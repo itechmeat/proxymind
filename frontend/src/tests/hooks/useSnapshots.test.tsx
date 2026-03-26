@@ -1,8 +1,9 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSnapshots } from "@/hooks/useSnapshots";
-import { ToastProvider } from "@/hooks/useToast";
+import { ToastProvider, useToast } from "@/hooks/useToast";
 import * as adminApi from "@/lib/admin-api";
+import { translate } from "@/lib/i18n";
 
 vi.mock("@/lib/admin-api", async () => {
   const actual =
@@ -114,8 +115,78 @@ describe("useSnapshots", () => {
       await result.current.createDraft();
     });
 
-    expect(adminApi.createSnapshot).toHaveBeenCalled();
-    expect(result.current.draftSnapshot?.id).toBe("draft-1");
+    expect(adminApi.createSnapshot).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(adminApi.getSnapshots).toHaveBeenCalledTimes(2);
+      expect(result.current.draftSnapshot?.id).toBe("draft-1");
+    });
+  });
+
+  it("keeps a successful publish successful when the refresh fails", async () => {
+    const refreshFailed = translate("admin.snapshot.refreshFailed");
+
+    vi.mocked(adminApi.getSnapshots)
+      .mockResolvedValueOnce([
+        {
+          id: "draft-1",
+          agent_id: null,
+          knowledge_base_id: null,
+          name: "Draft",
+          description: null,
+          status: "draft",
+          published_at: null,
+          activated_at: null,
+          archived_at: null,
+          chunk_count: 0,
+          created_at: "2026-03-25T12:00:00Z",
+          updated_at: "2026-03-25T12:00:00Z",
+        },
+      ])
+      .mockRejectedValueOnce(new Error(refreshFailed));
+    vi.mocked(adminApi.publishSnapshot).mockResolvedValue({
+      id: "published-1",
+      agent_id: null,
+      knowledge_base_id: null,
+      name: "Published",
+      description: null,
+      status: "published",
+      published_at: null,
+      activated_at: null,
+      archived_at: null,
+      chunk_count: 1,
+      created_at: "2026-03-25T12:00:00Z",
+      updated_at: "2026-03-25T12:00:00Z",
+    });
+
+    const { result } = renderHook(
+      () => {
+        const snapshots = useSnapshots();
+        const toast = useToast();
+
+        return {
+          ...snapshots,
+          toasts: toast.toasts,
+        };
+      },
+      { wrapper },
+    );
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.publish("draft-1", false);
+    });
+
+    expect(adminApi.publishSnapshot).toHaveBeenCalledWith("draft-1", false);
+    expect(result.current.busySnapshotId).toBeNull();
+    expect(result.current.toasts.map((toast) => toast.message)).toEqual(
+      expect.arrayContaining([
+        translate("admin.snapshot.published"),
+        refreshFailed,
+      ]),
+    );
   });
 
   it("runs publish, activate, and rollback mutations", async () => {

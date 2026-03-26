@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "@/hooks/useToast";
 import { deleteSource, getSources, uploadSource } from "@/lib/admin-api";
+import { translate } from "@/lib/i18n";
 import type { SourceListItem } from "@/types/admin";
 
 const POLL_INTERVAL_MS = 3000;
@@ -24,7 +25,7 @@ export function deriveSourceTitle(filename: string) {
   const trimmed = filename.trim();
   const dotIndex = trimmed.lastIndexOf(".");
   if (dotIndex <= 0) {
-    return trimmed || "Untitled source";
+    return trimmed || translate("admin.source.untitled");
   }
 
   return trimmed.slice(0, dotIndex) || trimmed;
@@ -37,11 +38,11 @@ export function validateSourceFile(file: File) {
     : "";
 
   if (!ALLOWED_SOURCE_EXTENSIONS.has(extension)) {
-    return `Unsupported file type for ${file.name}`;
+    return translate("admin.source.unsupportedType", { filename: file.name });
   }
 
   if (file.size === 0) {
-    return `${file.name} is empty`;
+    return translate("admin.source.emptyFile", { filename: file.name });
   }
 
   return null;
@@ -81,7 +82,9 @@ export function useSources() {
         if (active) {
           pushToast({
             message:
-              error instanceof Error ? error.message : "Failed to load sources",
+              error instanceof Error
+                ? error.message
+                : translate("admin.source.loadFailed"),
             tone: "error",
           });
         }
@@ -113,7 +116,7 @@ export function useSources() {
     intervalRef.current = window.setInterval(() => {
       void refreshSources().catch(() => {
         pushToast({
-          message: "Failed to refresh source statuses",
+          message: translate("admin.source.statusRefreshFailed"),
           tone: "error",
         });
       });
@@ -158,7 +161,10 @@ export function useSources() {
         for (const [index, result] of results.entries()) {
           if (result.status === "fulfilled") {
             pushToast({
-              message: `${validFiles[index]?.name ?? "File"} queued for ingestion`,
+              message: translate("admin.source.queuedForIngestion", {
+                filename:
+                  validFiles[index]?.name ?? translate("admin.source.untitled"),
+              }),
               tone: "success",
             });
             continue;
@@ -168,12 +174,26 @@ export function useSources() {
             message:
               result.reason instanceof Error
                 ? result.reason.message
-                : `Failed to upload ${validFiles[index]?.name ?? "file"}`,
+                : translate("admin.source.uploadFailed", {
+                    filename:
+                      validFiles[index]?.name ??
+                      translate("admin.source.untitled"),
+                  }),
             tone: "error",
           });
         }
 
-        await refreshSources();
+        try {
+          await refreshSources();
+        } catch (error) {
+          pushToast({
+            message:
+              error instanceof Error
+                ? error.message
+                : translate("admin.source.refreshFailed"),
+            tone: "warning",
+          });
+        }
       } finally {
         setIsUploading(false);
       }
@@ -192,16 +212,28 @@ export function useSources() {
           }
         } else {
           pushToast({
-            message: `${source.title} deleted`,
+            message: translate("admin.source.deleted", { title: source.title }),
             tone: "success",
           });
         }
 
-        await refreshSources();
+        try {
+          await refreshSources();
+        } catch (error) {
+          pushToast({
+            message:
+              error instanceof Error
+                ? error.message
+                : translate("admin.source.refreshFailed"),
+            tone: "warning",
+          });
+        }
       } catch (error) {
         pushToast({
           message:
-            error instanceof Error ? error.message : "Failed to delete source",
+            error instanceof Error
+              ? error.message
+              : translate("admin.source.deleteFailed"),
           tone: "error",
         });
       } finally {

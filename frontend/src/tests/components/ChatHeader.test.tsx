@@ -49,10 +49,9 @@ describe("ChatHeader", () => {
   it("shows the admin link when admin mode is enabled", () => {
     renderHeader(<ChatHeader adminMode name="ProxyMind" />);
 
-    expect(screen.getByRole("link", { name: "Admin" })).toHaveAttribute(
-      "href",
-      "/admin",
-    );
+    expect(
+      screen.getByRole("link", { name: strings.adminLink }),
+    ).toHaveAttribute("href", "/admin");
   });
 
   it("hides the settings button when admin mode is disabled", () => {
@@ -66,6 +65,6 @@ describe("ChatHeader", () => {
   it("hides the admin link when admin mode is disabled", () => {
     renderHeader(<ChatHeader adminMode={false} name="ProxyMind" />);
 
-    expect(screen.queryByRole("link", { name: "Admin" })).toBeNull();
+    expect(screen.queryByRole("link", { name: strings.adminLink })).toBeNull();
   });
 });

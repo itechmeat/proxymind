@@ -7,6 +7,7 @@ import {
   publishSnapshot,
   rollbackSnapshot,
 } from "@/lib/admin-api";
+import { translate } from "@/lib/i18n";
 import type { SnapshotResponse } from "@/types/admin";
 
 export function sortSnapshots(snapshots: SnapshotResponse[]) {
@@ -56,7 +57,7 @@ export function useSnapshots(includeArchived = false) {
             message:
               error instanceof Error
                 ? error.message
-                : "Failed to load snapshots",
+                : translate("admin.snapshot.loadFailed"),
             tone: "error",
           });
         }
@@ -77,17 +78,30 @@ export function useSnapshots(includeArchived = false) {
       snapshotId: string | null,
       operation: () => Promise<unknown>,
       successMessage: string,
+      fallbackErrorMessage: string,
     ) => {
       setBusySnapshotId(snapshotId);
       try {
         await operation();
         pushToast({ message: successMessage, tone: "success" });
+      } catch (error) {
+        pushToast({
+          message:
+            error instanceof Error ? error.message : fallbackErrorMessage,
+          tone: "error",
+        });
+        return;
+      }
+
+      try {
         await refreshSnapshots();
       } catch (error) {
         pushToast({
           message:
-            error instanceof Error ? error.message : "Snapshot action failed",
-          tone: "error",
+            error instanceof Error
+              ? error.message
+              : translate("admin.snapshot.refreshFailed"),
+          tone: "warning",
         });
       } finally {
         setBusySnapshotId(null);
@@ -97,7 +111,12 @@ export function useSnapshots(includeArchived = false) {
   );
 
   const createDraft = useCallback(async () => {
-    await runMutation(null, () => createSnapshot(), "Draft ready");
+    await runMutation(
+      null,
+      () => createSnapshot(),
+      translate("admin.snapshot.draftReady"),
+      translate("admin.snapshot.actionFailed"),
+    );
   }, [runMutation]);
 
   const publish = useCallback(
@@ -105,7 +124,10 @@ export function useSnapshots(includeArchived = false) {
       await runMutation(
         snapshotId,
         () => publishSnapshot(snapshotId, activate),
-        activate ? "Snapshot published and activated" : "Snapshot published",
+        activate
+          ? translate("admin.snapshot.publishedAndActivated")
+          : translate("admin.snapshot.published"),
+        translate("admin.snapshot.actionFailed"),
       );
     },
     [runMutation],
@@ -116,7 +138,8 @@ export function useSnapshots(includeArchived = false) {
       await runMutation(
         snapshotId,
         () => activateSnapshot(snapshotId),
-        "Snapshot activated",
+        translate("admin.snapshot.activated"),
+        translate("admin.snapshot.actionFailed"),
       );
     },
     [runMutation],
@@ -127,7 +150,8 @@ export function useSnapshots(includeArchived = false) {
       await runMutation(
         snapshotId,
         () => rollbackSnapshot(snapshotId),
-        "Rollback completed",
+        translate("admin.snapshot.rollbackCompleted"),
+        translate("admin.snapshot.actionFailed"),
       );
     },
     [runMutation],

@@ -2,6 +2,7 @@ import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { ToastItem } from "@/hooks/useToast";
+import { useAppTranslation } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 const toneStyles = {
@@ -30,6 +31,8 @@ export function ToastViewport({
   dismissToast: (id: string) => void;
   toasts: ToastItem[];
 }) {
+  const { t } = useAppTranslation();
+
   return (
     <div className="pointer-events-none fixed top-5 right-5 z-[60] flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-3">
       {toasts.map((toast) => {
@@ -48,7 +51,7 @@ export function ToastViewport({
             <Icon className="mt-0.5 size-4 shrink-0" />
             <p className="m-0 flex-1 text-sm leading-6">{toast.message}</p>
             <Button
-              aria-label="Dismiss notification"
+              aria-label={t("common.dismissNotification")}
               className="-mr-2"
               onClick={() => {
                 dismissToast(toast.id);

@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { translateSnapshotStatus, useAppTranslation } from "@/lib/i18n";
 import { formatRelativeTime } from "@/lib/strings";
 import type { SnapshotResponse } from "@/types/admin";
 
@@ -31,27 +32,28 @@ function snapshotVariant(status: SnapshotResponse["status"]) {
   }
 }
 
-function confirmationCopy(action: Exclude<ConfirmationAction, null>) {
+function confirmationCopy(
+  action: Exclude<ConfirmationAction, null>,
+  t: ReturnType<typeof useAppTranslation>["t"],
+) {
   switch (action) {
     case "publish":
       return {
-        button: "Publish",
-        description: "This locks the current draft into a published snapshot.",
-        title: "Publish this draft?",
+        button: t("admin.snapshot.confirm.publish.action"),
+        description: t("admin.snapshot.confirm.publish.description"),
+        title: t("admin.snapshot.confirm.publish.title"),
       };
     case "publish-activate":
       return {
-        button: "Publish & Activate",
-        description:
-          "This publishes the draft and switches the twin to the new snapshot immediately.",
-        title: "Publish and activate this draft?",
+        button: t("admin.snapshot.confirm.publishAndActivate.action"),
+        description: t("admin.snapshot.confirm.publishAndActivate.description"),
+        title: t("admin.snapshot.confirm.publishAndActivate.title"),
       };
     case "rollback":
       return {
-        button: "Rollback",
-        description:
-          "This restores the previously activated published snapshot as the active one.",
-        title: "Rollback the active snapshot?",
+        button: t("admin.snapshot.confirm.rollback.action"),
+        description: t("admin.snapshot.confirm.rollback.description"),
+        title: t("admin.snapshot.confirm.rollback.title"),
       };
   }
 }
@@ -73,10 +75,11 @@ export function SnapshotCard({
   onTest,
   snapshot,
 }: SnapshotCardProps) {
+  const { t } = useAppTranslation();
   const [confirmationAction, setConfirmationAction] =
     useState<ConfirmationAction>(null);
   const confirmation = confirmationAction
-    ? confirmationCopy(confirmationAction)
+    ? confirmationCopy(confirmationAction, t)
     : null;
 
   return (
@@ -89,22 +92,30 @@ export function SnapshotCard({
                 {snapshot.name}
               </h3>
               <Badge variant={snapshotVariant(snapshot.status)}>
-                {snapshot.status}
+                {translateSnapshotStatus(snapshot.status)}
               </Badge>
             </div>
             <div className="grid gap-2 text-sm text-stone-600 sm:grid-cols-2">
-              <p className="m-0">Chunks: {snapshot.chunk_count}</p>
               <p className="m-0">
-                Created {formatRelativeTime(snapshot.created_at)}
+                {t("admin.snapshot.chunks", { count: snapshot.chunk_count })}
+              </p>
+              <p className="m-0">
+                {t("admin.snapshot.createdAt", {
+                  relativeTime: formatRelativeTime(snapshot.created_at),
+                })}
               </p>
               {snapshot.published_at ? (
                 <p className="m-0">
-                  Published {formatRelativeTime(snapshot.published_at)}
+                  {t("admin.snapshot.publishedAt", {
+                    relativeTime: formatRelativeTime(snapshot.published_at),
+                  })}
                 </p>
               ) : null}
               {snapshot.activated_at ? (
                 <p className="m-0">
-                  Activated {formatRelativeTime(snapshot.activated_at)}
+                  {t("admin.snapshot.activatedAt", {
+                    relativeTime: formatRelativeTime(snapshot.activated_at),
+                  })}
                 </p>
               ) : null}
             </div>
@@ -121,7 +132,7 @@ export function SnapshotCard({
                   variant="outline"
                 >
                   <Search className="size-4" />
-                  Test
+                  {t("admin.snapshot.test")}
                 </Button>
                 <Button
                   disabled={busy}
@@ -132,7 +143,7 @@ export function SnapshotCard({
                   variant="outline"
                 >
                   <Upload className="size-4" />
-                  Publish
+                  {t("admin.snapshot.publish")}
                 </Button>
                 <Button
                   disabled={busy}
@@ -142,7 +153,7 @@ export function SnapshotCard({
                   type="button"
                 >
                   <Rocket className="size-4" />
-                  Publish & Activate
+                  {t("admin.snapshot.publishAndActivate")}
                 </Button>
               </>
             ) : null}
@@ -156,7 +167,7 @@ export function SnapshotCard({
                 type="button"
               >
                 <ArrowUpRight className="size-4" />
-                Activate
+                {t("admin.snapshot.activate")}
               </Button>
             ) : null}
 
@@ -170,7 +181,7 @@ export function SnapshotCard({
                 variant="outline"
               >
                 <RotateCcw className="size-4" />
-                Rollback
+                {t("admin.snapshot.rollback")}
               </Button>
             ) : null}
           </div>
@@ -194,7 +205,7 @@ export function SnapshotCard({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancelButton type="button">
-              Cancel
+              {t("common.cancel")}
             </AlertDialogCancelButton>
             <AlertDialogActionButton
               onClick={() => {

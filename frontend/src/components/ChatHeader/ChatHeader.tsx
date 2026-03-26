@@ -4,6 +4,7 @@ import { Link } from "react-router";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { useAppTranslation } from "@/lib/i18n";
 import { getInitials } from "@/lib/identity";
 import { strings } from "@/lib/strings";
 
@@ -22,6 +23,7 @@ export function ChatHeader({
   name,
   onOpenSettings,
 }: ChatHeaderProps) {
+  const { t } = useAppTranslation();
   const initials = getInitials(name);
   const [showAvatarImage, setShowAvatarImage] = useState(Boolean(avatarUrl));
 
@@ -57,7 +59,7 @@ export function ChatHeader({
         {adminMode ? (
           <div className="chat-header__actions">
             <Button asChild type="button" variant="outline">
-              <Link to="/admin">Admin</Link>
+              <Link to="/admin">{t("admin.link")}</Link>
             </Button>
             <Button
               aria-label={strings.profileSettings}

@@ -1,6 +1,7 @@
 import { CloudUpload } from "lucide-react";
 import { useRef, useState } from "react";
 
+import { useAppTranslation } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 interface DropZoneProps {
@@ -14,6 +15,7 @@ export function DropZone({
   isUploading = false,
   onFiles,
 }: DropZoneProps) {
+  const { t } = useAppTranslation();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -82,16 +84,18 @@ export function DropZone({
         </div>
         <div className="space-y-1">
           <h2 className="m-0 text-lg font-semibold text-stone-950">
-            Drop files to add new sources
+            {t("admin.source.dropZoneTitle")}
           </h2>
           <p className="m-0 text-sm leading-6 text-stone-600">
-            Drag and drop multiple files here, or tap to open the file picker.
+            {t("admin.source.dropZoneDescription")}
           </p>
           <p className="m-0 text-xs uppercase tracking-[0.14em] text-stone-400">
-            md, txt, pdf, docx, html, htm, png, jpg, jpeg, mp3, wav, mp4
+            {t("admin.source.dropZoneFormats")}
           </p>
           {isUploading ? (
-            <p className="m-0 text-sm font-medium text-sky-700">Uploading…</p>
+            <p className="m-0 text-sm font-medium text-sky-700">
+              {t("admin.source.uploading")}
+            </p>
           ) : null}
         </div>
       </div>

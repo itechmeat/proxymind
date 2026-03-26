@@ -8,6 +8,7 @@ import { TabsLink, TabsList } from "@/components/ui/tabs";
 import { ToastProvider } from "@/hooks/useToast";
 import { getTwinProfile } from "@/lib/api";
 import { appConfig } from "@/lib/config";
+import { useAppTranslation } from "@/lib/i18n";
 import { getInitials } from "@/lib/identity";
 import { strings } from "@/lib/strings";
 import type { TwinProfile } from "@/types/chat";
@@ -38,6 +39,7 @@ function resolveApiProfile(
 }
 
 export function AdminPage() {
+  const { t } = useAppTranslation();
   const [profile, setProfile] = useState<DisplayTwinProfile>(
     resolveFallbackProfile,
   );
@@ -81,10 +83,10 @@ export function AdminPage() {
 
                 <div>
                   <p className="m-0 text-xs uppercase tracking-[0.16em] text-stone-500">
-                    ProxyMind Control Surface
+                    {t("admin.controlSurface")}
                   </p>
                   <h1 className="m-0 mt-1 font-serif text-3xl font-semibold tracking-[-0.03em] text-stone-950">
-                    ProxyMind Admin
+                    {t("admin.title")}
                   </h1>
                 </div>
               </div>
@@ -103,7 +105,7 @@ export function AdminPage() {
                 </Avatar>
                 <div>
                   <p className="m-0 text-xs uppercase tracking-[0.16em] text-stone-500">
-                    Twin identity
+                    {t("admin.twinIdentity")}
                   </p>
                   <p className="m-0 text-sm font-medium text-stone-900">
                     {profile.name}
@@ -114,9 +116,11 @@ export function AdminPage() {
           </header>
 
           <div className="mt-4">
-            <TabsList aria-label="Admin sections">
-              <TabsLink to="/admin/sources">Sources</TabsLink>
-              <TabsLink to="/admin/snapshots">Snapshots</TabsLink>
+            <TabsList aria-label={t("admin.sections")}>
+              <TabsLink to="/admin/sources">{t("admin.tabs.sources")}</TabsLink>
+              <TabsLink to="/admin/snapshots">
+                {t("admin.tabs.snapshots")}
+              </TabsLink>
             </TabsList>
           </div>
 

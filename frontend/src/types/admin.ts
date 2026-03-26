@@ -42,10 +42,19 @@ export interface SourceUploadMetadata {
 export interface SourceUploadResponse {
   source_id: string;
   task_id: string;
-  status: string;
+  status: SourceStatus;
   file_path: string;
   message: string;
 }
+
+export type AdminTaskType =
+  | "ingest_source"
+  | "create_snapshot"
+  | "publish_snapshot"
+  | "activate_snapshot"
+  | "rollback_snapshot";
+
+export type AdminTaskState = "pending" | "running" | "succeeded" | "failed";
 
 export interface SourceDeleteResponse {
   id: string;
@@ -58,8 +67,8 @@ export interface SourceDeleteResponse {
 
 export interface AdminTaskStatus {
   id: string;
-  task_type: string;
-  status: string;
+  task_type: AdminTaskType;
+  status: AdminTaskState;
   source_id: string | null;
   progress: number | null;
   error_message: string | null;

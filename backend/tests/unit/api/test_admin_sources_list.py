@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import uuid
 
 import pytest
@@ -13,6 +14,7 @@ from app.db.models.enums import SourceStatus, SourceType
 async def _create_source(
     session_factory: async_sessionmaker[AsyncSession],
     *,
+    created_at: datetime | None = None,
     title: str,
     status: SourceStatus,
     knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
@@ -28,6 +30,8 @@ async def _create_source(
             status=status,
         )
         session.add(source)
+        if created_at is not None:
+            source.created_at = created_at
         await session.commit()
         await session.refresh(source)
         return source
@@ -50,11 +54,13 @@ async def test_list_sources_returns_non_deleted_sources_in_descending_order(
 ) -> None:
     older = await _create_source(
         session_factory,
+        created_at=datetime(2026, 3, 25, 12, 0, tzinfo=timezone.utc),
         title="older",
         status=SourceStatus.READY,
     )
     newer = await _create_source(
         session_factory,
+        created_at=datetime(2026, 3, 25, 13, 0, tzinfo=timezone.utc),
         title="newer",
         status=SourceStatus.PROCESSING,
     )

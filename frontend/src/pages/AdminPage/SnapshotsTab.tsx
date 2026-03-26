@@ -5,8 +5,10 @@ import { SnapshotCard } from "@/components/SnapshotCard/SnapshotCard";
 import { Button } from "@/components/ui/button";
 import { useDraftTest } from "@/hooks/useDraftTest";
 import { useSnapshots } from "@/hooks/useSnapshots";
+import { useAppTranslation } from "@/lib/i18n";
 
 export function SnapshotsTab() {
+  const { t } = useAppTranslation();
   const [showArchived, setShowArchived] = useState(false);
   const {
     activate,
@@ -39,10 +41,10 @@ export function SnapshotsTab() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="m-0 text-xs uppercase tracking-[0.16em] text-stone-500">
-            Snapshot lifecycle
+            {t("admin.snapshot.lifecycle")}
           </p>
           <h2 className="m-0 mt-1 text-2xl font-semibold tracking-[-0.03em] text-stone-950">
-            Manage drafts, publications, activation and rollback
+            {t("admin.snapshot.heading")}
           </h2>
         </div>
         <Button
@@ -50,16 +52,18 @@ export function SnapshotsTab() {
           onClick={() => {
             void createDraft();
           }}
-          title={draftSnapshot ? "A draft already exists" : undefined}
+          title={
+            draftSnapshot ? t("admin.snapshot.draftAlreadyExists") : undefined
+          }
           type="button"
         >
-          + New Draft
+          {t("admin.snapshot.newDraft")}
         </Button>
       </div>
 
       {isLoading ? (
         <div className="rounded-[1.5rem] border border-white/70 bg-white/90 px-6 py-8 text-sm text-stone-500 shadow-sm shadow-stone-900/5">
-          Loading snapshots…
+          {t("admin.loading.snapshots")}
         </div>
       ) : (
         <div className="space-y-4">
@@ -99,7 +103,7 @@ export function SnapshotsTab() {
 
           {draftSnapshots.length === 0 ? (
             <div className="rounded-[1.5rem] border border-dashed border-stone-300 bg-white/70 px-5 py-6 text-sm text-stone-500">
-              Create a draft to run inline draft testing.
+              {t("admin.snapshot.noDraftForTesting")}
             </div>
           ) : null}
 
@@ -111,7 +115,7 @@ export function SnapshotsTab() {
               }}
               type="checkbox"
             />
-            Show archived
+            {t("admin.snapshot.showArchived")}
           </label>
         </div>
       )}

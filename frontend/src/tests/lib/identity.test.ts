@@ -13,9 +13,22 @@ describe("getInitials", () => {
 
     appConfig.language = "tr";
 
-    expect(getInitials("istanbul izmir")).toBe("İİ");
+    try {
+      expect(getInitials("istanbul izmir")).toBe("İİ");
+    } finally {
+      appConfig.language = originalLanguage;
+      vi.unstubAllGlobals();
+    }
+  });
 
-    appConfig.language = originalLanguage;
-    vi.unstubAllGlobals();
+  it("falls back safely when the configured locale is invalid", () => {
+    const originalLanguage = appConfig.language;
+    appConfig.language = "en_US";
+
+    try {
+      expect(getInitials("proxy mind")).toBe("PM");
+    } finally {
+      appConfig.language = originalLanguage;
+    }
   });
 });

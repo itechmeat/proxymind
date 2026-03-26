@@ -150,8 +150,8 @@ Phase outcome: full-featured dialog with persona, citations, memory, promotions.
 
 Phase outcome: full-featured web interface for visitors and the owner.
 
-- [*] **S5-01: Chat UI**
-  React + Vite + Bun. Chat interface: input field, message feed, SSE streaming, twin avatar and name.
+- [x] **S5-01: Chat UI**
+      React + Vite + Bun. Chat interface: input field, message feed, SSE streaming, twin avatar and name.
   - **Outcome:** visitor can chat with the twin in the browser
   - **Verification:** open → send message → streaming response → history on refresh
   - Tasks: chat layout, SSE client, message rendering, session persistence

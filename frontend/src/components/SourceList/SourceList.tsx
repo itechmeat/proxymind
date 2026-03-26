@@ -13,6 +13,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  translateSourceStatus,
+  translateSourceType,
+  useAppTranslation,
+} from "@/lib/i18n";
 import { getSourceIcon } from "@/lib/source-icons";
 import { formatRelativeTime } from "@/lib/strings";
 import type { SourceListItem } from "@/types/admin";
@@ -38,7 +43,7 @@ function SourceTypeCell({ source }: { source: SourceListItem }) {
   return (
     <div className="flex items-center gap-2 text-sm text-stone-600">
       <Icon className="size-4" color={color} />
-      <span className="capitalize">{source.source_type}</span>
+      <span>{translateSourceType(source.source_type)}</span>
     </div>
   );
 }
@@ -49,7 +54,7 @@ function StatusBadge({ status }: { status: SourceListItem["status"] }) {
       className={status === "processing" ? "animate-pulse" : undefined}
       variant={sourceStatusVariant(status)}
     >
-      {status}
+      {translateSourceStatus(status)}
     </Badge>
   );
 }
@@ -65,6 +70,7 @@ export function SourceList({
   onDelete,
   sources,
 }: SourceListProps) {
+  const { t } = useAppTranslation();
   const [pendingSource, setPendingSource] = useState<SourceListItem | null>(
     null,
   );
@@ -72,10 +78,10 @@ export function SourceList({
   const emptyState = useMemo(
     () => (
       <div className="rounded-[1.5rem] border border-dashed border-stone-300 bg-white/70 px-6 py-10 text-center text-sm text-stone-500">
-        No sources yet. Upload a file to start building the knowledge base.
+        {t("admin.source.emptyState")}
       </div>
     ),
-    [],
+    [t],
   );
 
   if (sources.length === 0) {
@@ -88,11 +94,21 @@ export function SourceList({
         <table className="min-w-full border-collapse">
           <thead className="bg-stone-100/80 text-left text-xs uppercase tracking-[0.16em] text-stone-500">
             <tr>
-              <th className="px-5 py-4 font-medium">Title</th>
-              <th className="px-5 py-4 font-medium">Type</th>
-              <th className="px-5 py-4 font-medium">Status</th>
-              <th className="px-5 py-4 font-medium">Created</th>
-              <th className="px-5 py-4 font-medium text-right">Actions</th>
+              <th className="px-5 py-4 font-medium">
+                {t("admin.source.table.title")}
+              </th>
+              <th className="px-5 py-4 font-medium">
+                {t("admin.source.table.type")}
+              </th>
+              <th className="px-5 py-4 font-medium">
+                {t("admin.source.table.status")}
+              </th>
+              <th className="px-5 py-4 font-medium">
+                {t("admin.source.table.created")}
+              </th>
+              <th className="px-5 py-4 font-medium text-right">
+                {t("admin.source.table.actions")}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -149,11 +165,15 @@ export function SourceList({
               <div className="space-y-2">
                 <p className="m-0 font-medium text-stone-950">{source.title}</p>
                 <div className="flex flex-wrap gap-2">
-                  <Badge variant="muted">{source.source_type}</Badge>
+                  <Badge variant="muted">
+                    {translateSourceType(source.source_type)}
+                  </Badge>
                   <StatusBadge status={source.status} />
                 </div>
                 <p className="m-0 text-sm text-stone-500">
-                  Added {formatRelativeTime(source.created_at)}
+                  {t("admin.source.addedAt", {
+                    relativeTime: formatRelativeTime(source.created_at),
+                  })}
                 </p>
               </div>
               <Button
@@ -184,15 +204,17 @@ export function SourceList({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Delete source {pendingSource?.title}?
+              {pendingSource
+                ? t("admin.source.deleteTitle", { title: pendingSource.title })
+                : undefined}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Chunks in published snapshots will remain until replaced.
+              {t("admin.source.deleteDescription")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancelButton type="button">
-              Cancel
+              {t("common.cancel")}
             </AlertDialogCancelButton>
             <AlertDialogActionButton
               onClick={() => {
@@ -204,7 +226,7 @@ export function SourceList({
               type="button"
               variant="destructive"
             >
-              Delete source
+              {t("admin.source.deleteAction")}
             </AlertDialogActionButton>
           </AlertDialogFooter>
         </AlertDialogContent>

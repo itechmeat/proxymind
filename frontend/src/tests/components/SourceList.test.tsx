@@ -47,6 +47,15 @@ describe("SourceList", () => {
       screen.getByText(/chunks in published snapshots will remain/i),
     ).toBeInTheDocument();
 
+    await user.click(screen.getByRole("button", { name: /cancel/i }));
+
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(
+      screen.queryByText(/chunks in published snapshots will remain/i),
+    ).not.toBeInTheDocument();
+
+    await user.click(deleteButton);
+
     await user.click(screen.getByRole("button", { name: /delete source/i }));
 
     expect(onDelete).toHaveBeenCalledWith(sources[0]);
