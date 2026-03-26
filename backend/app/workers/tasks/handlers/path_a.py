@@ -82,6 +82,7 @@ async def handle_path_a(
             source=source,
             snapshot_service=services.snapshot_service,
             processing_path=ProcessingPath.PATH_A,
+            processing_hint=(task.result_metadata or {}).get("processing_hint", "auto"),
         )
         document = initialized.document
         document_version = initialized.document_version

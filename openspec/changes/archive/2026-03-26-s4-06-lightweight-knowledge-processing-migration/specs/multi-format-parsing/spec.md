@@ -1,4 +1,4 @@
-# multi-format-parsing
+# multi-format-parsing (delta)
 
 **Story:** S4-06 — Lightweight Knowledge Processing Migration
 **Status:** MODIFIED capability (includes MODIFIED, ADDED, and REMOVED requirements)
@@ -205,7 +205,6 @@ Both `LightweightParser` and `DocumentAIParser` SHALL implement this Protocol vi
 **[Added by S4-06]** The system SHALL provide a `TextChunker` class at `app/services/document_processing.py` (extracted from the former `DoclingParser._chunk_blocks` private method). The `TextChunker` SHALL accept a list of `ParsedBlock` instances and return a list of `ChunkData` instances. Both `LightweightParser` and `DocumentAIParser` SHALL use `TextChunker` for chunking, ensuring consistent chunking behavior across all processing paths.
 
 The `TextChunker` SHALL:
-
 - Split oversized blocks that exceed `chunk_max_tokens`
 - Merge consecutive small blocks under the same heading when they fit within the token limit
 - Assign sequential zero-based `chunk_index` values
@@ -252,8 +251,40 @@ The `TextChunker` SHALL:
 
 ---
 
-### REMOVED: \_chunk_external_document dead code
+### REMOVED: _chunk_external_document dead code
 
 **Reason:** The `_chunk_external_document()` method was never called. No external chunker was ever passed to the parser. This was a dead extension point that added confusion.
 
 **Migration:** Remove the method. No callers exist. No behavior change.
+
+---
+
+### REMOVED: chunker parameter from parser __init__
+
+**Reason:** The `chunker` parameter in the parser's `__init__()` was never used by any caller. It was a dead extension point.
+
+**Migration:** Remove the parameter. No callers pass it. No behavior change.
+
+---
+
+### REMOVED: _extract_anchor_page dead code
+
+**Reason:** The `_extract_anchor_page()` method was dead code -- no longer called after the lightweight parsing migration.
+
+**Migration:** Remove the method. No callers exist. No behavior change.
+
+---
+
+### REMOVED: All Docling-specific naming
+
+**Reason:** The codebase has no Docling dependency (`pyproject.toml` does not include Docling). All class names, file names, and references that still use "Docling" are misleading historical artifacts.
+
+**Migration:** Rename all Docling references to their lightweight equivalents:
+
+| Before | After |
+|--------|-------|
+| `DoclingParser` class | `LightweightParser` class |
+| `docling_parser.py` file | `lightweight_parser.py` file |
+| `test_docling_parser.py` | `test_lightweight_parser.py` |
+| `PipelineServices.docling_parser` field | `PipelineServices.document_processor` field |
+| `ctx["docling_parser"]` worker context key | `ctx["document_processor"]` worker context key |

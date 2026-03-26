@@ -42,7 +42,7 @@ Three stages: **Ingestion** (offline, async worker) → **Retrieval** (online, p
 
 RAGFlow offers 12 template-based chunking strategies (General, Book, Paper, Laws, Q&A, Table, etc.), each adapted to the structure of a specific document type. The key idea: **chunking must respect document structure**, not just split by tokens.
 
-ProxyMind borrows this principle through **Docling HybridChunker** — a structure-aware chunker that:
+ProxyMind borrows this principle through the **lightweight parser + shared TextChunker** stack — a structure-aware chunker that:
 
 - Recognizes document hierarchy (headings, sections, paragraphs).
 - Preserves anchor metadata (page, chapter, section) in each chunk.
@@ -52,8 +52,8 @@ ProxyMind borrows this principle through **Docling HybridChunker** — a structu
 
 ### What was not taken from RAGFlow
 
-- **12 separate templates** — Docling HybridChunker covers the main cases with a single strategy. For specific formats (Laws, Resume), a custom preprocessor can be added if needed.
-- **DeepDoc (RAGFlow's built-in parser)** — replaced with Docling, which shows better benchmark results (97.9% table accuracy vs 75% for Unstructured).
+- **12 separate templates** — the lightweight parser stack covers the main cases with a single strategy. For specific formats (Laws, Resume), a custom preprocessor can be added if needed.
+- **DeepDoc (RAGFlow's built-in parser)** — replaced with a product-owned lightweight parser path plus Document AI fallback when layout complexity requires external processing.
 - **Elasticsearch as document engine** — RAGFlow stores text and vectors in Elasticsearch. We use Qdrant (lighter, 2–4 GB vs 8+ GB for Elasticsearch).
 
 ## Ingestion: two-tier parsing
@@ -79,20 +79,35 @@ Pipeline Path A:
 
 **Criterion for switching to Path B:** only PDF falls back from Path A to Path B when `text_content` exceeds `path_a_text_threshold_pdf` (default: 2000 tokens). Images stay in Path A regardless of description length. Audio and video use `path_a_text_threshold_media` (default: 500 tokens); if exceeded, ingestion fails because Path B is not yet available for those formats.
 
-### Path B — Docling
+### Path B — lightweight local
 
 For everything that does not fit Path A limits:
 
 - Long PDFs (> 6 pages)
 - DOCX, HTML, Markdown, TXT
-- Long audio/video are currently rejected in the worker. Docling-based Path B for these formats is deferred until ASR support is wired in a later story.
+- Long audio/video are currently rejected in the worker. A future fallback for these formats remains deferred until ASR support is wired in a later story.
 
 Pipeline Path B:
 
-1. **Docling** — document parsing.
-2. **Docling HybridChunker** — splitting into chunks with anchor metadata.
+1. **LightweightParser** — local parsing for Markdown, TXT, HTML, DOCX, and text-based PDFs.
+2. **TextChunker** — shared chunking with anchor metadata preservation.
 3. **Gemini Embedding 2** — generating embeddings from chunk text.
 4. Multiple chunk-records, each with `text_content` and anchor metadata.
+
+### Path C — Document AI fallback
+
+For PDFs where lightweight extraction is insufficient:
+
+- scanned PDFs
+- layout-heavy PDFs
+- explicit `processing_hint="external"`
+
+Pipeline Path C:
+
+1. **Google Cloud Document AI** — OCR and layout-aware parsing.
+2. **TextChunker** — normalization into the same chunk contract used by Path B.
+3. **Gemini Embedding 2** — generating embeddings from chunk text.
+4. Multiple chunk-records with the same anchor contract and `processing_path=path_c`.
 
 ### Bulk operations
 
@@ -220,7 +235,7 @@ Enriched data is indexed in the Qdrant payload. Retrieval can search not only by
 ### Implementation plan (when needed)
 
 1. **Re-research best practices**, primarily based on RAGFlow (Transformer stage, Improvise/Precise/Balance modes, field selection for indexing). By the time of implementation, RAGFlow may have updated its approaches.
-2. Add a stage to the worker pipeline: `Docling → chunks → [Enrichment] → embeddings → Qdrant`.
+2. Add a stage to the worker pipeline: `LightweightParser/DocumentAIParser → chunks → [Enrichment] → embeddings → Qdrant`.
 3. New fields in Qdrant payload: `summary`, `keywords`, `questions`.
 4. Use **Gemini Batch API** for enrichment (cost minimization).
 5. Update retrieval — optionally search by enriched fields.
@@ -246,9 +261,9 @@ A pattern from RAGFlow (TreeRAG): for long documents (books), chunking creates a
 
 During retrieval: find the relevant child chunk, but pass its parent (or siblings) to the LLM for context completeness. This solves the problem of "found the right fragment, but there is not enough context for an answer."
 
-### Relationship with Docling
+### Relationship with the lightweight parser stack
 
-Docling HybridChunker preserves the hierarchical document structure (heading levels). This creates a natural foundation for parent-child: heading level 1 → parent, heading level 2–3 → children.
+The lightweight parser stack preserves the hierarchical document structure (heading levels). This creates a natural foundation for parent-child: heading level 1 → parent, heading level 2–3 → children.
 
 ### Status
 
@@ -263,7 +278,8 @@ ProxyMind defaults to English, but all language-dependent components are configu
 | Gemini Embedding 2 | Automatic                  | 100+ languages                                                                             |
 | Qdrant BM25        | `language` in `Bm25Config` | EN, RU, DE, FR, ES, IT, PT, NL, SV, NO, DA, FI, HU, RO, TR, and others (Snowball stemmers) |
 | Query rewriting    | Automatic (LLM)            | Any language supported by the LLM                                                          |
-| Docling            | Automatic                  | Multilingual parsing                                                                       |
+| Lightweight parser | Automatic                  | Local multilingual-friendly parsing for text-native formats                                |
+| Document AI        | External fallback          | OCR and layout-aware parsing for scanned or complex PDFs                                   |
 
 The BM25 language is set at deploy time via `.env` and applies system-wide.
 
@@ -273,20 +289,20 @@ The BM25 language is set at deploy time via `.env` and applies system-wide.
 
 Starting values for v1. All configurable. Refined based on eval results.
 
-| Parameter                       | Default                    | Description                                                                                                                                                                                                                   |
-| ------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `retrieval_top_n`               | 5                          | Number of chunks passed to the LLM                                                                                                                                                                                            |
-| `retrieval_context_budget`      | 4096 tokens                | Maximum retrieval context budget in the prompt                                                                                                                                                                                |
-| `min_dense_similarity`          | to be determined via evals | Minimum cosine similarity for dense vector. Applied **before** RRF fusion. The RRF score is not used as a threshold — it depends on the fusion formula and ranking depth and is not a stable metric for an absolute threshold |
-| `min_retrieved_chunks`          | 1                          | Minimum chunks required for an answer. If retrieval returns fewer — the digital twin responds "no answer found in the knowledge base"                                                                                         |
-| `rewrite_timeout_ms`            | 3000                       | Query rewriting timeout (fail-open on exceed)                                                                                                                                                                                 |
-| `rewrite_token_budget`          | 2048 tokens                | Maximum prompt budget for query rewriting (history + query). If history is longer — truncated to the most recent messages that fit within the budget                                                                          |
-| `max_citations_per_response`    | 5                          | Maximum citations per response                                                                                                                                                                                                |
-| `max_promotions_per_response`   | 1                          | Maximum commercial recommendations per response                                                                                                                                                                               |
-| `path_a_text_threshold_pdf`     | 2000 tokens                | text_content threshold for PDF: Path A → Path B                                                                                                                                                                               |
-| `path_a_text_threshold_media`   | 500 tokens                 | text_content threshold for audio/video only. Over-threshold audio/video fail ingestion because Path B is not yet available; images ignore this threshold and remain single-chunk Path A                                       |
-| `rewrite_history_messages`      | 10                         | Maximum recent messages for query rewriting (additionally limited by `rewrite_token_budget`)                                                                                                                                  |
-| `bm25_language`                 | english                    | Qdrant BM25 language (Snowball stemmer)                                                                                                                                                                                       |
+| Parameter                     | Default                    | Description                                                                                                                                                                                                                   |
+| ----------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `retrieval_top_n`             | 5                          | Number of chunks passed to the LLM                                                                                                                                                                                            |
+| `retrieval_context_budget`    | 4096 tokens                | Maximum retrieval context budget in the prompt                                                                                                                                                                                |
+| `min_dense_similarity`        | to be determined via evals | Minimum cosine similarity for dense vector. Applied **before** RRF fusion. The RRF score is not used as a threshold — it depends on the fusion formula and ranking depth and is not a stable metric for an absolute threshold |
+| `min_retrieved_chunks`        | 1                          | Minimum chunks required for an answer. If retrieval returns fewer — the digital twin responds "no answer found in the knowledge base"                                                                                         |
+| `rewrite_timeout_ms`          | 3000                       | Query rewriting timeout (fail-open on exceed)                                                                                                                                                                                 |
+| `rewrite_token_budget`        | 2048 tokens                | Maximum prompt budget for query rewriting (history + query). If history is longer — truncated to the most recent messages that fit within the budget                                                                          |
+| `max_citations_per_response`  | 5                          | Maximum citations per response                                                                                                                                                                                                |
+| `max_promotions_per_response` | 1                          | Maximum commercial recommendations per response                                                                                                                                                                               |
+| `path_a_text_threshold_pdf`   | 2000 tokens                | text_content threshold for PDF: Path A → Path B                                                                                                                                                                               |
+| `path_a_text_threshold_media` | 500 tokens                 | text_content threshold for audio/video only. Over-threshold audio/video fail ingestion because Path B is not yet available; images ignore this threshold and remain single-chunk Path A                                       |
+| `rewrite_history_messages`    | 10                         | Maximum recent messages for query rewriting (additionally limited by `rewrite_token_budget`)                                                                                                                                  |
+| `bm25_language`               | english                    | Qdrant BM25 language (Snowball stemmer)                                                                                                                                                                                       |
 
 ## Quality metrics
 

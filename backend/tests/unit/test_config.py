@@ -143,6 +143,32 @@ def test_empty_optional_provider_strings_are_normalized_to_none() -> None:
     assert settings.rewrite_llm_api_base is None
 
 
+def test_document_ai_partial_configuration_is_rejected() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="DOCUMENT_AI_PROJECT_ID and DOCUMENT_AI_PROCESSOR_ID must either both be set or both be empty",
+    ):
+        Settings(**_base_settings(), document_ai_project_id="project")
+
+
+def test_document_ai_processor_without_project_is_rejected() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="DOCUMENT_AI_PROJECT_ID and DOCUMENT_AI_PROCESSOR_ID must either both be set or both be empty",
+    ):
+        Settings(**_base_settings(), document_ai_processor_id="processor")
+
+
+def test_document_ai_enabled_when_project_and_processor_are_set() -> None:
+    settings = Settings(
+        **_base_settings(),
+        document_ai_project_id="project",
+        document_ai_processor_id="processor",
+    )
+
+    assert settings.document_ai_enabled is True
+
+
 def test_max_citations_per_response_default() -> None:
     settings = Settings(**_base_settings())
 

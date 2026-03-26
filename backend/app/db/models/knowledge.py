@@ -98,6 +98,7 @@ class DocumentVersion(PrimaryKeyMixin, TimestampMixin, Base):
         pg_enum(ProcessingPath, name="processing_path_enum"),
         nullable=True,
     )
+    processing_hint: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[DocumentVersionStatus] = mapped_column(
         pg_enum(DocumentVersionStatus, name="document_version_status_enum"),
         nullable=False,

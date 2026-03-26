@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, UrlConstraints, field_validator
 
@@ -17,6 +17,7 @@ class SourceUploadMetadata(BaseModel):
     public_url: Annotated[AnyHttpUrl, UrlConstraints(max_length=2048)] | None = None
     catalog_item_id: uuid.UUID | None = None
     language: str | None = Field(default=None, max_length=32)
+    processing_hint: Literal["auto", "external"] = "auto"
 
     @field_validator("language", mode="before")
     @classmethod

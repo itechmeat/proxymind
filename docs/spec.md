@@ -111,9 +111,14 @@ The system keeps storage, retrieval, and business state local, while offloading 
 
 - Scanned PDFs
 - PDFs with complex layout, tables, or poor reading order
-- DOCX / HTML documents where local extraction is insufficient
 
 Google Cloud Document AI is the preferred external fallback for Path C. It is used as a compute service only; parsed output is normalized into the local chunk contract before persistence and indexing.
+
+Implementation knobs for Path C:
+
+- `DOCUMENT_AI_PROJECT_ID` + `DOCUMENT_AI_PROCESSOR_ID` enable the fallback path
+- `DOCUMENT_AI_LOCATION` defaults to `us`
+- `PATH_C_MIN_CHARS_PER_PAGE` controls scan auto-detection for low-text PDFs
 
 Long audio/video are currently rejected outside Path A limits. Any future fallback for these formats MUST remain external and MUST NOT introduce local ML runtimes.
 

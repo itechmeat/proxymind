@@ -30,7 +30,8 @@ from app.db.models.enums import (
     SourceStatus,
     SourceType,
 )
-from app.services.docling_parser import ChunkData, DoclingParser
+from app.services.document_processing import ChunkData
+from app.services.lightweight_parser import LightweightParser
 from app.services.snapshot import SnapshotService
 from app.workers.tasks import ingestion
 
@@ -122,7 +123,7 @@ def _worker_context(
         "path_a_max_audio_duration_sec": 80,
         "path_a_max_video_duration_sec": 120,
         "storage_service": SimpleNamespace(download=AsyncMock(return_value=b"# ProxyMind")),
-        "docling_parser": SimpleNamespace(parse_and_chunk=AsyncMock(return_value=chunk_data)),
+        "document_processor": SimpleNamespace(parse_and_chunk=AsyncMock(return_value=chunk_data)),
         "embedding_service": embedding_service,
         "gemini_content_service": SimpleNamespace(extract_text_content=AsyncMock()),
         "tokenizer": SimpleNamespace(count_tokens=lambda text: len(str(text).split())),
@@ -156,7 +157,7 @@ def _real_parser_worker_context(
         "path_a_max_audio_duration_sec": 80,
         "path_a_max_video_duration_sec": 120,
         "storage_service": SimpleNamespace(download=AsyncMock(return_value=file_bytes)),
-        "docling_parser": DoclingParser(chunk_max_tokens=1024),
+        "document_processor": LightweightParser(chunk_max_tokens=1024),
         "embedding_service": embedding_service,
         "gemini_content_service": SimpleNamespace(extract_text_content=AsyncMock()),
         "tokenizer": SimpleNamespace(count_tokens=lambda text: len(str(text).split())),
@@ -214,7 +215,7 @@ async def test_worker_processes_task_full_lifecycle(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("committed_data_cleanup")
-async def test_worker_processes_html_with_real_docling_parser(
+async def test_worker_processes_html_with_real_lightweight_parser(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     source_id, task_id = await _seed_task(
@@ -257,7 +258,7 @@ async def test_worker_processes_html_with_real_docling_parser(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("committed_data_cleanup")
-async def test_worker_marks_corrupt_pdf_failed_with_real_docling_parser(
+async def test_worker_marks_corrupt_pdf_failed_with_real_lightweight_parser(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     source_id, task_id = await _seed_task(

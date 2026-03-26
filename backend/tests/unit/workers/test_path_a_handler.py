@@ -83,7 +83,8 @@ def _services(
     )
     return PipelineServices(
         storage_service=SimpleNamespace(download=AsyncMock()),
-        docling_parser=SimpleNamespace(parse_and_chunk=AsyncMock()),
+        document_processor=SimpleNamespace(parse_and_chunk=AsyncMock()),
+        document_ai_parser=None,
         embedding_service=SimpleNamespace(
             model="gemini-embedding-2-preview",
             dimensions=3,
@@ -101,6 +102,8 @@ def _services(
         path_a_max_pdf_pages=6,
         path_a_max_audio_duration_sec=80,
         path_a_max_video_duration_sec=120,
+        path_c_min_chars_per_page=50,
+        document_ai_enabled=False,
     )
 
 
