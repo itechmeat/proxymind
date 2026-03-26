@@ -6,19 +6,29 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+import pytest_asyncio
+from fastapi import FastAPI
 from httpx_sse import aconnect_sse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
 from app.db.models import Message, Source
-from app.db.models.enums import MessageRole, MessageStatus, SnapshotStatus, SourceStatus, SourceType
+from app.db.models.enums import (
+    MessageRole,
+    MessageStatus,
+    SnapshotStatus,
+    SourceStatus,
+    SourceType,
+)
 from app.db.models.knowledge import KnowledgeSnapshot
 from app.services.llm_types import LLMStreamEnd, LLMToken
+from app.services.promotions import PromotionsService
 from app.services.qdrant import RetrievedChunk
 from app.services.retrieval import RetrievalError
 
@@ -88,6 +98,68 @@ def _retrieved_chunk(
             "anchor_timecode": anchor_timecode,
         },
     )
+
+
+@pytest.fixture
+def rewriting_chat_app(
+    session_factory: async_sessionmaker[AsyncSession],
+    mock_retrieval_service,
+    mock_llm_service,
+) -> FastAPI:
+    from app.api.chat import router as chat_router
+    from app.persona.loader import PersonaContext
+    from app.services.llm_types import LLMResponse
+    from app.services.query_rewrite import QueryRewriteService
+
+    rewrite_llm = SimpleNamespace(
+        complete=AsyncMock(
+            return_value=LLMResponse(
+                content="expanded: tell me more about AI books",
+                model_name="test-rewrite-model",
+                token_count_prompt=20,
+                token_count_completion=10,
+            )
+        )
+    )
+    rewrite_service = QueryRewriteService(
+        llm_service=rewrite_llm,
+        rewrite_enabled=True,
+        timeout_ms=3000,
+        token_budget=2048,
+        history_messages=10,
+        temperature=0.1,
+    )
+
+    app = FastAPI()
+    app.include_router(chat_router)
+    app.state.settings = SimpleNamespace(
+        min_retrieved_chunks=1,
+        max_citations_per_response=5,
+        retrieval_context_budget=4096,
+        max_promotions_per_response=1,
+        sse_heartbeat_interval_seconds=15,
+        sse_inter_token_timeout_seconds=30,
+    )
+    app.state.session_factory = session_factory
+    app.state.retrieval_service = mock_retrieval_service
+    app.state.llm_service = mock_llm_service
+    app.state.query_rewrite_service = rewrite_service
+    app.state.persona_context = PersonaContext(
+        identity="Test identity",
+        soul="Test soul",
+        behavior="Test behavior",
+        config_commit_hash="test-commit",
+        config_content_hash="test-content-hash",
+    )
+    app.state.promotions_service = PromotionsService(promotions_text="")
+    return app
+
+
+@pytest_asyncio.fixture
+async def rewriting_chat_client(rewriting_chat_app) -> httpx.AsyncClient:
+    transport = httpx.ASGITransport(app=rewriting_chat_app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        yield client
 
 
 @pytest.mark.asyncio
@@ -247,6 +319,121 @@ async def test_sse_returns_422_without_snapshot(chat_client: httpx.AsyncClient) 
         json={"session_id": session_resp.json()["id"], "text": "Q?"},
     )
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_first_message_no_rewrite(
+    rewriting_chat_client: httpx.AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    mock_retrieval_service,
+    sample_retrieved_chunk,
+) -> None:
+    await _create_snapshot(session_factory, status=SnapshotStatus.ACTIVE)
+    mock_retrieval_service.search.return_value = [sample_retrieved_chunk]
+
+    session_id = (await rewriting_chat_client.post("/api/chat/sessions", json={})).json()["id"]
+
+    async with aconnect_sse(
+        rewriting_chat_client,
+        "POST",
+        "/api/chat/messages",
+        json={"session_id": session_id, "text": "What is AI?"},
+    ) as event_source:
+        _ = [sse async for sse in event_source.aiter_sse()]
+
+    async with session_factory() as session:
+        user_msg = await session.scalar(
+            select(Message).where(
+                Message.session_id == uuid.UUID(session_id),
+                Message.role == MessageRole.USER,
+            )
+        )
+        assert user_msg is not None
+        assert user_msg.rewritten_query is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_second_message_rewrite_persisted(
+    rewriting_chat_client: httpx.AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    mock_retrieval_service,
+    sample_retrieved_chunk,
+) -> None:
+    await _create_snapshot(session_factory, status=SnapshotStatus.ACTIVE)
+    mock_retrieval_service.search.return_value = [sample_retrieved_chunk]
+
+    session_id = (await rewriting_chat_client.post("/api/chat/sessions", json={})).json()["id"]
+
+    async with aconnect_sse(
+        rewriting_chat_client,
+        "POST",
+        "/api/chat/messages",
+        json={"session_id": session_id, "text": "What is AI?"},
+    ) as event_source:
+        _ = [sse async for sse in event_source.aiter_sse()]
+
+    async with aconnect_sse(
+        rewriting_chat_client,
+        "POST",
+        "/api/chat/messages",
+        json={"session_id": session_id, "text": "tell me more"},
+    ) as event_source:
+        _ = [sse async for sse in event_source.aiter_sse()]
+
+    async with session_factory() as session:
+        user_messages = list(
+            (
+                await session.scalars(
+                    select(Message)
+                    .where(
+                        Message.session_id == uuid.UUID(session_id),
+                        Message.role == MessageRole.USER,
+                    )
+                    .order_by(Message.created_at)
+                )
+            ).all()
+        )
+        assert len(user_messages) == 2
+        assert user_messages[0].rewritten_query is None
+        assert user_messages[1].rewritten_query == "expanded: tell me more about AI books"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_retrieval_called_with_rewritten_query(
+    rewriting_chat_client: httpx.AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    mock_retrieval_service,
+    sample_retrieved_chunk,
+) -> None:
+    await _create_snapshot(session_factory, status=SnapshotStatus.ACTIVE)
+    mock_retrieval_service.search.return_value = [sample_retrieved_chunk]
+
+    session_id = (await rewriting_chat_client.post("/api/chat/sessions", json={})).json()["id"]
+
+    async with aconnect_sse(
+        rewriting_chat_client,
+        "POST",
+        "/api/chat/messages",
+        json={"session_id": session_id, "text": "What is AI?"},
+    ) as event_source:
+        _ = [sse async for sse in event_source.aiter_sse()]
+
+    mock_retrieval_service.search.reset_mock()
+
+    async with aconnect_sse(
+        rewriting_chat_client,
+        "POST",
+        "/api/chat/messages",
+        json={"session_id": session_id, "text": "tell me more"},
+    ) as event_source:
+        _ = [sse async for sse in event_source.aiter_sse()]
+
+    mock_retrieval_service.search.assert_called_once()
+    call_args = mock_retrieval_service.search.call_args
+    assert call_args[0][0] == "expanded: tell me more about AI books"
 
 
 @pytest.mark.asyncio

@@ -64,6 +64,37 @@ def _create_llm_service(settings):
     )
 
 
+def _create_query_rewrite_service(settings, llm_service):
+    from app.services.query_rewrite import QueryRewriteService
+
+    if settings.rewrite_llm_model is not None:
+        from app.services.llm import LLMService
+
+        rewrite_llm_service = LLMService(
+            model=settings.rewrite_llm_model,
+            api_key=settings.rewrite_llm_api_key or settings.llm_api_key,
+            api_base=settings.rewrite_llm_api_base or settings.llm_api_base,
+            temperature=settings.rewrite_temperature,
+        )
+    else:
+        rewrite_llm_service = llm_service
+
+    return QueryRewriteService(
+        llm_service=rewrite_llm_service,
+        rewrite_enabled=settings.rewrite_enabled,
+        timeout_ms=settings.rewrite_timeout_ms,
+        token_budget=settings.rewrite_token_budget,
+        history_messages=settings.rewrite_history_messages,
+        temperature=settings.rewrite_temperature,
+    )
+
+
+def _create_promotions_service(settings):
+    from app.services.promotions import PromotionsService
+
+    return PromotionsService.from_file(Path(settings.promotions_file_path))
+
+
 def _create_storage_service(settings, storage_http_client):
     from app.services.storage import StorageService
 
@@ -117,6 +148,10 @@ async def lifespan(app: FastAPI):
             app.state.qdrant_service,
         )
         app.state.llm_service = _create_llm_service(settings)
+        app.state.query_rewrite_service = _create_query_rewrite_service(
+            settings,
+            app.state.llm_service,
+        )
         app.state.storage_service = _create_storage_service(
             settings,
             app.state.storage_http_client,
@@ -130,6 +165,7 @@ async def lifespan(app: FastAPI):
             config_dir=Path(settings.config_dir),
         )
         app.state.persona_context = persona_loader.load()
+        app.state.promotions_service = _create_promotions_service(settings)
     except Exception as error:
         logger.error("app.startup_failed", error=str(error))
         await _close_app_resources(app, logger)

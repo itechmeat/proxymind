@@ -2,37 +2,101 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
+from xml.etree import ElementTree
+from zipfile import BadZipFile, ZipFile
+
+from pypdf import PdfReader
 
 from app.db.models.enums import SourceType
 
-if TYPE_CHECKING:
-    pass
+from app.services.token_counter import ApproximateTokenizer, CHARS_PER_TOKEN
 
-def _input_format_for_source_type(source_type: SourceType) -> Any | None:
-    from docling.datamodel.base_models import InputFormat
-
-    # TXT is handled separately via convert_string() because Docling consumes
-    # plain text most reliably as Markdown content rather than a binary stream.
-    return {
-        SourceType.MARKDOWN: InputFormat.MD,
-        SourceType.PDF: InputFormat.PDF,
-        SourceType.DOCX: InputFormat.DOCX,
-        SourceType.HTML: InputFormat.HTML,
-    }.get(source_type)
+_WORD_NAMESPACE = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+_MAX_DOCX_XML_BYTES = 8 * 1024 * 1024
+_MAX_DOCX_XML_COMPRESSION_RATIO = 100
 
 
-def _suffix_for_input_format(input_format: Any) -> str:
-    from docling.datamodel.base_models import InputFormat
+@dataclass(slots=True, frozen=True)
+class _ParsedBlock:
+    text: str
+    headings: tuple[str, ...]
+    anchor_page: int | None = None
 
-    return {
-        InputFormat.MD: ".md",
-        InputFormat.PDF: ".pdf",
-        InputFormat.DOCX: ".docx",
-        InputFormat.HTML: ".html",
-    }[input_format]
+
+class _HTMLBlockParser(HTMLParser):
+    _HEADING_LEVELS = {"h1": 1, "h2": 2, "h3": 3, "h4": 4, "h5": 5, "h6": 6}
+    _TEXT_BLOCK_TAGS = {"p", "li", "td", "th"}
+    _SKIP_TAGS = {"script", "style"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.blocks: list[_ParsedBlock] = []
+        self._heading_stack: list[str | None] = [None] * 6
+        self._active_heading_level: int | None = None
+        self._active_block_tag: str | None = None
+        self._buffer: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        del attrs
+        normalized_tag = tag.lower()
+        if normalized_tag in self._SKIP_TAGS:
+            self._skip_depth += 1
+            return
+        if self._skip_depth:
+            return
+        if normalized_tag in self._HEADING_LEVELS:
+            self._flush_buffer()
+            self._active_heading_level = self._HEADING_LEVELS[normalized_tag]
+            self._buffer = []
+            return
+        if normalized_tag in self._TEXT_BLOCK_TAGS:
+            self._flush_buffer()
+            self._active_block_tag = normalized_tag
+            self._buffer = []
+
+    def handle_endtag(self, tag: str) -> None:
+        normalized_tag = tag.lower()
+        if normalized_tag in self._SKIP_TAGS:
+            self._skip_depth = max(0, self._skip_depth - 1)
+            return
+        if self._skip_depth:
+            return
+        if normalized_tag in self._HEADING_LEVELS and self._active_heading_level is not None:
+            heading_text = _normalize_whitespace(" ".join(self._buffer))
+            self._buffer = []
+            if heading_text:
+                level_index = self._active_heading_level - 1
+                self._heading_stack[level_index] = heading_text
+                for deeper_index in range(level_index + 1, len(self._heading_stack)):
+                    self._heading_stack[deeper_index] = None
+            self._active_heading_level = None
+            return
+        if normalized_tag == self._active_block_tag:
+            self._flush_buffer()
+            self._active_block_tag = None
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth:
+            return
+        if self._active_heading_level is None and self._active_block_tag is None:
+            return
+        self._buffer.append(data)
+
+    def close(self) -> None:
+        super().close()
+        self._flush_buffer()
+
+    def _flush_buffer(self) -> None:
+        text = _normalize_whitespace(" ".join(self._buffer))
+        self._buffer = []
+        if not text or self._active_heading_level is not None:
+            return
+        self.blocks.append(_ParsedBlock(text=text, headings=_current_headings(self._heading_stack)))
 
 
 @dataclass(slots=True, frozen=True)
@@ -51,28 +115,11 @@ class DoclingParser:
         self,
         *,
         chunk_max_tokens: int,
-        converter: Any | None = None,
         chunker: Any | None = None,
     ) -> None:
-        from docling.chunking import HybridChunker
-        from docling.datamodel.base_models import InputFormat
-        from docling.document_converter import DocumentConverter
-        from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
-
-        self._converter = converter or DocumentConverter(
-            allowed_formats=[
-                InputFormat.MD,
-                InputFormat.PDF,
-                InputFormat.DOCX,
-                InputFormat.HTML,
-            ]
-        )
-        self._chunker = chunker or HybridChunker(
-            tokenizer=HuggingFaceTokenizer.from_pretrained(
-                model_name="sentence-transformers/all-MiniLM-L6-v2",
-                max_tokens=chunk_max_tokens,
-            )
-        )
+        self._chunk_max_tokens = chunk_max_tokens
+        self._tokenizer = ApproximateTokenizer()
+        self._chunker = chunker
 
     async def parse_and_chunk(
         self,
@@ -84,7 +131,7 @@ class DoclingParser:
             return []
 
         document = await asyncio.to_thread(self._convert_document, content, filename, source_type)
-        if document is None:
+        if not document:
             return []
 
         return await asyncio.to_thread(self._chunk_document, document)
@@ -94,39 +141,25 @@ class DoclingParser:
         content: bytes,
         filename: str,
         source_type: SourceType,
-    ) -> Any | None:
-        from docling.datamodel.base_models import DocumentStream, InputFormat
-
-        input_format = _input_format_for_source_type(source_type)
-
-        if input_format is InputFormat.MD:
-            stream = DocumentStream(
-                name=self._normalize_stream_name(filename, input_format),
-                stream=BytesIO(content),
-            )
-            return self._converter.convert(stream).document
-
+    ) -> list[_ParsedBlock]:
+        if source_type is SourceType.MARKDOWN:
+            return self._parse_markdown(content.decode("utf-8", errors="replace"))
         if source_type is SourceType.TXT:
-            text = content.decode("utf-8", errors="replace")
-            if not text.strip():
-                return None
-            normalized_name = f"{Path(filename).stem or 'document'}.md"
-            return self._converter.convert_string(
-                text,
-                format=InputFormat.MD,
-                name=normalized_name,
-            ).document
-
-        if input_format in {InputFormat.PDF, InputFormat.DOCX, InputFormat.HTML}:
-            stream = DocumentStream(
-                name=self._normalize_stream_name(filename, input_format),
-                stream=BytesIO(content),
-            )
-            return self._converter.convert(stream).document
-
+            return self._parse_plain_text(content.decode("utf-8", errors="replace"))
+        if source_type is SourceType.HTML:
+            return self._parse_html(content.decode("utf-8", errors="replace"))
+        if source_type is SourceType.DOCX:
+            return self._parse_docx(content)
+        if source_type is SourceType.PDF:
+            return self._parse_pdf(content)
         raise ValueError(f"Unsupported source type for DoclingParser: {source_type.value}")
 
     def _chunk_document(self, document: Any) -> list[ChunkData]:
+        if self._chunker is not None and hasattr(self._chunker, "chunk"):
+            return self._chunk_external_document(document)
+        return self._chunk_blocks(document)
+
+    def _chunk_external_document(self, document: Any) -> list[ChunkData]:
         chunk_data: list[ChunkData] = []
         for chunk in self._chunker.chunk(document):
             text_content = chunk.text.strip()
@@ -148,13 +181,176 @@ class DoclingParser:
             )
         return chunk_data
 
+    def _chunk_blocks(self, blocks: list[_ParsedBlock]) -> list[ChunkData]:
+        chunk_data: list[ChunkData] = []
+        current_parts: list[str] = []
+        current_tokens = 0
+        current_headings: tuple[str, ...] = ()
+        current_anchor_page: int | None = None
+
+        def flush() -> None:
+            nonlocal current_parts, current_tokens, current_headings, current_anchor_page
+            text_content = _normalize_whitespace("\n\n".join(current_parts))
+            if not text_content:
+                current_parts = []
+                current_tokens = 0
+                current_headings = ()
+                current_anchor_page = None
+                return
+            chunk_data.append(
+                ChunkData(
+                    text_content=text_content,
+                    token_count=max(1, current_tokens),
+                    chunk_index=len(chunk_data),
+                    anchor_page=current_anchor_page,
+                    anchor_chapter=current_headings[0] if current_headings else None,
+                    anchor_section=current_headings[-1] if len(current_headings) > 1 else None,
+                )
+            )
+            current_parts = []
+            current_tokens = 0
+            current_headings = ()
+            current_anchor_page = None
+
+        for block in blocks:
+            block_text = _normalize_whitespace(block.text)
+            if not block_text:
+                continue
+            for fragment in self._split_block_text(block_text):
+                fragment_tokens = self._tokenizer.count_tokens(fragment)
+                if current_parts and current_tokens + fragment_tokens > self._chunk_max_tokens:
+                    flush()
+                if not current_parts:
+                    current_headings = block.headings
+                    current_anchor_page = block.anchor_page
+                current_parts.append(fragment)
+                current_tokens += fragment_tokens
+
+        flush()
+        return chunk_data
+
+    def _split_block_text(self, text: str) -> list[str]:
+        if self._tokenizer.count_tokens(text) <= self._chunk_max_tokens:
+            return [text]
+
+        max_chars = max(CHARS_PER_TOKEN, self._chunk_max_tokens * CHARS_PER_TOKEN)
+        fragments: list[str] = []
+        start = 0
+
+        while start < len(text):
+            end = min(len(text), start + max_chars)
+            if end < len(text):
+                split_at = text.rfind(" ", start, end)
+                if split_at <= start:
+                    split_at = end
+            else:
+                split_at = end
+
+            fragment = text[start:split_at].strip()
+            if fragment:
+                fragments.append(fragment)
+            start = split_at
+            while start < len(text) and text[start].isspace():
+                start += 1
+
+        return fragments
+
     @staticmethod
-    def _normalize_stream_name(filename: str, input_format: Any) -> str:
-        path = Path(filename)
-        expected_suffix = _suffix_for_input_format(input_format)
-        if path.suffix.lower() == expected_suffix:
-            return path.name
-        return f"{path.stem or 'document'}{expected_suffix}"
+    def _parse_markdown(text: str) -> list[_ParsedBlock]:
+        blocks: list[_ParsedBlock] = []
+        heading_stack: list[str | None] = [None] * 6
+        paragraph_lines: list[str] = []
+
+        def flush_paragraph() -> None:
+            if not paragraph_lines:
+                return
+            paragraph = _normalize_whitespace(" ".join(paragraph_lines))
+            paragraph_lines.clear()
+            if paragraph:
+                blocks.append(_ParsedBlock(text=paragraph, headings=_current_headings(heading_stack)))
+
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                flush_paragraph()
+                continue
+            if line.startswith("#"):
+                flush_paragraph()
+                hashes, _, title = line.partition(" ")
+                level = min(len(hashes), 6)
+                heading_stack[level - 1] = title.strip()
+                for deeper_index in range(level, len(heading_stack)):
+                    heading_stack[deeper_index] = None
+                continue
+            paragraph_lines.append(line)
+
+        flush_paragraph()
+        return blocks
+
+    @staticmethod
+    def _parse_plain_text(text: str) -> list[_ParsedBlock]:
+        normalized = _normalize_whitespace(text)
+        if not normalized:
+            return []
+        return [_ParsedBlock(text=normalized, headings=())]
+
+    @staticmethod
+    def _parse_html(text: str) -> list[_ParsedBlock]:
+        parser = _HTMLBlockParser()
+        parser.feed(text)
+        parser.close()
+        return parser.blocks
+
+    @staticmethod
+    def _parse_docx(content: bytes) -> list[_ParsedBlock]:
+        try:
+            with ZipFile(BytesIO(content)) as archive:
+                document_info = archive.getinfo("word/document.xml")
+                _validate_zip_member(
+                    document_info.file_size,
+                    document_info.compress_size,
+                    max_size=_MAX_DOCX_XML_BYTES,
+                    max_ratio=_MAX_DOCX_XML_COMPRESSION_RATIO,
+                )
+                document_xml = archive.read(document_info)
+        except (BadZipFile, KeyError) as error:
+            raise ValueError("Invalid DOCX file") from error
+
+        root = ElementTree.fromstring(document_xml)
+        blocks: list[_ParsedBlock] = []
+        heading_stack: list[str | None] = [None] * 6
+
+        body = root.find("w:body", _WORD_NAMESPACE)
+        if body is None:
+            return []
+
+        for paragraph in body.findall(".//w:p", _WORD_NAMESPACE):
+            text = _normalize_whitespace(
+                " ".join(node.text or "" for node in paragraph.findall(".//w:t", _WORD_NAMESPACE))
+            )
+            if not text:
+                continue
+            style = paragraph.find("w:pPr/w:pStyle", _WORD_NAMESPACE)
+            style_value = style.get(f"{{{_WORD_NAMESPACE['w']}}}val", "") if style is not None else ""
+            level = _docx_heading_level(style_value)
+            if level is not None:
+                heading_stack[level - 1] = text
+                for deeper_index in range(level, len(heading_stack)):
+                    heading_stack[deeper_index] = None
+                continue
+            blocks.append(_ParsedBlock(text=text, headings=_current_headings(heading_stack)))
+
+        return blocks
+
+    @staticmethod
+    def _parse_pdf(content: bytes) -> list[_ParsedBlock]:
+        reader = PdfReader(BytesIO(content))
+        blocks: list[_ParsedBlock] = []
+        for page_index, page in enumerate(reader.pages, start=1):
+            page_text = page.extract_text() or ""
+            for paragraph in _split_text_blocks(page_text):
+                blocks.append(_ParsedBlock(text=paragraph, headings=(), anchor_page=page_index))
+        return blocks
 
     @staticmethod
     def _extract_anchor_page(chunk: Any) -> int | None:
@@ -164,3 +360,43 @@ class DoclingParser:
                 if isinstance(page_no, int):
                     return page_no
         return None
+
+
+def _current_headings(heading_stack: list[str | None]) -> tuple[str, ...]:
+    return tuple(heading for heading in heading_stack if heading)
+
+
+def _docx_heading_level(style_value: str) -> int | None:
+    lowered = style_value.lower()
+    if lowered == "title":
+        return 1
+    if lowered.startswith("heading"):
+        suffix = lowered.removeprefix("heading")
+        if suffix.isdigit():
+            return max(1, min(int(suffix), 6))
+    return None
+
+
+def _split_text_blocks(text: str) -> list[str]:
+    paragraphs = [
+        _normalize_whitespace(part)
+        for part in text.replace("\r", "\n").split("\n\n")
+    ]
+    return [paragraph for paragraph in paragraphs if paragraph]
+
+
+def _normalize_whitespace(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _validate_zip_member(
+    file_size: int,
+    compressed_size: int,
+    *,
+    max_size: int,
+    max_ratio: int,
+) -> None:
+    if file_size > max_size:
+        raise ValueError("DOCX file is too large to parse safely")
+    if compressed_size > 0 and (file_size / compressed_size) > max_ratio:
+        raise ValueError("DOCX file compression ratio is too high")

@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote_plus
 
 from pydantic import Field, computed_field, model_validator
@@ -50,11 +51,22 @@ class Settings(BaseSettings):
     retrieval_top_n: int = Field(default=5, ge=1)
     min_retrieved_chunks: int = Field(default=1, ge=0)
     max_citations_per_response: int = Field(default=5, ge=1)
+    retrieval_context_budget: int = Field(default=4096, ge=1)
+    max_promotions_per_response: int = Field(default=1, ge=0)
     min_dense_similarity: float | None = Field(default=None, ge=0.0, le=1.0)
     sse_heartbeat_interval_seconds: int = Field(default=15, ge=1)
     sse_inter_token_timeout_seconds: int = Field(default=30, ge=1)
+    rewrite_enabled: bool = Field(default=True)
+    rewrite_llm_model: str | None = Field(default=None)
+    rewrite_llm_api_key: str | None = Field(default=None)
+    rewrite_llm_api_base: str | None = Field(default=None)
+    rewrite_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
+    rewrite_timeout_ms: int = Field(default=3000, ge=1)
+    rewrite_token_budget: int = Field(default=2048, ge=1)
+    rewrite_history_messages: int = Field(default=10, ge=1)
     persona_dir: str = Field(default=str(REPO_ROOT / "persona"))
     config_dir: str = Field(default=str(REPO_ROOT / "config"))
+    promotions_file_path: str = Field(default=str(REPO_ROOT / "config" / "PROMOTIONS.md"))
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
@@ -69,6 +81,25 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_empty_optional_strings(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        normalized = dict(data)
+        for field_name in (
+            "gemini_api_key",
+            "llm_api_key",
+            "llm_api_base",
+            "rewrite_llm_model",
+            "rewrite_llm_api_key",
+            "rewrite_llm_api_base",
+        ):
+            if normalized.get(field_name) == "":
+                normalized[field_name] = None
+        return normalized
 
     @model_validator(mode="after")
     def validate_retrieval_settings(self) -> Settings:

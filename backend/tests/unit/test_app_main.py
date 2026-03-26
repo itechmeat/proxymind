@@ -27,6 +27,14 @@ def _settings() -> SimpleNamespace:
         llm_api_key=None,
         llm_api_base=None,
         llm_temperature=0.7,
+        rewrite_enabled=True,
+        rewrite_llm_model=None,
+        rewrite_llm_api_key=None,
+        rewrite_llm_api_base=None,
+        rewrite_temperature=0.1,
+        rewrite_timeout_ms=3000,
+        rewrite_token_budget=2048,
+        rewrite_history_messages=10,
         seaweedfs_host="localhost",
         seaweedfs_filer_port=8888,
         seaweedfs_filer_url="http://localhost:8888",
@@ -35,6 +43,7 @@ def _settings() -> SimpleNamespace:
         redis_port=6379,
         persona_dir="/persona",
         config_dir="/config",
+        promotions_file_path="/config/PROMOTIONS.md",
     )
 
 
@@ -235,6 +244,7 @@ async def test_lifespan_loads_persona_context(
         assert test_app.state.persona_context.behavior == "Test behavior"
         assert len(test_app.state.persona_context.config_content_hash) == 64
         assert test_app.state.persona_context.config_commit_hash != ""
+        assert test_app.state.promotions_service is not None
 
 
 @pytest.mark.asyncio

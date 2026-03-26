@@ -8,6 +8,12 @@ It is March 2026. When searching for tools, libraries, versions, or best practic
 
 All tools and dependencies MUST be installed at versions equal to or greater than those specified in `docs/spec.md`. Never downgrade below the minimum versions listed in the spec. If a version is marked as "—" (dash), the exact version is not yet pinned — use the latest stable release available.
 
+### Container-Only Backend Rule
+
+- Backend dependencies, checks, tests, migrations, and runtime validation MUST run only inside Docker containers. Do not install or verify backend Python packages in the host operating system.
+- Before any backend verification, use `docker compose` to build or run the relevant backend container and execute commands there.
+- Local ML frameworks and heavyweight inference runtimes are strictly forbidden in the project and its Docker images. Do not install `torch`, `torchvision`, `transformers`, CUDA runtimes, OCR/vision ML stacks, or similar packages.
+
 ## Product Language Policy
 
 ProxyMind is an open-source product designed for **English by default**, but MUST support multilingual usage. All language-dependent components (BM25 tokenization, stemming, stopwords, embedding task types, UI labels) must be configurable per installation. Never hardcode a specific language — always use a language setting. When implementing search, chunking, or text processing, ensure the solution works across popular languages (English, Russian, Spanish, German, French, Chinese, Japanese, Korean, etc.).

@@ -1,6 +1,6 @@
 ## Purpose
 
-Chat session lifecycle, message send/receive, retrieval-augmented response generation, LLM integration, prompt assembly, and SSE streaming (S4-02). Introduced by S2-04.
+Chat session lifecycle, message send/receive, retrieval-augmented response generation, LLM integration, prompt assembly, SSE streaming (S4-02), and query rewriting (S4-04). Introduced by S2-04.
 
 ### Requirement: Session creation via POST /api/chat/sessions
 
@@ -27,15 +27,19 @@ The system SHALL provide a `POST /api/chat/sessions` endpoint that creates a new
 
 ### Requirement: Message send via POST /api/chat/messages
 
-The system SHALL provide a `POST /api/chat/messages` endpoint that accepts `session_id` (UUID), `text` (non-empty string), and an optional `idempotency_key` (string, client-generated) in the `SendMessageRequest`. The endpoint SHALL save the user message with `role=user`, `status=received`, and `idempotency_key` (when provided), then perform retrieval against the session's active snapshot, assemble a prompt using the retrieval context and the loaded `PersonaContext`, and stream the assistant's response as SSE (`text/event-stream; charset=utf-8`) with status 200.
+The system SHALL provide a `POST /api/chat/messages` endpoint that accepts `session_id` (UUID), `text` (non-empty string), and an optional `idempotency_key` (string, client-generated) in the `SendMessageRequest`. The endpoint SHALL save the user message with `role=user`, `status=received`, and `idempotency_key` (when provided), then perform query rewriting (S4-04), then perform retrieval against the session's active snapshot, then assemble a prompt using `ContextAssembler.assemble()` with the retrieval chunks, original user query, and source map, and stream the assistant's response as SSE (`text/event-stream; charset=utf-8`) with status 200.
 
-The `ChatService` SHALL provide a `stream_answer()` method alongside the existing `answer()` method. The existing `answer()` method SHALL be preserved (used by tests and non-streaming internal calls such as query rewriting in S4-04). The `stream_answer()` method SHALL receive `PersonaContext` and pass it to `build_chat_prompt(query, chunks, persona)` for system message assembly that includes the safety policy and persona layers.
+After the user message is persisted, the system SHALL load conversation history for the session, then call `QueryRewriteService.rewrite()` with the user's query text and the loaded history. The retrieval step SHALL use the rewritten query (or the original query if rewriting was skipped or failed). The prompt assembly step SHALL call `ContextAssembler.assemble(chunks=retrieved_chunks, query=original_query, source_map=source_map)` — using the original user query text, not the rewritten query. When rewriting produces a different query, the `rewritten_query` column on the user message SHALL be updated with the rewritten text.
 
-The assistant message SHALL be created with `role=assistant`, `status=streaming`, and `parent_message_id` set to the user message's `id` before the first SSE event is emitted. Upon successful completion, the assistant message SHALL be updated to `status=complete` with `content`, `model_name`, token counts (`token_count_prompt`, `token_count_completion`), deduplicated `source_ids` from retrieved chunks, and audit hashes (`config_commit_hash`, `config_content_hash` from `PersonaContext`).
+The `ChatService` SHALL provide a `stream_answer()` method alongside the existing `answer()` method. The existing `answer()` method SHALL be preserved (used by tests and non-streaming internal calls). Both methods SHALL include the query rewriting step. Both methods SHALL call `ContextAssembler.assemble()` for prompt construction instead of `build_chat_prompt()`.
 
-Pre-stream errors (session not found, no active snapshot, concurrent stream conflict, idempotency conflict for STREAMING) SHALL return standard HTTP error codes (404, 409, 422) as JSON responses — the SSE stream SHALL NOT be opened for these cases. The old hardcoded `SYSTEM_PROMPT` SHALL be removed and replaced by `SYSTEM_SAFETY_POLICY` plus persona layers.
+After the LLM response is received and citations are extracted, the system SHALL call `compute_content_type_spans()` with the response text and the `included_promotions` from `AssembledPrompt`. The resulting spans SHALL be persisted in the assistant message's `content_type_spans` JSONB column.
 
-On every response — both the LLM-generated response path (`chat.assistant_completed`) and the code-level refusal path (`chat.refusal_returned`) — `ChatService` SHALL log `config_commit_hash` and `config_content_hash` from the `PersonaContext` via structlog. The response SHALL include a runtime-computed `retrieved_chunks_count` field (delivered in the `done` or `meta` SSE event as appropriate).
+The assistant message SHALL be created with `role=assistant`, `status=streaming`, and `parent_message_id` set to the user message's `id` before the first SSE event is emitted. Upon successful completion, the assistant message SHALL be updated to `status=complete` with `content`, `model_name`, token counts (`token_count_prompt`, `token_count_completion`), deduplicated `source_ids` from retrieved chunks, `content_type_spans` from heuristic classification, and audit hashes (`config_commit_hash`, `config_content_hash` from `context_assembler.persona_context`).
+
+Pre-stream errors (session not found, no active snapshot, concurrent stream conflict, idempotency conflict for STREAMING) SHALL return standard HTTP error codes (404, 409, 422) as JSON responses — the SSE stream SHALL NOT be opened for these cases.
+
+On every response — both the LLM-generated response path (`chat.assistant_completed`) and the code-level refusal path (`chat.refusal_returned`) — `ChatService` SHALL log `config_commit_hash` and `config_content_hash` from `context_assembler.persona_context` via structlog. The response SHALL include a runtime-computed `retrieved_chunks_count` field (delivered in the `done` or `meta` SSE event as appropriate).
 
 #### Scenario: Successful message with SSE streaming response
 
@@ -59,29 +63,41 @@ On every response — both the LLM-generated response path (`chat.assistant_comp
 - **WHEN** a message exchange completes successfully (assistant message reaches COMPLETE status)
 - **THEN** the session's `message_count` SHALL be incremented to reflect both the user and assistant messages
 
-#### Scenario: PersonaContext is injected into prompt assembly
+#### Scenario: ContextAssembler used for prompt construction
 
 - **WHEN** `ChatService.stream_answer()` assembles the LLM prompt
-- **THEN** it SHALL call `build_chat_prompt(query, chunks, persona)` with the `PersonaContext` from `app.state`
-- **AND** the system message SHALL contain the safety policy followed by persona layers (identity, soul, behavior) with empty sections skipped
+- **THEN** it SHALL call `ContextAssembler.assemble(chunks=retrieved_chunks, query=original_query, source_map=source_map)`
+- **AND** SHALL pass the resulting `AssembledPrompt.messages` to the LLM service
+- **AND** SHALL NOT call `build_chat_prompt()`
+
+#### Scenario: Config hashes accessed via context_assembler.persona_context
+
+- **WHEN** the assistant message is saved with `status=complete` or a refusal is returned
+- **THEN** `config_commit_hash` and `config_content_hash` SHALL be read from `context_assembler.persona_context`
+- **AND** these values SHALL be persisted on the assistant message and logged via structlog
 
 #### Scenario: Config hashes logged on successful LLM response
 
 - **WHEN** the LLM returns a successful response and the assistant message is saved with `status=complete`
 - **THEN** structlog SHALL emit a `chat.assistant_completed` event
-- **AND** the log entry SHALL include `config_commit_hash` and `config_content_hash` from the `PersonaContext`
+- **AND** the log entry SHALL include `config_commit_hash` and `config_content_hash` from `context_assembler.persona_context`
 
 #### Scenario: Config hashes logged on code-level refusal
 
 - **WHEN** retrieval returns fewer chunks than `min_retrieved_chunks` and the system returns a refusal without calling the LLM
 - **THEN** structlog SHALL emit a `chat.refusal_returned` event
-- **AND** the log entry SHALL include `config_commit_hash` and `config_content_hash` from the `PersonaContext`
+- **AND** the log entry SHALL include `config_commit_hash` and `config_content_hash` from `context_assembler.persona_context`
 
-#### Scenario: Old SYSTEM_PROMPT no longer used
+#### Scenario: Content type spans computed after LLM response
 
-- **WHEN** the chat message flow assembles a prompt
-- **THEN** the old hardcoded `SYSTEM_PROMPT` constant SHALL NOT be referenced
-- **AND** the system message SHALL be assembled from `SYSTEM_SAFETY_POLICY` plus persona layers via `build_chat_prompt`
+- **WHEN** the LLM returns a successful response and citations are extracted
+- **THEN** `compute_content_type_spans()` SHALL be called with the response text and `assembled_prompt.included_promotions`
+- **AND** the resulting spans SHALL be stored in the assistant message's `content_type_spans` column
+
+#### Scenario: Content type spans empty when refusal
+
+- **WHEN** retrieval returns fewer chunks than `min_retrieved_chunks` and a refusal is returned
+- **THEN** `content_type_spans` on the assistant message SHALL be `null` or an empty list (no content type classification is needed for refusal text)
 
 #### Scenario: SendMessageRequest accepts optional idempotency_key
 
@@ -92,6 +108,117 @@ On every response — both the LLM-generated response path (`chat.assistant_comp
 
 - **WHEN** `ChatService` is used after S4-02 implementation
 - **THEN** the `answer()` method SHALL remain available and functional with the same signature and behavior
+
+#### Scenario: Rewritten query used for retrieval, original for assembler
+
+- **WHEN** a user sends "Tell me more about the second one" in a session with prior history
+- **AND** query rewriting reformulates the query to "Tell me more about Sergey's book Deep Learning in Practice"
+- **THEN** the retrieval step SHALL search using "Tell me more about Sergey's book Deep Learning in Practice"
+- **AND** `ContextAssembler.assemble()` SHALL receive the original query "Tell me more about the second one"
+
+#### Scenario: First message skips rewriting
+
+- **WHEN** the first message in a session is sent
+- **THEN** query rewriting SHALL be skipped (no history available)
+- **AND** the retrieval step SHALL use the original query text
+- **AND** `rewritten_query` on the user message SHALL remain `NULL`
+
+#### Scenario: Rewrite failure does not block the chat flow
+
+- **WHEN** the query rewrite LLM call times out or raises an error
+- **THEN** the retrieval step SHALL proceed with the original query text
+- **AND** the assistant response SHALL be generated normally
+- **AND** `rewritten_query` on the user message SHALL remain `NULL`
+
+#### Scenario: Rewritten query persisted on user message
+
+- **WHEN** query rewriting succeeds and produces a different query
+- **THEN** the `rewritten_query` column on the user message record SHALL be updated with the rewritten text
+- **AND** the update SHALL occur before the retrieval step
+
+---
+
+### Requirement: ChatService constructor
+
+The `ChatService` constructor SHALL accept a `context_assembler` parameter of type `ContextAssembler` instead of a direct `persona_context` parameter. The `context_assembler` SHALL encapsulate `persona_context` and make it accessible as a public attribute (`context_assembler.persona_context`) for config hash access. The `ChatService` constructor SHALL also accept a `query_rewrite_service` parameter of type `QueryRewriteService`. Both dependencies SHALL be injected via the existing dependency injection mechanism in `api/dependencies.py`.
+
+#### Scenario: ChatService accepts context_assembler instead of persona_context
+
+- **WHEN** `ChatService` is instantiated
+- **THEN** it SHALL require a `context_assembler` parameter of type `ContextAssembler`
+- **AND** SHALL NOT accept a direct `persona_context` parameter
+- **AND** SHALL store `context_assembler` for use during prompt construction
+
+#### Scenario: persona_context accessible via context_assembler
+
+- **WHEN** `ChatService` needs `config_commit_hash` or `config_content_hash` for audit logging
+- **THEN** it SHALL access them via `self.context_assembler.persona_context.config_commit_hash` and `self.context_assembler.persona_context.config_content_hash`
+
+#### Scenario: ChatService requires QueryRewriteService
+
+- **WHEN** `ChatService` is instantiated
+- **THEN** it SHALL require a `query_rewrite_service` parameter
+- **AND** SHALL store it for use during message processing
+
+#### Scenario: ContextAssembler wired via dependency injection
+
+- **WHEN** the `get_chat_service()` dependency is resolved
+- **THEN** it SHALL provide a `ContextAssembler` instance (wrapping `persona_context` and `promotions_service`) to the `ChatService` constructor
+- **AND** SHALL NOT pass `persona_context` directly
+
+#### Scenario: QueryRewriteService wired via dependency injection
+
+- **WHEN** the `get_chat_service()` dependency is resolved
+- **THEN** it SHALL provide a `QueryRewriteService` instance to the `ChatService` constructor
+
+---
+
+### Requirement: rewritten_query column on messages table
+
+The `messages` table SHALL have a `rewritten_query` column of type nullable TEXT. This column SHALL be populated only for user messages (`role=user`) when query rewriting occurs and produces a different query. The column SHALL be `NULL` when: the message is the first in a session (no history), rewriting is disabled, rewriting fails or times out, or the message is an assistant message. Introduced by S4-04.
+
+#### Scenario: Rewritten query stored for user message
+
+- **WHEN** a user message triggers successful query rewriting
+- **THEN** the `rewritten_query` column SHALL contain the LLM-reformulated query text
+
+#### Scenario: NULL for first message in session
+
+- **WHEN** the first message is sent in a new session (no prior history)
+- **THEN** the `rewritten_query` column SHALL be `NULL`
+
+#### Scenario: NULL for assistant messages
+
+- **WHEN** an assistant message is persisted
+- **THEN** the `rewritten_query` column SHALL be `NULL`
+
+#### Scenario: NULL when rewrite fails
+
+- **WHEN** query rewriting times out or raises an error
+- **THEN** the `rewritten_query` column on the user message SHALL remain `NULL`
+
+---
+
+### Requirement: Conversation history loading
+
+The `ChatService` SHALL provide a `_load_history()` method (or equivalent) that loads session messages for the rewrite context. The method SHALL load all messages in the session excluding the current user message, ordered by `created_at` ascending. Only messages with status RECEIVED (user messages) or COMPLETE (assistant messages) SHALL be included. Messages with status STREAMING, PARTIAL, or FAILED SHALL be excluded. Introduced by S4-04.
+
+#### Scenario: History loaded excluding current message
+
+- **WHEN** a session has 4 prior messages and the user sends a 5th message
+- **THEN** `_load_history()` SHALL return the 4 prior messages
+- **AND** the current (5th) user message SHALL NOT be included
+
+#### Scenario: Only RECEIVED and COMPLETE messages included
+
+- **WHEN** a session has 3 messages: user (RECEIVED), assistant (COMPLETE), and assistant (FAILED)
+- **THEN** `_load_history()` SHALL return 2 messages (the RECEIVED user message and the COMPLETE assistant message)
+- **AND** the FAILED assistant message SHALL be excluded
+
+#### Scenario: Empty history for first message
+
+- **WHEN** the first message is sent in a new session
+- **THEN** `_load_history()` SHALL return an empty list
 
 ---
 
@@ -126,7 +253,7 @@ The system SHALL implement lazy snapshot binding. If `session.snapshot_id` is `n
 
 ### Requirement: Retrieval-grounded refusal without LLM call
 
-When retrieval returns fewer chunks than `min_retrieved_chunks` (configurable, default 1), the system SHALL save an assistant message with a hardcoded refusal text and `status=complete`, and return it without calling the LLM. This prevents wasted LLM calls and eliminates hallucination risk when no grounding context is available. The refusal message content SHALL indicate that no answer was found in the knowledge base.
+When retrieval returns fewer chunks than `min_retrieved_chunks` (configurable, default 1), `ChatService` SHALL save an assistant message with a hardcoded refusal text and `status=complete`, and return it without calling the LLM or the `ContextAssembler`. This check SHALL happen before the assembler is invoked. `ChatService` is the single owner of the refusal decision — the `ContextAssembler` does budget trimming but never decides to refuse.
 
 #### Scenario: Refusal when zero chunks retrieved
 
@@ -134,17 +261,18 @@ When retrieval returns fewer chunks than `min_retrieved_chunks` (configurable, d
 - **THEN** the response SHALL be 200 with an assistant message containing a refusal text
 - **AND** the assistant message `status` SHALL be `"complete"`
 - **AND** the LLM SHALL NOT be called
+- **AND** the `ContextAssembler` SHALL NOT be called
 - **AND** `retrieved_chunks_count` SHALL be 0
 
 #### Scenario: Refusal when chunks below min_retrieved_chunks threshold
 
 - **WHEN** `min_retrieved_chunks` is configured to 3 and retrieval returns 2 chunks
-- **THEN** the system SHALL return a refusal without calling the LLM
+- **THEN** the system SHALL return a refusal without calling the LLM or the assembler
 
 #### Scenario: Normal flow when chunks meet threshold
 
 - **WHEN** `min_retrieved_chunks` is 1 and retrieval returns 3 chunks
-- **THEN** the system SHALL proceed to prompt assembly and LLM call
+- **THEN** the system SHALL proceed to `ContextAssembler.assemble()` and then to the LLM call
 
 ---
 
@@ -153,6 +281,7 @@ When retrieval returns fewer chunks than `min_retrieved_chunks` (configurable, d
 The system SHALL provide a `GET /api/chat/sessions/{session_id}` endpoint that returns the session with its ordered message history. Messages SHALL be ordered by `created_at` ascending. The response SHALL include `id`, `status`, `channel`, `snapshot_id`, `message_count`, `created_at`, and a `messages` array. Each message in the array SHALL be represented by the `MessageInHistory` schema and SHALL include `id`, `role`, `content`, `status`, `model_name` (for assistant messages), `created_at`, and a `citations` field (`list[CitationResponse] | None`).
 
 `CitationResponse` SHALL contain the following fields:
+
 - `index` — integer, the citation's position number in the response text
 - `source_id` — UUID, the knowledge source this citation references
 - `source_title` — string, the human-readable title of the source document
@@ -162,6 +291,7 @@ The system SHALL provide a `GET /api/chat/sessions/{session_id}` endpoint that r
 - `text_citation` — string, human-readable bibliographic reference (e.g., `"Clean Architecture", Chapter 5, p. 42`). Always present regardless of whether `url` is set. Assembled from source title and anchor metadata by the citation service.
 
 `AnchorResponse` SHALL contain the following fields:
+
 - `page` — nullable integer, the page number within the source document
 - `chapter` — nullable string, the chapter title or identifier
 - `section` — nullable string, the section title or identifier
@@ -314,20 +444,23 @@ The assistant message SHALL store deduplicated `source_ids` (UUID array) extract
 
 ### Requirement: Prompt assembly as pure functions
 
-The system SHALL provide prompt assembly via stateless pure functions in `services/prompt.py`. The `build_chat_prompt` function SHALL accept a user query and a list of retrieved chunks, and SHALL return a messages list in OpenAI chat API format (accepted by LiteLLM). The system message SHALL contain behavioral instructions directing the LLM to answer only from the provided context. The user message SHALL contain the formatted retrieval context followed by the user question. Each chunk in the context SHALL include its source_id for traceability.
+The `services/prompt.py` module SHALL retain utility functions (`format_chunk_header()` and `NO_CONTEXT_REFUSAL` constant) used by other services. The `build_chat_prompt()` function SHALL be removed — its responsibility is now handled by `ContextAssembler`. Layer assembly logic, XML tag wrapping, and budget management SHALL live exclusively in `ContextAssembler`.
 
-#### Scenario: Prompt structure with retrieved chunks
+#### Scenario: build_chat_prompt no longer exists
 
-- **WHEN** `build_chat_prompt` is called with a query and 3 retrieved chunks
-- **THEN** the result SHALL be a list of 2 messages: one with `role=system` and one with `role=user`
-- **AND** the system message SHALL instruct the LLM to answer only from provided context
-- **AND** the user message SHALL contain all 3 chunk texts with source identifiers, followed by the user question
+- **WHEN** the `services/prompt.py` module is inspected after S4-05
+- **THEN** it SHALL NOT contain a `build_chat_prompt()` function
 
-#### Scenario: Prompt with empty chunks list
+#### Scenario: format_chunk_header retained
 
-- **WHEN** `build_chat_prompt` is called with an empty chunks list
-- **THEN** the result SHALL still contain a system message and a user message
-- **AND** the user message SHALL contain only the question (no context section)
+- **WHEN** `ContextAssembler` formats retrieval chunks
+- **THEN** it SHALL use `format_chunk_header()` from `services/prompt.py`
+- **AND** the function SHALL remain available for other consumers
+
+#### Scenario: NO_CONTEXT_REFUSAL retained
+
+- **WHEN** `ChatService` returns a refusal due to insufficient chunks
+- **THEN** it SHALL use the `NO_CONTEXT_REFUSAL` constant from `services/prompt.py`
 
 ---
 
@@ -417,6 +550,7 @@ The `ChatService` SHALL provide a `save_failed_on_timeout` method (or equivalent
 After retrieval and before prompt assembly, the chat service SHALL batch-load source metadata from PostgreSQL for all unique `source_id` values present in the retrieved chunks. The batch query SHALL load `title`, `public_url`, and `source_type` for each source in a single database query. The resulting source map (`dict[UUID, SourceInfo]`) SHALL be passed to both the prompt builder (for context enrichment) and the citation service (for building citation objects with source titles and URLs).
 
 `SourceInfo` SHALL contain the following fields:
+
 - `id` — UUID, the source identifier
 - `title` — string, the human-readable title of the source document
 - `public_url` — nullable string, the public URL of the source (null when no public URL exists)

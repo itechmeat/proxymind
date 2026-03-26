@@ -16,12 +16,15 @@ from app.db.models import Message, Session, Source
 from app.db.models.enums import MessageRole, MessageStatus, SessionChannel, SessionStatus
 from app.persona.loader import PersonaContext
 from app.services.citation import Citation, CitationService, SourceInfo
+from app.services.content_type import compute_content_type_spans
+from app.services.context_assembler import ContextAssembler
 from app.services.llm_types import LLMToken
-from app.services.prompt import NO_CONTEXT_REFUSAL, build_chat_prompt
+from app.services.prompt import NO_CONTEXT_REFUSAL
 from app.services.qdrant import RetrievedChunk
 
 if TYPE_CHECKING:
     from app.services.llm import LLMService
+    from app.services.query_rewrite import QueryRewriteService
     from app.services.retrieval import RetrievalService
     from app.services.snapshot import SnapshotService
 
@@ -99,7 +102,8 @@ class ChatService:
         snapshot_service: SnapshotService,
         retrieval_service: RetrievalService,
         llm_service: LLMService,
-        persona_context: PersonaContext,
+        query_rewrite_service: QueryRewriteService,
+        context_assembler: ContextAssembler,
         min_retrieved_chunks: int,
         max_citations_per_response: int = 5,
     ) -> None:
@@ -107,10 +111,15 @@ class ChatService:
         self._snapshot_service = snapshot_service
         self._retrieval_service = retrieval_service
         self._llm_service = llm_service
-        self._persona_context = persona_context
+        self._query_rewrite_service = query_rewrite_service
+        self._context_assembler = context_assembler
         self._min_retrieved_chunks = min_retrieved_chunks
         self._max_citations_per_response = max_citations_per_response
         self._logger = structlog.get_logger(__name__)
+
+    @property
+    def _persona_context(self) -> PersonaContext:
+        return self._context_assembler.persona_context
 
     async def create_session(
         self,
@@ -164,7 +173,11 @@ class ChatService:
 
         retrieved_chunks: list[RetrievedChunk] = []
         try:
-            retrieved_chunks = await self._retrieval_service.search(text, snapshot_id=snapshot_id)
+            search_query = await self._do_rewrite(text, chat_session, user_message)
+            retrieved_chunks = await self._retrieval_service.search(
+                search_query,
+                snapshot_id=snapshot_id,
+            )
             self._logger.info(
                 "chat.retrieval_completed",
                 session_id=str(chat_session.id),
@@ -204,22 +217,28 @@ class ChatService:
                 snapshot_id=str(snapshot_id),
                 retrieved_chunks_count=len(retrieved_chunks),
             )
-            source_ids = self._deduplicate_source_ids(retrieved_chunks)
-            source_map = await self._load_source_map(source_ids)
-            llm_response = await self._llm_service.complete(
-                build_chat_prompt(
-                    text,
-                    retrieved_chunks,
-                    self._persona_context,
-                    source_map=source_map,
-                )
+            source_map = await self._load_source_map(self._deduplicate_source_ids(retrieved_chunks))
+            assembled = self._context_assembler.assemble(
+                chunks=retrieved_chunks,
+                query=text,
+                source_map=source_map,
             )
+            selected_chunks = retrieved_chunks[: assembled.retrieval_chunks_used]
+            source_ids = self._deduplicate_source_ids(selected_chunks)
+            llm_response = await self._llm_service.complete(assembled.messages)
             citations = CitationService.extract(
                 llm_response.content,
-                retrieved_chunks,
+                selected_chunks,
                 source_map,
                 self._max_citations_per_response,
             )
+            content_type_spans = [
+                {"start": span.start, "end": span.end, "type": span.type}
+                for span in compute_content_type_spans(
+                    llm_response.content,
+                    promotions=assembled.included_promotions,
+                )
+            ]
             assistant_message = await self._persist_message(
                 chat_session,
                 role=MessageRole.ASSISTANT,
@@ -231,6 +250,7 @@ class ChatService:
                 model_name=llm_response.model_name,
                 token_count_prompt=llm_response.token_count_prompt,
                 token_count_completion=llm_response.token_count_completion,
+                content_type_spans=content_type_spans,
                 parent_message_id=user_message.id,
                 config_commit_hash=self._persona_context.config_commit_hash,
                 config_content_hash=self._persona_context.config_content_hash,
@@ -246,7 +266,7 @@ class ChatService:
             )
             return ChatAnswerResult(
                 assistant_message=assistant_message,
-                retrieved_chunks_count=len(retrieved_chunks),
+                retrieved_chunks_count=len(selected_chunks),
             )
         except Exception as error:
             try:
@@ -315,7 +335,11 @@ class ChatService:
 
         retrieved_chunks: list[RetrievedChunk] = []
         try:
-            retrieved_chunks = await self._retrieval_service.search(text, snapshot_id=snapshot_id)
+            search_query = await self._do_rewrite(text, chat_session, user_message)
+            retrieved_chunks = await self._retrieval_service.search(
+                search_query,
+                snapshot_id=snapshot_id,
+            )
             self._logger.info(
                 "chat.retrieval_completed",
                 session_id=str(chat_session.id),
@@ -373,8 +397,14 @@ class ChatService:
             )
             return
 
-        source_ids = self._deduplicate_source_ids(retrieved_chunks)
-        source_map = await self._load_source_map(source_ids)
+        source_map = await self._load_source_map(self._deduplicate_source_ids(retrieved_chunks))
+        assembled = self._context_assembler.assemble(
+            chunks=retrieved_chunks,
+            query=text,
+            source_map=source_map,
+        )
+        selected_chunks = retrieved_chunks[: assembled.retrieval_chunks_used]
+        source_ids = self._deduplicate_source_ids(selected_chunks)
         assistant_message = await self._persist_message(
             chat_session,
             role=MessageRole.ASSISTANT,
@@ -391,12 +421,7 @@ class ChatService:
         )
 
         content_buffer: list[str] = []
-        prompt = build_chat_prompt(
-            text,
-            retrieved_chunks,
-            self._persona_context,
-            source_map=source_map,
-        )
+        prompt = assembled.messages
         try:
             stream = self._llm_service.stream(prompt)
             if inspect.isawaitable(stream):
@@ -411,7 +436,7 @@ class ChatService:
                 assistant_message.content = "".join(content_buffer)
                 citations = CitationService.extract(
                     assistant_message.content,
-                    retrieved_chunks,
+                    selected_chunks,
                     source_map,
                     self._max_citations_per_response,
                 )
@@ -420,6 +445,13 @@ class ChatService:
                 assistant_message.token_count_prompt = event.token_count_prompt
                 assistant_message.token_count_completion = event.token_count_completion
                 assistant_message.citations = [citation.to_dict() for citation in citations]
+                assistant_message.content_type_spans = [
+                    {"start": span.start, "end": span.end, "type": span.type}
+                    for span in compute_content_type_spans(
+                        assistant_message.content,
+                        promotions=assembled.included_promotions,
+                    )
+                ]
                 assistant_message.config_commit_hash = self._persona_context.config_commit_hash
                 assistant_message.config_content_hash = self._persona_context.config_content_hash
                 await self._session.commit()
@@ -437,7 +469,7 @@ class ChatService:
                     token_count_prompt=event.token_count_prompt,
                     token_count_completion=event.token_count_completion,
                     model_name=event.model_name,
-                    retrieved_chunks_count=len(retrieved_chunks),
+                    retrieved_chunks_count=len(selected_chunks),
                 )
         except Exception as error:
             assistant_message.content = "".join(content_buffer) or FAILED_ASSISTANT_CONTENT
@@ -537,6 +569,7 @@ class ChatService:
         idempotency_key: str | None = None,
         parent_message_id: uuid.UUID | None = None,
         citations: list[dict[str, object]] | None = None,
+        content_type_spans: list[dict[str, object]] | None = None,
         config_commit_hash: str | None = None,
         config_content_hash: str | None = None,
     ) -> Message:
@@ -551,6 +584,7 @@ class ChatService:
             snapshot_id=snapshot_id,
             source_ids=source_ids,
             citations=citations,
+            content_type_spans=content_type_spans,
             model_name=model_name,
             token_count_prompt=token_count_prompt,
             token_count_completion=token_count_completion,
@@ -562,6 +596,52 @@ class ChatService:
         await self._session.commit()
         await self._session.refresh(message)
         return message
+
+    async def _load_history(
+        self,
+        session_id: uuid.UUID,
+        exclude_message_id: uuid.UUID,
+    ) -> list[Message]:
+        result = await self._session.execute(
+            select(Message)
+            .where(
+                Message.session_id == session_id,
+                Message.id != exclude_message_id,
+                Message.status.in_([MessageStatus.RECEIVED, MessageStatus.COMPLETE]),
+            )
+            .order_by(Message.created_at)
+        )
+        return list(result.scalars().all())
+
+    async def _do_rewrite(
+        self,
+        text: str,
+        chat_session: Session,
+        user_message: Message,
+    ) -> str:
+        history = await self._load_history(chat_session.id, exclude_message_id=user_message.id)
+        rewrite_result = await self._query_rewrite_service.rewrite(
+            text,
+            history,
+            session_id=str(chat_session.id),
+        )
+        if rewrite_result.is_rewritten:
+            user_message_id = str(user_message.id)
+            user_message.rewritten_query = rewrite_result.query
+            try:
+                await self._session.commit()
+                await self._session.refresh(user_message)
+            except Exception as error:
+                await self._session.rollback()
+                await self._session.refresh(chat_session)
+                await self._session.refresh(user_message)
+                self._logger.warning(
+                    "chat.rewrite_persist_failed",
+                    error=error.__class__.__name__,
+                    session_id=str(chat_session.id),
+                    user_message_id=user_message_id,
+                )
+        return rewrite_result.query
 
     async def _check_idempotency(
         self,

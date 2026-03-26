@@ -125,21 +125,27 @@ Phase outcome: full-featured dialog with persona, citations, memory, promotions.
   - **Verification:** response with citation → correct URL; offline source → "Book, chapter N, p. M"
   - Tasks: citation prompt instructions, source_id extraction, URL/text substitution, SSE citation event
 
-- [ ] **S4-04: Query rewriting**
+- [x] **S4-04: Query rewriting**
       LLM-based reformulation with history context. Fail-open on timeout. Token budget.
   - **Outcome:** multi-turn dialog yields relevant retrieval
   - **Verification:** "tell me more" → reformulated → better retrieval; timeout → fallback to original
   - Tasks: rewrite prompt, timeout handling, token budget trimming
   - **Parallel pair:** S5-01 (Chat UI) — pure backend vs pure frontend, zero file overlap
 
-- [ ] **S4-05: Promotions + context assembly**
-      Backend parses `PROMOTIONS.md`: filter expired, inject into prompt by priority rules (high/medium/low). No more than one recommendation per response. Full context assembly of all prompt layers except conversation memory (delivered in S4-06): system safety → IDENTITY → SOUL → BEHAVIOR → PROMOTIONS → retrieval → user query. Token budget management (`retrieval_context_budget`). Content type markup (fact/inference/recommendation). Conversation memory slot is reserved but populated in S4-06.
-  - **Outcome:** prompt assembly with all layers including promotions, token budgets, and content type markup; conversation memory slot is a placeholder until S4-06
+- [x] **S4-05: Promotions + context assembly**
+      Backend parses `PROMOTIONS.md`: filter expired, inject into prompt by priority rules (high/medium/low). No more than one recommendation per response. Full context assembly of all prompt layers except conversation memory (delivered in S4-07): system safety → IDENTITY → SOUL → BEHAVIOR → PROMOTIONS → retrieval → user query. Token budget management (`retrieval_context_budget`). Content type markup (fact/inference/recommendation). Conversation memory slot is reserved but populated in S4-07.
+  - **Outcome:** prompt assembly with all layers including promotions, token budgets, and content type markup; conversation memory slot is a placeholder until S4-07
   - **Verification:** promo with expired date → not in prompt; all layers present; when budget exceeded — retrieval is trimmed; response distinguishes content types
   - Tasks: PROMOTIONS.md parser, expiry filter, priority-based inclusion, prompt builder service, token counting, budget trimming, content type instructions
   - **Parallel pair:** S5-02 (Chat polish) — backend prompt work vs frontend components, zero file overlap
 
-- [ ] **S4-06: Conversation memory**
+- [ ] **S4-06: Lightweight knowledge processing migration**
+      Replace the remaining Docling-centric implementation with the lightweight local core and external-heavy processing architecture defined in canonical docs. Keep Qdrant local, preserve the current chunk contract, and introduce routing policy `local-first, external-on-complexity`: lightweight local parsing by default, Google Cloud Document AI as an external fallback for complex documents, Gemini Embedding 2 as the external embedding layer.
+  - **Outcome:** the knowledge contour matches the canonical lightweight architecture without local heavy ML dependencies
+  - **Verification:** Docling and local ML stacks are absent from runtime dependencies; supported text-centric formats still ingest successfully through the lightweight path; complex documents route through the external fallback; Qdrant payloads and citations remain compatible
+  - Tasks: provider-agnostic document processing interface, Document AI adapter, routing rules, normalized chunk contract validation, dependency cleanup, regression coverage for local path and external fallback
+
+- [ ] **S4-07: Conversation memory**
       Dialog history + summary for long conversations. Trimming when token budget exceeded. Session management.
   - **Outcome:** long conversations retain context
   - **Verification:** 20+ messages → context preserved; summary generated when limit reached
@@ -169,7 +175,7 @@ Phase outcome: full-featured web interface for visitors and the owner.
   - **Outcome:** owner manages sources and knowledge versions through the interface
   - **Verification:** upload file → see processing progress → status done; create snapshot → publish → twin responds; rollback → previous version
   - Tasks: file upload component, source list, status polling, delete confirmation, snapshot list, publish/rollback buttons, draft test view
-  - **Parallel pair:** S4-06 (Conversation memory) — admin frontend vs backend dialog, zero file overlap
+  - **Parallel pair:** S4-07 (Conversation memory) — admin frontend vs backend dialog, zero file overlap
 
 ### Phase 6: Commerce
 
@@ -238,7 +244,7 @@ Phase outcome: improved retrieval and answer quality driven by data.
       Hierarchical indexing for books. Search by child, context from parent.
   - **Outcome:** long documents provide richer context
   - **Verification:** book → hierarchical chunks → retrieval returns child + parent
-  - Tasks: hierarchy extraction from Docling, parent-child linking, context expansion
+  - Tasks: hierarchy extraction from the normalized parsing pipeline, parent-child linking, context expansion
   - **Parallel pair:** S9-01 (Chunk enrichment) — both modify ingestion pipeline but touch different stages
 
 - [ ] **S9-03: BGE-M3 fallback**

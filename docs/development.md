@@ -30,6 +30,7 @@ Simplicity is not laziness. It is the discipline of doing the minimum that solve
 - If a solution requires a comment explaining "why this works," it is probably too clever.
 - Do not add configuration for things that have one correct value. Do not add feature flags for things that are not features.
 - Three similar lines of code are better than a premature abstraction.
+- Cheap-VPS-first is a hard constraint. Local ML frameworks, CUDA runtimes, and heavyweight inference/OCR stacks MUST NOT be added to project environments or Docker images. If a capability requires local ML to work, the design is wrong for this project.
 
 ### DRY — Don't Repeat Yourself
 
@@ -79,6 +80,7 @@ raise NotImplementedError("Ingestion task enqueue — implemented in S2-01")
 ```
 
 Requirements for stubs:
+
 - The TODO MUST reference a specific story ID from `docs/plan.md` (e.g., `S2-01`).
 - The TODO MUST describe **what** the real implementation does and **how** it integrates.
 - The stub MUST fail loudly (`raise NotImplementedError`) — never return fake data or silently succeed.
@@ -93,6 +95,8 @@ Requirements for stubs:
 The measure of progress is working software that delivers value — not the number of files created, meetings held, or stories in the backlog. The project MUST be able to respond to change rather than rigidly follow an initial plan.
 
 ### 2. Simplicity is a first-class concern
+
+- Cheap-VPS-first is a hard constraint. Local ML frameworks, CUDA runtimes, and heavyweight inference/OCR stacks MUST NOT be added to project environments or Docker images. If a capability requires local ML to work, the design is wrong for this project.
 
 Complexity is a hidden tax on development, maintenance, onboarding, and operations. Simplicity applies to code, APIs, configuration, processes, and the system lifecycle. Maximize the amount of work not done.
 
@@ -184,6 +188,7 @@ If the team does the same thing manually more than twice, automate it. Manual pr
 Architecture Decision Records are the project's memory. Without them, in 3-6 months nobody remembers why the system is built this way.
 
 In ProxyMind, architectural decisions are captured in:
+
 - `docs/architecture.md` — system-level architecture.
 - `docs/spec.md` — tools, versions, contracts.
 - Design specs in `docs/superpowers/specs/` — per-story decisions with rationale.
@@ -207,12 +212,12 @@ Write code you would be comfortable maintaining a year from now.
 
 ## Part 4: How SOLID/KISS/DRY/YAGNI Relate to the Bigger Picture
 
-| Principle | Is a specific instance of | Works only together with |
-|-----------|--------------------------|--------------------------|
-| KISS | Simplicity (principle 2) | Readability (4), refactoring (5) |
-| YAGNI | "Do not build what is not needed" (2) | Refactoring (5), changeability (3) |
-| SOLID | Changeability and managed growth (3) | Simplicity (2) — over-applying SOLID creates unnecessary abstractions |
-| DRY | Knowledge deduplication (4) | Simplicity (2) — premature DRY creates wrong abstractions |
+| Principle | Is a specific instance of             | Works only together with                                              |
+| --------- | ------------------------------------- | --------------------------------------------------------------------- |
+| KISS      | Simplicity (principle 2)              | Readability (4), refactoring (5)                                      |
+| YAGNI     | "Do not build what is not needed" (2) | Refactoring (5), changeability (3)                                    |
+| SOLID     | Changeability and managed growth (3)  | Simplicity (2) — over-applying SOLID creates unnecessary abstractions |
+| DRY       | Knowledge deduplication (4)           | Simplicity (2) — premature DRY creates wrong abstractions             |
 
 These four are local heuristics. They are useful but insufficient on their own. The engineering principles in Part 3 are the foundation; SOLID/KISS/DRY/YAGNI are tools for applying them at the code level.
 

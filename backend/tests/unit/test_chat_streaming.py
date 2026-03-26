@@ -25,9 +25,12 @@ from app.services.chat import (
     NoActiveSnapshotError,
     SessionNotFoundError,
 )
+from app.services.context_assembler import AssembledPrompt, ContextAssembler
 from app.services.citation import SourceInfo
 from app.services.llm_types import LLMError, LLMStreamEnd, LLMToken
 from app.services.prompt import NO_CONTEXT_REFUSAL
+from app.services.promotions import PromotionsService
+from app.services.query_rewrite import RewriteResult
 from app.services.qdrant import RetrievedChunk
 from app.services.snapshot import SnapshotService
 
@@ -92,6 +95,8 @@ def _make_service(
     stream_error: Exception | None = None,
     min_retrieved_chunks: int = 1,
     max_citations_per_response: int = 5,
+    rewritten_query: str | None = None,
+    rewrite_error: Exception | None = None,
 ) -> tuple[ChatService, SimpleNamespace, SimpleNamespace]:
     retrieval_service = SimpleNamespace(search=AsyncMock())
     if isinstance(retrieval_result, Exception):
@@ -105,12 +110,30 @@ def _make_service(
     else:
         llm_service.stream.return_value = _fake_stream(*stream_tokens)
 
+    async def _rewrite(query, history, **kwargs):
+        if rewrite_error is not None:
+            raise rewrite_error
+        if rewritten_query is None:
+            return RewriteResult(query=query, is_rewritten=False, original_query=query)
+        return RewriteResult(query=rewritten_query, is_rewritten=True, original_query=query)
+
+    rewrite_service = SimpleNamespace(rewrite=AsyncMock(side_effect=_rewrite))
+    context_assembler = ContextAssembler(
+        persona_context=persona_context,
+        promotions_service=PromotionsService(promotions_text=""),
+        retrieval_context_budget=4096,
+        max_citations=max_citations_per_response,
+        min_retrieved_chunks=min_retrieved_chunks,
+        max_promotions_per_response=1,
+    )
+
     service = ChatService(
         session=db_session,
         snapshot_service=SnapshotService(session=db_session),
         retrieval_service=retrieval_service,
         llm_service=llm_service,
-        persona_context=persona_context,
+        query_rewrite_service=rewrite_service,
+        context_assembler=context_assembler,
         min_retrieved_chunks=min_retrieved_chunks,
         max_citations_per_response=max_citations_per_response,
     )
@@ -227,6 +250,7 @@ async def test_stream_answer_persists_complete_message(
     assert messages[1].status is MessageStatus.COMPLETE
     assert messages[1].content == "answer"
     assert messages[1].source_ids == [source_id]
+    assert messages[1].content_type_spans == [{"start": 0, "end": 6, "type": "inference"}]
     assert messages[1].parent_message_id == messages[0].id
 
 
@@ -252,7 +276,46 @@ async def test_stream_answer_refusal_when_no_chunks(
     citation_events = [event for event in events if isinstance(event, ChatStreamCitations)]
     assert len(citation_events) == 1
     assert citation_events[0].citations == []
+    messages = await _message_rows(db_session, session.id)
+    assert messages[1].content_type_spans is None
     llm_service.stream.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_llm_prompt_uses_original_query_when_rewrite_occurs(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    service, retrieval_service, llm_service = _make_service(
+        db_session,
+        persona_context=persona_context,
+        retrieval_result=[_chunk()],
+        stream_tokens=("answer",),
+        rewritten_query="expanded query",
+    )
+    session = await service.create_session()
+    captured_prompt_text: dict[str, str] = {}
+
+    def _capture_assemble(*, chunks, query, source_map):
+        captured_prompt_text["text"] = query
+        return AssembledPrompt(
+            messages=[{"role": "user", "content": query}],
+            token_estimate=1,
+            included_promotions=[],
+            retrieval_chunks_used=len(chunks),
+            retrieval_chunks_total=len(chunks),
+            layer_token_counts={},
+        )
+
+    monkeypatch.setattr(service._context_assembler, "assemble", _capture_assemble)
+
+    await _collect_events(service, session_id=session.id, text="original question")
+
+    retrieval_service.search.assert_awaited_once_with("expanded query", snapshot_id=session.snapshot_id)
+    llm_service.stream.assert_called_once()
+    assert captured_prompt_text["text"] == "original question"
 
 
 @pytest.mark.asyncio
@@ -273,6 +336,29 @@ async def test_stream_answer_yields_error_on_llm_failure(
 
     assert len([event for event in events if isinstance(event, ChatStreamError)]) == 1
     messages = await _message_rows(db_session, session.id)
+    assert messages[1].status is MessageStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_stream_answer_persists_failed_assistant_when_rewrite_raises(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    service, retrieval_service, llm_service = _make_service(
+        db_session,
+        persona_context=persona_context,
+        rewrite_error=RuntimeError("rewrite exploded"),
+    )
+    session = await service.create_session()
+
+    with pytest.raises(RuntimeError, match="rewrite exploded"):
+        await _collect_events(service, session_id=session.id, text="Q?")
+
+    retrieval_service.search.assert_not_awaited()
+    llm_service.stream.assert_not_called()
+    messages = await _message_rows(db_session, session.id)
+    assert [message.role for message in messages] == [MessageRole.USER, MessageRole.ASSISTANT]
     assert messages[1].status is MessageStatus.FAILED
 
 

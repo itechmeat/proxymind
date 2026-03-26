@@ -20,8 +20,11 @@ from app.db.models.enums import (
 from app.db.models.knowledge import KnowledgeSnapshot
 from app.persona.loader import PersonaContext
 from app.services.chat import ChatService, NoActiveSnapshotError, SessionNotFoundError
+from app.services.context_assembler import ContextAssembler
 from app.services.llm_types import LLMError, LLMResponse
 from app.services.prompt import NO_CONTEXT_REFUSAL
+from app.services.promotions import PromotionsService
+from app.services.query_rewrite import RewriteResult
 from app.services.qdrant import RetrievedChunk
 from app.services.retrieval import RetrievalError
 from app.services.snapshot import SnapshotService
@@ -72,6 +75,8 @@ def _make_service(
     retrieval_result: list[RetrievedChunk] | Exception | None = None,
     llm_result: LLMResponse | Exception | None = None,
     min_retrieved_chunks: int = 1,
+    rewritten_query: str | None = None,
+    rewrite_error: Exception | None = None,
 ) -> tuple[ChatService, SimpleNamespace, SimpleNamespace]:
     retrieval_service = SimpleNamespace(search=AsyncMock())
     if isinstance(retrieval_result, Exception):
@@ -85,12 +90,30 @@ def _make_service(
     elif llm_result is not None:
         llm_service.complete.return_value = llm_result
 
+    async def _rewrite(query, history, **kwargs):
+        if rewrite_error is not None:
+            raise rewrite_error
+        if rewritten_query is None:
+            return RewriteResult(query=query, is_rewritten=False, original_query=query)
+        return RewriteResult(query=rewritten_query, is_rewritten=True, original_query=query)
+
+    rewrite_service = SimpleNamespace(rewrite=AsyncMock(side_effect=_rewrite))
+    context_assembler = ContextAssembler(
+        persona_context=persona_context,
+        promotions_service=PromotionsService(promotions_text=""),
+        retrieval_context_budget=4096,
+        max_citations=5,
+        min_retrieved_chunks=min_retrieved_chunks,
+        max_promotions_per_response=1,
+    )
+
     service = ChatService(
         session=db_session,
         snapshot_service=SnapshotService(session=db_session),
         retrieval_service=retrieval_service,
         llm_service=llm_service,
-        persona_context=persona_context,
+        query_rewrite_service=rewrite_service,
+        context_assembler=context_assembler,
         min_retrieved_chunks=min_retrieved_chunks,
     )
     return service, retrieval_service, llm_service
@@ -177,6 +200,9 @@ async def test_answer_saves_assistant_response_with_chunks(
     messages = await _message_rows(db_session, chat_session.id)
     assert [message.role for message in messages] == [MessageRole.USER, MessageRole.ASSISTANT]
     assert messages[1].status is MessageStatus.COMPLETE
+    assert messages[1].content_type_spans == [
+        {"start": 0, "end": len("Grounded answer"), "type": "inference"}
+    ]
     session_row = await db_session.get(Session, chat_session.id)
     assert session_row is not None
     assert session_row.message_count == 2
@@ -188,6 +214,7 @@ async def test_answer_returns_refusal_without_llm_when_no_chunks(
     persona_context: PersonaContext,
 ) -> None:
     active_snapshot = await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    active_snapshot_id = active_snapshot.id
     service, retrieval_service, llm_service = _make_service(
         db_session,
         persona_context=persona_context,
@@ -202,6 +229,7 @@ async def test_answer_returns_refusal_without_llm_when_no_chunks(
     assert result.assistant_message.status is MessageStatus.COMPLETE
     assert result.assistant_message.snapshot_id == active_snapshot.id
     assert result.assistant_message.source_ids == []
+    assert result.assistant_message.content_type_spans is None
     retrieval_service.search.assert_awaited_once()
     llm_service.complete.assert_not_awaited()
 
@@ -473,3 +501,81 @@ async def test_config_hashes_logged_on_refusal(
     assert len(refusal_logs) == 1
     assert refusal_logs[0]["config_commit_hash"] == persona_context.config_commit_hash
     assert refusal_logs[0]["config_content_hash"] == persona_context.config_content_hash
+
+
+@pytest.mark.asyncio
+async def test_answer_continues_when_rewrite_persistence_fails(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active_snapshot = await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    active_snapshot_id = active_snapshot.id
+    service, retrieval_service, llm_service = _make_service(
+        db_session,
+        persona_context=persona_context,
+        retrieval_result=[_chunk()],
+        llm_result=LLMResponse(
+            content="Grounded answer",
+            model_name="openai/gpt-4o",
+            token_count_prompt=12,
+            token_count_completion=6,
+        ),
+        rewritten_query="expanded question",
+    )
+    chat_session = await service.create_session()
+
+    original_commit = service._session.commit
+    commit_calls = 0
+
+    async def _commit_with_one_failure() -> None:
+        nonlocal commit_calls
+        commit_calls += 1
+        if commit_calls == 2:
+            raise RuntimeError("rewrite persist failed")
+        await original_commit()
+
+    monkeypatch.setattr(service._session, "commit", _commit_with_one_failure)
+
+    with structlog.testing.capture_logs() as logs:
+        result = await service.answer(session_id=chat_session.id, text="Question?")
+
+    assert result.assistant_message.content == "Grounded answer"
+    assert result.assistant_message.snapshot_id == active_snapshot_id
+    retrieval_service.search.assert_awaited_once_with(
+        "expanded question",
+        snapshot_id=active_snapshot_id,
+    )
+    llm_service.complete.assert_awaited_once()
+
+    persist_logs = [entry for entry in logs if entry.get("event") == "chat.rewrite_persist_failed"]
+    assert len(persist_logs) == 1
+    assert persist_logs[0]["error"] == "RuntimeError"
+
+    messages = await _message_rows(db_session, chat_session.id)
+    assert [message.role for message in messages] == [MessageRole.USER, MessageRole.ASSISTANT]
+    assert messages[0].rewritten_query is None
+    assert messages[1].status is MessageStatus.COMPLETE
+
+
+@pytest.mark.asyncio
+async def test_answer_persists_failed_assistant_when_rewrite_raises(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    service, retrieval_service, llm_service = _make_service(
+        db_session,
+        persona_context=persona_context,
+        rewrite_error=RuntimeError("rewrite exploded"),
+    )
+    chat_session = await service.create_session()
+
+    with pytest.raises(RuntimeError, match="rewrite exploded"):
+        await service.answer(session_id=chat_session.id, text="Question?")
+
+    retrieval_service.search.assert_not_awaited()
+    llm_service.complete.assert_not_awaited()
+    messages = await _message_rows(db_session, chat_session.id)
+    assert [message.role for message in messages] == [MessageRole.USER, MessageRole.ASSISTANT]
+    assert messages[1].status is MessageStatus.FAILED

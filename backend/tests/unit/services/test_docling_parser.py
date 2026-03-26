@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import app.services.docling_parser as docling_parser
 from app.db.models.enums import SourceType
 from app.services.docling_parser import DoclingParser
 
@@ -208,3 +209,50 @@ async def test_parse_corrupt_pdf_raises_exception() -> None:
             "corrupt.pdf",
             SourceType.PDF,
         )
+
+
+def test_chunk_blocks_split_oversized_block_to_respect_budget() -> None:
+    parser = DoclingParser(chunk_max_tokens=10)
+
+    chunks = parser._chunk_blocks(
+        [
+            docling_parser._ParsedBlock(
+                text="word " * 40,
+                headings=("Heading",),
+                anchor_page=3,
+            )
+        ]
+    )
+
+    assert len(chunks) > 1
+    assert all(chunk.token_count <= 10 for chunk in chunks)
+    assert all(chunk.anchor_page == 3 for chunk in chunks)
+    assert all(chunk.anchor_chapter == "Heading" for chunk in chunks)
+
+
+def test_parse_docx_rejects_oversized_document_xml(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeZipFile:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def __enter__(self) -> FakeZipFile:
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        @staticmethod
+        def getinfo(_name: str) -> SimpleNamespace:
+            return SimpleNamespace(
+                file_size=docling_parser._MAX_DOCX_XML_BYTES + 1,
+                compress_size=1024,
+            )
+
+        @staticmethod
+        def read(_info: object) -> bytes:
+            raise AssertionError("read should not be reached for oversized document.xml")
+
+    monkeypatch.setattr(docling_parser, "ZipFile", FakeZipFile)
+
+    with pytest.raises(ValueError, match="too large"):
+        DoclingParser._parse_docx(b"fake-docx")

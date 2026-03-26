@@ -20,8 +20,6 @@ from app.db.models.enums import (
 logger = structlog.get_logger(__name__)
 
 if TYPE_CHECKING:
-    from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
-
     from app.core.config import Settings
     from app.services.batch_orchestrator import BatchOrchestrator
     from app.services.docling_parser import DoclingParser
@@ -30,6 +28,7 @@ if TYPE_CHECKING:
     from app.services.qdrant import QdrantService
     from app.services.snapshot import SnapshotService
     from app.services.storage import StorageService
+    from app.services.token_counter import ApproximateTokenizer
 
 
 @dataclass(slots=True)
@@ -40,7 +39,7 @@ class PipelineServices:
     qdrant_service: QdrantService
     snapshot_service: SnapshotService
     gemini_content_service: GeminiContentService
-    tokenizer: HuggingFaceTokenizer
+    tokenizer: ApproximateTokenizer
     settings: Settings
     default_language: str
     path_a_text_threshold_pdf: int
