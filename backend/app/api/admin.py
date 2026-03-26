@@ -52,7 +52,7 @@ from app.api.snapshot_schemas import (
     RollbackSnapshotResponse,
     SnapshotResponse,
 )
-from app.api.source_schemas import SourceDeleteResponse
+from app.api.source_schemas import SourceDeleteResponse, SourceListItem
 from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
 from app.db.models import BackgroundTask, BatchJob, Chunk, Source
 from app.db.models.enums import (
@@ -379,6 +379,27 @@ async def get_batch_job_detail(
     return BatchJobDetailResponse.from_batch_job(batch_job)
 
 
+@router.get("/sources", response_model=list[SourceListItem])
+async def list_sources(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
+    knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
+) -> list[SourceListItem]:
+    # TODO(S7-01): Protect /api/admin/* with Bearer auth before any non-local deployment.
+    sources = (
+        await session.scalars(
+            select(Source)
+            .where(
+                Source.agent_id == agent_id,
+                Source.knowledge_base_id == knowledge_base_id,
+                Source.status != SourceStatus.DELETED,
+            )
+            .order_by(Source.created_at.desc())
+        )
+    ).all()
+    return [SourceListItem.model_validate(source) for source in sources]
+
+
 @router.delete("/sources/{source_id}", response_model=SourceDeleteResponse)
 async def delete_source(
     source_id: uuid.UUID,
@@ -433,6 +454,28 @@ async def list_snapshots(
         include_archived=include_archived,
     )
     return [SnapshotResponse.model_validate(snapshot) for snapshot in snapshots]
+
+
+@router.post(
+    "/snapshots",
+    response_model=SnapshotResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def create_snapshot(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    snapshot_service: Annotated[SnapshotService, Depends(get_snapshot_service)],
+    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
+    knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
+) -> SnapshotResponse:
+    # TODO(S7-01): Protect /api/admin/* with Bearer auth before any non-local deployment.
+    snapshot = await snapshot_service.get_or_create_draft(
+        session=session,
+        agent_id=agent_id,
+        knowledge_base_id=knowledge_base_id,
+    )
+    await session.commit()
+    await session.refresh(snapshot)
+    return SnapshotResponse.model_validate(snapshot)
 
 
 @router.get("/snapshots/{snapshot_id}", response_model=SnapshotResponse)

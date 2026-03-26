@@ -150,7 +150,7 @@ Phase outcome: full-featured dialog with persona, citations, memory, promotions.
 
 Phase outcome: full-featured web interface for visitors and the owner.
 
-- [*] **S5-01: Chat UI**
+- [x] **S5-01: Chat UI**
       React + Vite + Bun. Chat interface: input field, message feed, SSE streaming, twin avatar and name.
   - **Outcome:** visitor can chat with the twin in the browser
   - **Verification:** open → send message → streaming response → history on refresh
@@ -164,7 +164,7 @@ Phase outcome: full-featured web interface for visitors and the owner.
   - Tasks: citation parser, collapsible block component, link rendering, avatar upload, profile metadata form, display in chat header
   - **Parallel pair:** S4-05 (Promotions + context assembly) — frontend vs backend, zero file overlap
 
-- [ ] **S5-03: Admin UI — knowledge management**
+- [x] **S5-03: Admin UI — knowledge management**
       Source upload (drag & drop), source list with ingestion statuses, soft delete. Snapshot list, create draft, publish, rollback, draft testing.
   - **Outcome:** owner manages sources and knowledge versions through the interface
   - **Verification:** upload file → see processing progress → status done; create snapshot → publish → twin responds; rollback → previous version

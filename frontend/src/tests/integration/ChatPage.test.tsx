@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "@/App";
 import { SESSION_STORAGE_KEY } from "@/hooks/useSession";
@@ -114,6 +114,10 @@ describe("ChatPage integration", () => {
 
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("renders the full chat flow through the root route", async () => {
