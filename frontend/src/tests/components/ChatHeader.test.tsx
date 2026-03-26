@@ -3,6 +3,7 @@ import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 
 import { ChatHeader } from "@/components/ChatHeader";
+import { translate } from "@/lib/i18n";
 import { strings } from "@/lib/strings";
 
 function renderHeader(ui: React.ReactNode) {
@@ -50,7 +51,7 @@ describe("ChatHeader", () => {
     renderHeader(<ChatHeader adminMode name="ProxyMind" />);
 
     expect(
-      screen.getByRole("link", { name: strings.adminLink }),
+      screen.getByRole("link", { name: translate("admin.link") }),
     ).toHaveAttribute("href", "/admin");
   });
 
@@ -65,6 +66,8 @@ describe("ChatHeader", () => {
   it("hides the admin link when admin mode is disabled", () => {
     renderHeader(<ChatHeader adminMode={false} name="ProxyMind" />);
 
-    expect(screen.queryByRole("link", { name: strings.adminLink })).toBeNull();
+    expect(
+      screen.queryByRole("link", { name: translate("admin.link") }),
+    ).toBeNull();
   });
 });

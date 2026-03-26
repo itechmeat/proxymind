@@ -45,7 +45,6 @@ export const strings = {
   profileSaveFailed: "Failed to save the profile.",
   profileUploadFailed: "Failed to upload the avatar.",
   profileRemoveFailed: "Failed to remove the avatar.",
-  cancel: "Cancel",
   requestFailed: (status: number) => `Request failed with status ${status}`,
   relativeTime: relativeTimeStrings,
 } as const;

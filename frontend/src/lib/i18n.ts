@@ -1,12 +1,9 @@
 import i18n from "i18next";
 import { initReactI18next, useTranslation } from "react-i18next";
 
+import { appLanguage } from "@/lib/config";
 import en from "@/locales/en";
 import type { SnapshotStatus, SourceStatus, SourceType } from "@/types/admin";
-
-const defaultLanguage =
-  (import.meta.env.VITE_DEFAULT_LANGUAGE ?? "en").trim().toLowerCase() || "en";
-const activeLanguage = defaultLanguage.split(/[-_]/)[0] || "en";
 
 const resources = {
   en: {
@@ -16,9 +13,7 @@ const resources = {
 
 if (!i18n.isInitialized) {
   void i18n.use(initReactI18next).init({
-    lng: resources[activeLanguage as keyof typeof resources]
-      ? activeLanguage
-      : "en",
+    lng: resources[appLanguage as keyof typeof resources] ? appLanguage : "en",
     fallbackLng: "en",
     initImmediate: false,
     resources,

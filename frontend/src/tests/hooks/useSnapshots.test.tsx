@@ -189,6 +189,57 @@ describe("useSnapshots", () => {
     );
   });
 
+  it("clears the busy state when a mutation fails", async () => {
+    const actionFailed = translate("admin.snapshot.actionFailed");
+
+    vi.mocked(adminApi.getSnapshots).mockResolvedValueOnce([
+      {
+        id: "draft-1",
+        agent_id: null,
+        knowledge_base_id: null,
+        name: "Draft",
+        description: null,
+        status: "draft",
+        published_at: null,
+        activated_at: null,
+        archived_at: null,
+        chunk_count: 0,
+        created_at: "2026-03-25T12:00:00Z",
+        updated_at: "2026-03-25T12:00:00Z",
+      },
+    ]);
+    vi.mocked(adminApi.publishSnapshot).mockRejectedValue(
+      new Error(actionFailed),
+    );
+
+    const { result } = renderHook(
+      () => {
+        const snapshots = useSnapshots();
+        const toast = useToast();
+
+        return {
+          ...snapshots,
+          toasts: toast.toasts,
+        };
+      },
+      { wrapper },
+    );
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.publish("draft-1", false);
+    });
+
+    expect(result.current.busySnapshotId).toBeNull();
+    expect(result.current.toasts.map((toast) => toast.message)).toEqual(
+      expect.arrayContaining([actionFailed]),
+    );
+    expect(adminApi.getSnapshots).toHaveBeenCalledTimes(1);
+  });
+
   it("runs publish, activate, and rollback mutations", async () => {
     vi.mocked(adminApi.getSnapshots)
       .mockResolvedValueOnce([

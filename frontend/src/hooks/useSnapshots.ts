@@ -82,27 +82,29 @@ export function useSnapshots(includeArchived = false) {
     ) => {
       setBusySnapshotId(snapshotId);
       try {
-        await operation();
-        pushToast({ message: successMessage, tone: "success" });
-      } catch (error) {
-        pushToast({
-          message:
-            error instanceof Error ? error.message : fallbackErrorMessage,
-          tone: "error",
-        });
-        return;
-      }
+        try {
+          await operation();
+          pushToast({ message: successMessage, tone: "success" });
+        } catch (error) {
+          pushToast({
+            message:
+              error instanceof Error ? error.message : fallbackErrorMessage,
+            tone: "error",
+          });
+          return;
+        }
 
-      try {
-        await refreshSnapshots();
-      } catch (error) {
-        pushToast({
-          message:
-            error instanceof Error
-              ? error.message
-              : translate("admin.snapshot.refreshFailed"),
-          tone: "warning",
-        });
+        try {
+          await refreshSnapshots();
+        } catch (error) {
+          pushToast({
+            message:
+              error instanceof Error
+                ? error.message
+                : translate("admin.snapshot.refreshFailed"),
+            tone: "warning",
+          });
+        }
       } finally {
         setBusySnapshotId(null);
       }
