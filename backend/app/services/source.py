@@ -69,13 +69,19 @@ class SourceService:
             catalog_item_id=metadata.catalog_item_id,
             status=SourceStatus.PENDING,
         )
+        result_metadata: dict[str, object] | None = None
+        if skip_embedding:
+            result_metadata = {"skip_embedding": True}
+        if metadata.processing_hint != "auto":
+            result_metadata = {**(result_metadata or {}), "processing_hint": metadata.processing_hint}
+
         task = BackgroundTask(
             id=uuid.uuid7(),
             agent_id=DEFAULT_AGENT_ID,
             task_type=BackgroundTaskType.INGESTION,
             status=BackgroundTaskStatus.PENDING,
             source_id=source_id,
-            result_metadata={"skip_embedding": True} if skip_embedding else None,
+            result_metadata=result_metadata,
         )
         self._session.add_all([source, task])
 

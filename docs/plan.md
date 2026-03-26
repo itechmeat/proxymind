@@ -139,7 +139,7 @@ Phase outcome: full-featured dialog with persona, citations, memory, promotions.
   - Tasks: PROMOTIONS.md parser, expiry filter, priority-based inclusion, prompt builder service, token counting, budget trimming, content type instructions
   - **Parallel pair:** S5-02 (Chat polish) — backend prompt work vs frontend components, zero file overlap
 
-- [ ] **S4-06: Lightweight knowledge processing migration**
+- [x] **S4-06: Lightweight knowledge processing migration**
       Replace the remaining Docling-centric implementation with the lightweight local core and external-heavy processing architecture defined in canonical docs. Keep Qdrant local, preserve the current chunk contract, and introduce routing policy `local-first, external-on-complexity`: lightweight local parsing by default, Google Cloud Document AI as an external fallback for complex documents, Gemini Embedding 2 as the external embedding layer.
   - **Outcome:** the knowledge contour matches the canonical lightweight architecture without local heavy ML dependencies
   - **Verification:** Docling and local ML stacks are absent from runtime dependencies; supported text-centric formats still ingest successfully through the lightweight path; complex documents route through the external fallback; Qdrant payloads and citations remain compatible

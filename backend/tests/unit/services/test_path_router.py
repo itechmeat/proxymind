@@ -22,6 +22,7 @@ def _settings() -> SimpleNamespace:
         path_a_max_pdf_pages=6,
         path_a_max_audio_duration_sec=80,
         path_a_max_video_duration_sec=120,
+        document_ai_enabled=False,
     )
 
 

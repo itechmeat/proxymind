@@ -74,7 +74,7 @@ A stub is permitted **only** when the plan (`docs/plan.md`) describes future fun
 ```python
 # TODO(S2-01): Replace with arq task enqueue.
 # The ingestion worker picks up the task from Redis and processes the file
-# through the Docling pipeline (Path A or Path B based on format/size).
+# through the lightweight processing pipeline (Path A or Path B based on format/size).
 # See docs/plan.md S2-01 and docs/architecture.md § Knowledge circuit.
 raise NotImplementedError("Ingestion task enqueue — implemented in S2-01")
 ```

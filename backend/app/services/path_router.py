@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from io import BytesIO
 from typing import Protocol
 
+import structlog
 from pypdf import PdfReader
 from tinytag import TinyTag
 
@@ -14,6 +15,7 @@ class PathRouterSettings(Protocol):
     path_a_max_pdf_pages: int
     path_a_max_audio_duration_sec: int
     path_a_max_video_duration_sec: int
+    document_ai_enabled: bool
 
 
 @dataclass(slots=True, frozen=True)
@@ -28,6 +30,9 @@ class PathDecision:
     path: ProcessingPath | None
     reason: str
     rejected: bool
+
+
+logger = structlog.get_logger(__name__)
 
 
 def inspect_file(file_bytes: bytes, source_type: SourceType) -> FileMetadata:
@@ -57,7 +62,29 @@ def determine_path(
     source_type: SourceType,
     file_metadata: FileMetadata,
     settings: PathRouterSettings,
+    processing_hint: str = "auto",
 ) -> PathDecision:
+    if source_type is SourceType.PDF and processing_hint == "external":
+        if settings.document_ai_enabled:
+            return PathDecision(
+                path=ProcessingPath.PATH_C,
+                reason="Explicit external processing hint routed the PDF to Path C",
+                rejected=False,
+            )
+        logger.warning(
+            "path_router.document_ai_unavailable_for_external_hint",
+            source_type=source_type.value,
+            processing_hint=processing_hint,
+        )
+        return PathDecision(
+            path=ProcessingPath.PATH_B,
+            reason=(
+                "Document AI is not configured; the explicit external processing hint "
+                "falls back to Path B"
+            ),
+            rejected=False,
+        )
+
     if source_type is SourceType.IMAGE:
         return PathDecision(
             path=ProcessingPath.PATH_A,

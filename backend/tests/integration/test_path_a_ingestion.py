@@ -22,7 +22,7 @@ from app.db.models.enums import (
     SourceStatus,
     SourceType,
 )
-from app.services.docling_parser import ChunkData
+from app.services.document_processing import ChunkData
 from app.services.path_router import FileMetadata
 from app.services.qdrant import QdrantService
 from app.services.snapshot import SnapshotService
@@ -110,7 +110,7 @@ async def test_worker_processes_image_via_path_a_and_indexes_in_qdrant(
         "path_a_max_audio_duration_sec": 80,
         "path_a_max_video_duration_sec": 120,
         "storage_service": SimpleNamespace(download=AsyncMock(return_value=MINIMAL_PNG_BYTES)),
-        "docling_parser": SimpleNamespace(parse_and_chunk=AsyncMock()),
+        "document_processor": SimpleNamespace(parse_and_chunk=AsyncMock()),
         "embedding_service": SimpleNamespace(
             model="gemini-embedding-2-preview",
             dimensions=3,
@@ -187,7 +187,7 @@ async def test_worker_falls_back_to_path_b_when_pdf_text_is_too_long(
         "path_a_max_audio_duration_sec": 80,
         "path_a_max_video_duration_sec": 120,
         "storage_service": SimpleNamespace(download=AsyncMock(return_value=pdf_bytes)),
-        "docling_parser": SimpleNamespace(
+        "document_processor": SimpleNamespace(
             parse_and_chunk=AsyncMock(
                 return_value=[
                     ChunkData(
@@ -286,7 +286,7 @@ async def test_worker_preserves_skip_embedding_during_path_a_to_path_b_fallback(
         "path_a_max_audio_duration_sec": 80,
         "path_a_max_video_duration_sec": 120,
         "storage_service": SimpleNamespace(download=AsyncMock(return_value=pdf_bytes)),
-        "docling_parser": SimpleNamespace(
+        "document_processor": SimpleNamespace(
             parse_and_chunk=AsyncMock(
                 return_value=[
                     ChunkData(
@@ -383,7 +383,7 @@ async def test_worker_rejects_over_limit_media_before_persist(
         "path_a_max_audio_duration_sec": 80,
         "path_a_max_video_duration_sec": 120,
         "storage_service": SimpleNamespace(download=AsyncMock(return_value=b"media-bytes")),
-        "docling_parser": SimpleNamespace(parse_and_chunk=AsyncMock()),
+        "document_processor": SimpleNamespace(parse_and_chunk=AsyncMock()),
         "embedding_service": SimpleNamespace(
             model="gemini-embedding-2-preview",
             dimensions=3,

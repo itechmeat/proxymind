@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+from types import ModuleType
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -27,7 +29,12 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
         gemini_content_model="gemini-2.5-flash",
         gemini_file_upload_threshold_bytes=10 * 1024 * 1024,
         gemini_api_key=None,
+        document_ai_project_id=None,
+        document_ai_location="us",
+        document_ai_processor_id=None,
+        document_ai_enabled=False,
         chunk_max_tokens=1024,
+        path_c_min_chars_per_page=50,
         path_a_text_threshold_pdf=2000,
         path_a_text_threshold_media=500,
         path_a_max_pdf_pages=6,
@@ -68,16 +75,28 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
         captured_qdrant_kwargs.update(kwargs)
         return qdrant_service
 
-    monkeypatch.setattr("app.services.storage.StorageService", fake_storage_service)
-    monkeypatch.setattr("app.services.qdrant.QdrantService", fake_qdrant_service)
-    monkeypatch.setattr("app.services.docling_parser.DoclingParser", lambda **_kwargs: object())
-    monkeypatch.setattr("app.services.embedding.EmbeddingService", lambda **_kwargs: object())
-    monkeypatch.setattr(
-        "app.services.gemini_content.GeminiContentService",
-        lambda **_kwargs: gemini_content_service,
+    def install_stub(module_name: str, **attributes: object) -> None:
+        module = ModuleType(module_name)
+        for attribute_name, value in attributes.items():
+            setattr(module, attribute_name, value)
+        monkeypatch.setitem(sys.modules, module_name, module)
+
+    install_stub("app.services.storage", StorageService=fake_storage_service)
+    install_stub("app.services.qdrant", QdrantService=fake_qdrant_service)
+    install_stub(
+        "app.services.lightweight_parser",
+        LightweightParser=lambda **_kwargs: object(),
     )
-    monkeypatch.setattr("app.services.snapshot.SnapshotService", lambda: object())
-    monkeypatch.setattr("app.services.token_counter.ApproximateTokenizer", lambda: tokenizer)
+    install_stub("app.services.embedding", EmbeddingService=lambda **_kwargs: object())
+    install_stub("app.services.document_ai_parser", DocumentAIParser=lambda **_kwargs: object())
+    install_stub(
+        "app.services.gemini_content",
+        GeminiContentService=lambda **_kwargs: gemini_content_service,
+    )
+    install_stub("app.services.snapshot", SnapshotService=lambda: object())
+    install_stub("app.services.token_counter", ApproximateTokenizer=lambda: tokenizer)
+    install_stub("app.services.batch_embedding", BatchEmbeddingClient=lambda **_kwargs: object())
+    install_stub("app.services.batch_orchestrator", BatchOrchestrator=lambda **_kwargs: object())
 
     await main.on_startup(ctx)
 

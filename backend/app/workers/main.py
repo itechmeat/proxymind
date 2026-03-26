@@ -20,9 +20,10 @@ DEFAULT_EMBEDDING_TASK_TYPE = "RETRIEVAL_DOCUMENT"
 async def on_startup(ctx: dict[str, Any]) -> None:
     from app.services.batch_embedding import BatchEmbeddingClient
     from app.services.batch_orchestrator import BatchOrchestrator
-    from app.services.docling_parser import DoclingParser
+    from app.services.document_ai_parser import DocumentAIParser
     from app.services.embedding import EmbeddingService
     from app.services.gemini_content import GeminiContentService
+    from app.services.lightweight_parser import LightweightParser
     from app.services.qdrant import QdrantService
     from app.services.snapshot import SnapshotService
     from app.services.storage import StorageService
@@ -71,12 +72,23 @@ async def on_startup(ctx: dict[str, Any]) -> None:
         qdrant_service=qdrant_service,
     )
     tokenizer = ApproximateTokenizer()
+    document_ai_parser = (
+        DocumentAIParser(
+            project_id=settings.document_ai_project_id,
+            location=settings.document_ai_location,
+            processor_id=settings.document_ai_processor_id,
+            chunk_max_tokens=settings.chunk_max_tokens,
+        )
+        if settings.document_ai_enabled
+        else None
+    )
     ctx["db_engine"] = engine
     ctx["session_factory"] = create_session_factory(engine)
     ctx["settings"] = settings
     ctx["storage_http_client"] = storage_http_client
     ctx["storage_service"] = storage_service
-    ctx["docling_parser"] = DoclingParser(chunk_max_tokens=settings.chunk_max_tokens)
+    ctx["document_processor"] = LightweightParser(chunk_max_tokens=settings.chunk_max_tokens)
+    ctx["document_ai_parser"] = document_ai_parser
     ctx["embedding_service"] = embedding_service
     ctx["gemini_content_service"] = gemini_content_service
     ctx["batch_embedding_client"] = batch_embedding_client
@@ -89,6 +101,7 @@ async def on_startup(ctx: dict[str, Any]) -> None:
     ctx["path_a_max_pdf_pages"] = settings.path_a_max_pdf_pages
     ctx["path_a_max_audio_duration_sec"] = settings.path_a_max_audio_duration_sec
     ctx["path_a_max_video_duration_sec"] = settings.path_a_max_video_duration_sec
+    ctx["path_c_min_chars_per_page"] = settings.path_c_min_chars_per_page
     await qdrant_service.ensure_collection()
     await storage_service.ensure_storage_root()
     logger.info("worker.startup.complete")

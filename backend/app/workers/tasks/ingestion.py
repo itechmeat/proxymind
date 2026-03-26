@@ -41,7 +41,8 @@ logger = structlog.get_logger(__name__)
 def _load_pipeline_services(ctx: dict[str, Any]) -> PipelineServices:
     try:
         storage_service = ctx["storage_service"]
-        docling_parser = ctx["docling_parser"]
+        document_processor = ctx["document_processor"]
+        document_ai_parser = ctx.get("document_ai_parser")
         embedding_service = ctx["embedding_service"]
         qdrant_service = ctx["qdrant_service"]
         snapshot_service = ctx["snapshot_service"]
@@ -53,6 +54,10 @@ def _load_pipeline_services(ctx: dict[str, Any]) -> PipelineServices:
         path_a_max_pdf_pages = ctx["path_a_max_pdf_pages"]
         path_a_max_audio_duration_sec = ctx["path_a_max_audio_duration_sec"]
         path_a_max_video_duration_sec = ctx["path_a_max_video_duration_sec"]
+        path_c_min_chars_per_page = ctx.get(
+            "path_c_min_chars_per_page",
+            getattr(settings, "path_c_min_chars_per_page", 50),
+        )
         batch_orchestrator = ctx.get("batch_orchestrator")
     except KeyError as error:
         raise RuntimeError(
@@ -61,8 +66,10 @@ def _load_pipeline_services(ctx: dict[str, Any]) -> PipelineServices:
 
     if not hasattr(storage_service, "download"):
         raise RuntimeError("Worker context contains an invalid storage service")
-    if not hasattr(docling_parser, "parse_and_chunk"):
-        raise RuntimeError("Worker context contains an invalid Docling parser")
+    if not hasattr(document_processor, "parse_and_chunk"):
+        raise RuntimeError("Worker context contains an invalid document processor")
+    if document_ai_parser is not None and not hasattr(document_ai_parser, "parse_and_chunk"):
+        raise RuntimeError("Worker context contains an invalid Document AI parser")
     if not hasattr(embedding_service, "embed_texts") or not hasattr(
         embedding_service, "embed_file"
     ):
@@ -82,7 +89,8 @@ def _load_pipeline_services(ctx: dict[str, Any]) -> PipelineServices:
 
     return PipelineServices(
         storage_service=storage_service,
-        docling_parser=docling_parser,
+        document_processor=document_processor,
+        document_ai_parser=document_ai_parser,
         embedding_service=embedding_service,
         qdrant_service=qdrant_service,
         snapshot_service=snapshot_service,
@@ -95,6 +103,8 @@ def _load_pipeline_services(ctx: dict[str, Any]) -> PipelineServices:
         path_a_max_pdf_pages=path_a_max_pdf_pages,
         path_a_max_audio_duration_sec=path_a_max_audio_duration_sec,
         path_a_max_video_duration_sec=path_a_max_video_duration_sec,
+        path_c_min_chars_per_page=path_c_min_chars_per_page,
+        document_ai_enabled=getattr(settings, "document_ai_enabled", False),
         batch_orchestrator=batch_orchestrator,
     )
 
@@ -232,7 +242,13 @@ async def _run_ingestion_pipeline(
     await session.commit()
 
     file_metadata = inspect_file(file_bytes, source.source_type)
-    path_decision = determine_path(source.source_type, file_metadata, services)
+    processing_hint = (task.result_metadata or {}).get("processing_hint", "auto")
+    path_decision = determine_path(
+        source.source_type,
+        file_metadata,
+        services,
+        processing_hint=processing_hint,
+    )
     task.progress = 20
     await session.commit()
 
@@ -246,6 +262,7 @@ async def _run_ingestion_pipeline(
 
     from app.workers.tasks.handlers.path_a import PathAFallback, handle_path_a
     from app.workers.tasks.handlers.path_b import handle_path_b
+    from app.workers.tasks.handlers.path_c import handle_path_c
 
     if path_decision.path is ProcessingPath.PATH_A:
         result = await handle_path_a(
@@ -257,9 +274,46 @@ async def _run_ingestion_pipeline(
             services,
         )
         if isinstance(result, PathAFallback):
-            result = await handle_path_b(session, task, source, file_bytes, services)
+            if processing_hint == "external" and services.has_document_ai:
+                result = await handle_path_c(
+                    session,
+                    task,
+                    source,
+                    file_bytes,
+                    file_metadata,
+                    services,
+                    processing_hint=processing_hint,
+                )
+            else:
+                result = await handle_path_b(
+                    session,
+                    task,
+                    source,
+                    file_bytes,
+                    file_metadata,
+                    services,
+                    processing_hint=processing_hint,
+                )
+    elif path_decision.path is ProcessingPath.PATH_C:
+        result = await handle_path_c(
+            session,
+            task,
+            source,
+            file_bytes,
+            file_metadata,
+            services,
+            processing_hint=processing_hint,
+        )
     else:
-        result = await handle_path_b(session, task, source, file_bytes, services)
+        result = await handle_path_b(
+            session,
+            task,
+            source,
+            file_bytes,
+            file_metadata,
+            services,
+            processing_hint=processing_hint,
+        )
 
     return result
 

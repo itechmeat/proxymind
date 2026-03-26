@@ -138,14 +138,39 @@
 
 ### Requirement: Upload metadata validation
 
-The `metadata` field SHALL be validated as JSON conforming to a Pydantic schema with the following fields: `title` (string, required, 1-255 characters), `description` (string, optional, max 2000 characters), `public_url` (string, optional, valid HTTP/HTTPS URL, max 2048 characters), `catalog_item_id` (UUID, optional), `language` (string, optional, max 32 characters). The `source_type` SHALL be determined automatically from the file extension and SHALL NOT be part of the metadata input.
+The `metadata` field SHALL be validated as JSON conforming to a Pydantic schema with the following fields: `title` (string, required, 1-255 characters), `description` (string, optional, max 2000 characters), `public_url` (string, optional, valid HTTP/HTTPS URL, max 2048 characters), `catalog_item_id` (UUID, optional), `language` (string, optional, max 32 characters), `processing_hint` (string, optional, one of `"auto"` or `"external"`, default `"auto"`). The `source_type` SHALL be determined automatically from the file extension and SHALL NOT be part of the metadata input.
 
 The `language` field from `SourceUploadMetadata` SHALL be persisted on the `Source` record. The `source.py` service `create_source_and_task()` method MUST pass `language=metadata.language` to the Source constructor. Empty or whitespace-only `language` values SHALL be normalized to NULL before persistence. A nullable `language` column (VARCHAR(32)) exists on the `sources` table (added in S2-02 migration 004). Existing sources have NULL, which means "use system default."
+
+**[Modified by S4-06]** The `SourceUploadMetadata` Pydantic schema SHALL gain an optional `processing_hint` field of type `Literal["auto", "external"]` with a default value of `"auto"`. This field allows users to explicitly request external processing (Document AI, Path C) for complex documents. The field is fully backward-compatible -- omitting it defaults to `"auto"`, which preserves existing routing behavior.
 
 #### Scenario: Missing title in metadata
 
 - **WHEN** a POST request is sent with metadata JSON that lacks the `title` field
 - **THEN** the response status SHALL be 422
+
+#### Scenario: processing_hint defaults to "auto" when omitted
+
+- **WHEN** a POST request is sent with valid metadata that does not include `processing_hint`
+- **THEN** the `processing_hint` SHALL default to `"auto"`
+- **AND** the upload SHALL proceed with standard automatic routing
+
+#### Scenario: processing_hint "external" is accepted
+
+- **WHEN** a POST request is sent with metadata containing `"processing_hint": "external"`
+- **THEN** the response status SHALL be 202
+- **AND** the `processing_hint` value SHALL be stored for downstream routing
+
+#### Scenario: processing_hint "auto" is accepted
+
+- **WHEN** a POST request is sent with metadata containing `"processing_hint": "auto"`
+- **THEN** the response status SHALL be 202
+
+#### Scenario: Invalid processing_hint value is rejected
+
+- **WHEN** a POST request is sent with metadata containing `"processing_hint": "fast"` (not in allowed values)
+- **THEN** the response status SHALL be 422
+- **AND** the response body SHALL contain validation error details indicating allowed values
 
 #### Scenario: Title exceeds maximum length
 
@@ -322,6 +347,23 @@ Uploaded files SHALL be stored in SeaweedFS via the Filer HTTP API with an objec
 
 The upload endpoint SHALL follow the commit-before-enqueue pattern: (1) upload file to SeaweedFS, (2) create Source (status PENDING) and BackgroundTask (status PENDING) in PostgreSQL and COMMIT, (3) enqueue the arq job. On enqueue success, the `arq_job_id` SHALL be saved on the BackgroundTask and committed. On enqueue failure, a compensating update SHALL mark both Source and BackgroundTask as FAILED with an error message, and the endpoint SHALL return 500.
 
+**[Modified by S4-06]** When `processing_hint` is not `"auto"`, the value SHALL be stored in `BackgroundTask.result_metadata` so that the ingestion worker can read it during routing. When `processing_hint` is `"auto"` (the default), it SHALL NOT be stored in `result_metadata` — the worker SHALL treat absence of the key as `"auto"`. This follows the existing pattern where only non-default values are stored in `result_metadata` (same as `skip_embedding`).
+
+Note: `BackgroundTask.result_metadata` is a transport mechanism. The canonical audit record is `DocumentVersion.processing_hint`, which is always written by the worker (defaulting to `"auto"` when the key is absent from `result_metadata`).
+
+#### Scenario: Non-default processing_hint stored in BackgroundTask result_metadata
+
+- **WHEN** a file is uploaded with `processing_hint="external"`
+- **AND** the response is 202
+- **THEN** the `BackgroundTask.result_metadata` SHALL contain `{"processing_hint": "external"}`
+
+#### Scenario: Default processing_hint omitted from result_metadata
+
+- **WHEN** a file is uploaded without specifying `processing_hint` (default `"auto"`)
+- **AND** the response is 202
+- **THEN** the `BackgroundTask.result_metadata` SHALL NOT contain a `"processing_hint"` key
+- **AND** the worker SHALL treat the absence as `"auto"`
+
 #### Scenario: Source and Task records exist in PG after successful upload
 
 - **WHEN** a file is successfully uploaded and the response is 202
@@ -352,6 +394,37 @@ The upload endpoint SHALL follow the commit-before-enqueue pattern: (1) upload f
 - **WHEN** the PostgreSQL create/commit fails after a successful SeaweedFS upload
 - **THEN** the file SHALL be deleted from SeaweedFS
 - **AND** the endpoint SHALL return 500
+
+---
+
+### Requirement: DocumentVersion gains processing_hint column
+
+**[Added by S4-06]** The `DocumentVersion` model at `app/db/models/knowledge.py` SHALL gain a `processing_hint` column of type `String(32)`, nullable, for audit purposes. This column stores the user-provided `processing_hint` value (`"auto"` or `"external"`) at the time of upload, enabling traceability of routing decisions. The column SHALL be added via an Alembic migration in the same migration file that adds `PATH_C` to the `processing_path_enum`.
+
+The ingestion worker SHALL populate `DocumentVersion.processing_hint` by reading `BackgroundTask.result_metadata.get("processing_hint", "auto")` — defaulting to `"auto"` when the key is absent (which is the case for default uploads).
+
+#### Scenario: processing_hint column stores user-provided value
+
+- **WHEN** a document is ingested with `processing_hint="external"`
+- **THEN** the `DocumentVersion.processing_hint` column SHALL contain `"external"`
+
+#### Scenario: processing_hint column stores default value
+
+- **WHEN** a document is ingested with default `processing_hint` (auto)
+- **THEN** the `DocumentVersion.processing_hint` column SHALL contain `"auto"`
+
+#### Scenario: processing_hint column is nullable for existing records
+
+- **WHEN** the Alembic migration runs on a database with existing `DocumentVersion` records
+- **THEN** existing records SHALL have `processing_hint` set to `NULL`
+- **AND** the migration SHALL NOT fail
+
+#### Scenario: Alembic migration adds column and enum value together
+
+- **WHEN** the Alembic migration for S4-06 runs
+- **THEN** it SHALL add `path_c` to `processing_path_enum`
+- **AND** it SHALL add the `processing_hint` column to `document_versions`
+- **AND** both changes SHALL be in the same migration file
 
 ---
 
@@ -463,101 +536,9 @@ The response SHALL be a JSON array where each item includes: `id` (UUID), `title
 - **WHEN** a GET request is sent to `/api/admin/sources` without any authorization header
 - **THEN** the request SHALL be processed normally (not rejected for missing auth)
 
-\*\*\* Add File: /Users/techmeat/www/projects/agentic-depot/proxymind/openspec/specs/admin-knowledge-ui/spec.md
-
-## Purpose
-
-Frontend admin interface for knowledge management — source upload, source list with status tracking, snapshot lifecycle management, draft testing. Includes admin routing, layout, and access control via environment flag. Introduced by S5-03.
-
-## ADDED Requirements
-
-### Requirement: Admin routing with VITE_ADMIN_MODE guard
-
-The application SHALL expose `/admin`, `/admin/sources`, and `/admin/snapshots` routes. Navigating to `/admin` SHALL redirect to `/admin/sources`. All `/admin/*` routes SHALL be guarded by the `VITE_ADMIN_MODE` environment flag. When `import.meta.env.VITE_ADMIN_MODE` is not `"true"` or is unset, navigating to any `/admin/*` route SHALL redirect the user to `/`. The guard is UI-only and does not protect backend endpoints.
-
-#### Scenario: Admin root redirects to sources tab
-
-- **WHEN** a user navigates to `/admin` and `VITE_ADMIN_MODE` is `"true"`
-- **THEN** the browser SHALL redirect to `/admin/sources`
-
-#### Scenario: Admin routes accessible in admin mode
-
-- **WHEN** `import.meta.env.VITE_ADMIN_MODE` equals `"true"`
-- **AND** the user navigates to `/admin/sources` or `/admin/snapshots`
-- **THEN** the corresponding tab content SHALL render
-
-#### Scenario: Admin routes blocked when not admin mode
-
-- **WHEN** `import.meta.env.VITE_ADMIN_MODE` is not `"true"` or is unset
-- **AND** the user navigates to `/admin`, `/admin/sources`, or `/admin/snapshots`
-- **THEN** the user SHALL be redirected to `/`
-
 ---
 
-### Requirement: Admin layout with header and top tabs navigation
-
-The admin pages SHALL render inside an `AdminLayout` component that provides: (1) a header with a "Chat" back-link navigating to `/`, a "ProxyMind Admin" title, and twin identity display; (2) horizontal top tabs for "Sources" and "Snapshots" that link to `/admin/sources` and `/admin/snapshots` respectively; (3) a scrollable content area below the tabs rendering the active tab's route outlet. On mobile, tabs SHALL span full width (50/50 for two tabs).
-
-#### Scenario: Admin header renders navigation elements
-
-- **WHEN** the admin layout renders
-- **THEN** it SHALL display a back-link to `/` (Chat), the title "ProxyMind Admin", and the twin identity
-
-#### Scenario: Tab navigation between sources and snapshots
-
-- **WHEN** the user clicks the "Sources" tab
-- **THEN** the browser SHALL navigate to `/admin/sources` and the Sources tab content SHALL render
-
-- **WHEN** the user clicks the "Snapshots" tab
-- **THEN** the browser SHALL navigate to `/admin/snapshots` and the Snapshots tab content SHALL render
-
-#### Scenario: Active tab visually indicated
-
-- **WHEN** the user is on `/admin/sources`
-- **THEN** the "Sources" tab SHALL have active styling (e.g., highlighted border or background)
-- **AND** the "Snapshots" tab SHALL have inactive styling
-
-#### Scenario: Mobile responsive tabs
-
-- **WHEN** the viewport width is below the mobile breakpoint
-- **THEN** the two tabs SHALL each occupy 50% of the available width
-
----
-
-### Requirement: ChatHeader admin link
-
-The ChatHeader component SHALL render an "Admin" link button that navigates to `/admin`. The link SHALL be visible only when `import.meta.env.VITE_ADMIN_MODE === "true"`. When `VITE_ADMIN_MODE` is not `"true"` or is unset, the Admin link SHALL NOT be rendered. The Admin link SHALL be separate from the existing Settings icon button.
-
-#### Scenario: Admin link visible in admin mode
-
-- **WHEN** `import.meta.env.VITE_ADMIN_MODE` equals `"true"`
-- **THEN** the ChatHeader SHALL render an Admin link button that navigates to `/admin`
-
-#### Scenario: Admin link hidden when not admin mode
-
-- **WHEN** `import.meta.env.VITE_ADMIN_MODE` is not `"true"` or is unset
-- **THEN** the ChatHeader SHALL NOT render the Admin link button
-
----
-
-### Requirement: Sources tab with drag and drop upload zone
-
-The Sources tab SHALL include a drag and drop upload zone at the top of the page. The drop zone SHALL display a dashed border, an icon, and instructional text. When files are dragged over the zone, it SHALL enter a highlighted visual state. The zone SHALL support multi-file upload: each dropped file SHALL trigger a separate `POST /api/admin/sources` request. On mobile, tapping the zone SHALL open the native file picker as a fallback. Upload metadata SHALL be auto-derived: `title` defaults to the filename without extension. No metadata modal SHALL be shown.
-
-#### Scenario: Drop zone renders with instructional text
-
-- **WHEN** the Sources tab renders
-- **THEN** a drop zone with dashed border, icon, and instructional text SHALL be displayed
-
-#### Scenario: Visual highlight on drag over
-
-- **WHEN** files are dragged over the drop zone
-- **THEN** the zone SHALL enter a highlighted visual state (e.g., changed border color/style)
-
-- **WHEN** the drag leaves the zone without dropping
-- **THEN** the zone SHALL return to its default visual state
-
-#### Scenario: Multi-file upload triggers separate requests
+### Requirement: SeaweedFS storage root auto-creation at startup
 
 - **WHEN** the user drops 3 files onto the zone
 - **THEN** 3 separate `POST /api/admin/sources` requests SHALL be sent, one per file

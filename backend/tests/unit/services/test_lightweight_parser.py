@@ -5,9 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 
-import app.services.docling_parser as docling_parser
+import app.services.lightweight_parser as lightweight_parser
 from app.db.models.enums import SourceType
-from app.services.docling_parser import DoclingParser
+from app.services.document_processing import ParsedBlock
+from app.services.lightweight_parser import LightweightParser
 
 FIXTURES_DIR = Path(__file__).resolve().parents[2] / "fixtures"
 
@@ -18,7 +19,7 @@ def _fixture_bytes(name: str) -> bytes:
 
 @pytest.mark.asyncio
 async def test_parse_markdown_extracts_chunk_metadata() -> None:
-    parser = DoclingParser(chunk_max_tokens=128)
+    parser = LightweightParser(chunk_max_tokens=128)
 
     chunks = await parser.parse_and_chunk(
         _fixture_bytes("sample.md"),
@@ -36,7 +37,7 @@ async def test_parse_markdown_extracts_chunk_metadata() -> None:
 
 @pytest.mark.asyncio
 async def test_parse_txt_file_returns_chunks() -> None:
-    parser = DoclingParser(chunk_max_tokens=128)
+    parser = LightweightParser(chunk_max_tokens=128)
 
     chunks = await parser.parse_and_chunk(
         _fixture_bytes("sample.txt"),
@@ -50,7 +51,7 @@ async def test_parse_txt_file_returns_chunks() -> None:
 
 @pytest.mark.asyncio
 async def test_empty_content_returns_no_chunks() -> None:
-    parser = DoclingParser(chunk_max_tokens=128)
+    parser = LightweightParser(chunk_max_tokens=128)
 
     chunks = await parser.parse_and_chunk(b"   \n\t", "empty.md", SourceType.MARKDOWN)
 
@@ -59,7 +60,7 @@ async def test_empty_content_returns_no_chunks() -> None:
 
 @pytest.mark.asyncio
 async def test_single_paragraph_document_produces_one_chunk() -> None:
-    parser = DoclingParser(chunk_max_tokens=128)
+    parser = LightweightParser(chunk_max_tokens=128)
 
     chunks = await parser.parse_and_chunk(
         _fixture_bytes("sample_small.md"),
@@ -71,43 +72,9 @@ async def test_single_paragraph_document_produces_one_chunk() -> None:
     assert chunks[0].chunk_index == 0
 
 
-def test_chunk_indices_stay_sequential_when_empty_chunks_are_skipped() -> None:
-    parser = DoclingParser(chunk_max_tokens=128)
-
-    class FakeChunker:
-        tokenizer = SimpleNamespace(count_tokens=lambda text: len(text.split()))
-
-        @staticmethod
-        def contextualize(chunk: SimpleNamespace) -> str:
-            return chunk.text
-
-        @staticmethod
-        def chunk(document: object) -> list[SimpleNamespace]:
-            return [
-                SimpleNamespace(
-                    text="First",
-                    meta=SimpleNamespace(headings=["H1"], doc_items=[]),
-                ),
-                SimpleNamespace(
-                    text="   ",
-                    meta=SimpleNamespace(headings=["H1"], doc_items=[]),
-                ),
-                SimpleNamespace(
-                    text="Second",
-                    meta=SimpleNamespace(headings=["H1"], doc_items=[]),
-                ),
-            ]
-
-    parser._chunker = FakeChunker()  # type: ignore[assignment]
-
-    chunks = parser._chunk_document(document=object())
-
-    assert [chunk.chunk_index for chunk in chunks] == [0, 1]
-
-
 @pytest.mark.asyncio
 async def test_parse_pdf_extracts_chunks_with_page_numbers() -> None:
-    parser = DoclingParser(chunk_max_tokens=1024)
+    parser = LightweightParser(chunk_max_tokens=1024)
 
     chunks = await parser.parse_and_chunk(
         _fixture_bytes("sample.pdf"),
@@ -125,7 +92,7 @@ async def test_parse_pdf_extracts_chunks_with_page_numbers() -> None:
 
 @pytest.mark.asyncio
 async def test_parse_docx_extracts_chunks_with_headings() -> None:
-    parser = DoclingParser(chunk_max_tokens=1024)
+    parser = LightweightParser(chunk_max_tokens=1024)
 
     chunks = await parser.parse_and_chunk(
         _fixture_bytes("sample.docx"),
@@ -142,7 +109,7 @@ async def test_parse_docx_extracts_chunks_with_headings() -> None:
 
 @pytest.mark.asyncio
 async def test_parse_html_extracts_chunks_with_headings() -> None:
-    parser = DoclingParser(chunk_max_tokens=1024)
+    parser = LightweightParser(chunk_max_tokens=1024)
 
     chunks = await parser.parse_and_chunk(
         _fixture_bytes("sample.html"),
@@ -159,7 +126,7 @@ async def test_parse_html_extracts_chunks_with_headings() -> None:
 
 @pytest.mark.asyncio
 async def test_parse_htm_alias_extracts_chunks_with_headings() -> None:
-    parser = DoclingParser(chunk_max_tokens=1024)
+    parser = LightweightParser(chunk_max_tokens=1024)
 
     chunks = await parser.parse_and_chunk(
         _fixture_bytes("sample.html"),
@@ -176,7 +143,7 @@ async def test_parse_htm_alias_extracts_chunks_with_headings() -> None:
 
 @pytest.mark.asyncio
 async def test_parse_pdf_table_content_appears_in_chunks() -> None:
-    parser = DoclingParser(chunk_max_tokens=1024)
+    parser = LightweightParser(chunk_max_tokens=1024)
 
     chunks = await parser.parse_and_chunk(
         _fixture_bytes("sample.pdf"),
@@ -191,7 +158,7 @@ async def test_parse_pdf_table_content_appears_in_chunks() -> None:
 
 @pytest.mark.asyncio
 async def test_parse_unsupported_type_raises_value_error() -> None:
-    parser = DoclingParser(chunk_max_tokens=1024)
+    parser = LightweightParser(chunk_max_tokens=1024)
 
     with pytest.raises(ValueError, match="Unsupported source type"):
         await parser.parse_and_chunk(b"fake content", "file.wav", SourceType.AUDIO)
@@ -199,10 +166,8 @@ async def test_parse_unsupported_type_raises_value_error() -> None:
 
 @pytest.mark.asyncio
 async def test_parse_corrupt_pdf_raises_exception() -> None:
-    parser = DoclingParser(chunk_max_tokens=1024)
+    parser = LightweightParser(chunk_max_tokens=1024)
 
-    # Docling may raise different low-level parser exceptions here depending
-    # on the PDF backend; the worker integration test is the primary contract.
     with pytest.raises(Exception):
         await parser.parse_and_chunk(
             b"not-a-real-pdf-content",
@@ -212,11 +177,11 @@ async def test_parse_corrupt_pdf_raises_exception() -> None:
 
 
 def test_chunk_blocks_split_oversized_block_to_respect_budget() -> None:
-    parser = DoclingParser(chunk_max_tokens=10)
+    parser = LightweightParser(chunk_max_tokens=10)
 
-    chunks = parser._chunk_blocks(
+    chunks = parser._chunker.chunk_blocks(
         [
-            docling_parser._ParsedBlock(
+            ParsedBlock(
                 text="word " * 40,
                 headings=("Heading",),
                 anchor_page=3,
@@ -244,7 +209,7 @@ def test_parse_docx_rejects_oversized_document_xml(monkeypatch: pytest.MonkeyPat
         @staticmethod
         def getinfo(_name: str) -> SimpleNamespace:
             return SimpleNamespace(
-                file_size=docling_parser._MAX_DOCX_XML_BYTES + 1,
+                file_size=lightweight_parser._MAX_DOCX_XML_BYTES + 1,
                 compress_size=1024,
             )
 
@@ -252,7 +217,7 @@ def test_parse_docx_rejects_oversized_document_xml(monkeypatch: pytest.MonkeyPat
         def read(_info: object) -> bytes:
             raise AssertionError("read should not be reached for oversized document.xml")
 
-    monkeypatch.setattr(docling_parser, "ZipFile", FakeZipFile)
+    monkeypatch.setattr(lightweight_parser, "ZipFile", FakeZipFile)
 
     with pytest.raises(ValueError, match="too large"):
-        DoclingParser._parse_docx(b"fake-docx")
+        LightweightParser._parse_docx(b"fake-docx")

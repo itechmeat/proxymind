@@ -4,6 +4,32 @@
 
 Move ProxyMind from a Docling-centric ingestion design to a **lightweight local core with external-heavy processing**.
 
+## Migration status: Complete
+
+S4-06 implementation is now in place.
+
+Implemented runtime changes:
+
+- `DoclingParser` runtime naming was removed in favor of `LightweightParser`
+- shared `DocumentProcessor` protocol and `TextChunker` were extracted into the shared document-processing layer
+- `Path C` was implemented for PDF fallback through Google Cloud Document AI
+- upload metadata now supports `processing_hint` with audit persistence on `DocumentVersion`
+- scan detection can reroute low-text PDFs from Path B to Path C when Document AI is configured
+- PostgreSQL `processing_path_enum` now includes `path_c`
+
+Implemented configuration:
+
+- `DOCUMENT_AI_PROJECT_ID`
+- `DOCUMENT_AI_LOCATION`
+- `DOCUMENT_AI_PROCESSOR_ID`
+- `PATH_C_MIN_CHARS_PER_PAGE`
+
+Operational status:
+
+- backend migration for `path_c` + `processing_hint` exists and applies successfully
+- backend runtime images rebuild successfully with the updated dependency lock
+- targeted S4-06 unit and integration coverage passes in Docker
+
 The target state is:
 
 - data and retrieval remain local

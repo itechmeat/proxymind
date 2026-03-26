@@ -133,13 +133,37 @@ The existing `StorageService` SHALL provide a `download(object_key: str) -> byte
 
 ### Requirement: Pipeline orchestration in the worker task
 
-**[Modified by S3-06]** The ingestion worker task (`app/workers/tasks/ingestion.py`) SHALL be refactored into a thin orchestrator that dispatches to separate handler modules. The orchestrator SHALL execute these stages in sequence: (1) Download source file from SeaweedFS, (2) Inspect file via `PathRouter.inspect_file()` and determine processing path via `PathRouter.determine_path()`, (3) If path is REJECTED, mark the task FAILED with the rejection reason and return, (4) Dispatch to `handle_path_a()` (`app/workers/tasks/handlers/path_a.py`) or `handle_path_b()` (`app/workers/tasks/handlers/path_b.py`) based on the routing decision, (5) Finalize statuses and create EmbeddingProfile (Tx 2). Each handler module SHALL own its own stages internally: persist (Tx 1), embed, index. The worker task IS the orchestrator; there SHALL NOT be a separate Pipeline abstraction class.
+**[Modified by S3-06]** The ingestion worker task (`app/workers/tasks/ingestion.py`) SHALL be refactored into a thin orchestrator that dispatches to separate handler modules. The orchestrator SHALL execute these stages in sequence: (1) Download source file from SeaweedFS, (2) Inspect file via `PathRouter.inspect_file()` and determine processing path via `PathRouter.determine_path()`, (3) If path is REJECTED, mark the task FAILED with the rejection reason and return, (4) Dispatch to `handle_path_a()` (`app/workers/tasks/handlers/path_a.py`), `handle_path_b()` (`app/workers/tasks/handlers/path_b.py`), or `handle_path_c()` (`app/workers/tasks/handlers/path_c.py`) based on the routing decision, (5) Finalize statuses and create EmbeddingProfile (Tx 2). Each handler module SHALL own its own stages internally: persist (Tx 1), embed, index. The worker task IS the orchestrator; there SHALL NOT be a separate Pipeline abstraction class.
 
 **[Modified by S2-03]** Stage persist (inside each handler) SHALL use `ensure_draft_or_rebind` to acquire a FOR UPDATE lock on the snapshot row before persisting any chunks. The lock SHALL be held through the chunk insert and transaction commit. If the snapshot is no longer DRAFT (published concurrently), the worker SHALL rebind to a new draft via the same method.
 
 **[Modified by S3-06]** The orchestrator SHALL accept an optional `skip_embedding` flag from the `BackgroundTask.result_metadata`. When `skip_embedding=true`, the handler SHALL parse and chunk the source but SHALL NOT call `embedding_service.embed_texts()`, `embed_file()`, or `qdrant_service.upsert_chunks()`. Chunks SHALL be saved with status `PENDING`. The Source SHALL be set to `READY`. The BackgroundTask SHALL be marked COMPLETE with `result_metadata.skip_embedding = true`.
 
 **[Modified by S3-06]** When `skip_embedding=false` (default) and the chunk count after parsing exceeds `batch_embed_chunk_threshold` (default 50), the handler SHALL return a `BatchSubmittedResult` early — before `_finalize_pipeline_success` is called. The handler SHALL create a `BatchJob` inline via `BatchOrchestrator.create_batch_job_for_threshold()`, then submit to Gemini via `BatchOrchestrator.submit_to_gemini()`. The Source SHALL stay `PROCESSING`, the BackgroundTask SHALL stay `PROCESSING`. The calling code in `_process_task` SHALL detect `BatchSubmittedResult` and exit without finalization. The `poll_active_batches` cron SHALL complete the lifecycle.
+
+**[Modified by S4-06]** The orchestrator SHALL read `processing_hint` from the `BackgroundTask.result_metadata` and pass it to `PathRouter.determine_path()`. The orchestrator SHALL dispatch to `handle_path_c()` when the router returns `PATH_C`. The Path A fallback re-dispatch logic SHALL also consider `PATH_C` as a valid re-dispatch target when Document AI is configured and the document qualifies.
+
+#### Scenario: Orchestrator dispatches to Path C handler
+
+- **WHEN** the orchestrator receives a routing decision of `PATH_C` from PathRouter
+- **THEN** the orchestrator SHALL call `handle_path_c()` with the downloaded file bytes and pipeline services
+- **AND** the Path C handler SHALL execute the Document AI parsing pipeline
+
+#### Scenario: Orchestrator passes processing_hint to router
+
+- **WHEN** the `BackgroundTask.result_metadata` contains `processing_hint: "external"`
+- **THEN** the orchestrator SHALL pass `processing_hint="external"` to `PathRouter.determine_path()`
+- **AND** the router SHALL use this hint in its routing decision
+
+#### Scenario: Successful end-to-end pipeline execution via Path C
+
+- **WHEN** the ingestion task processes a PDF routed to Path C with status PENDING
+- **THEN** the Source status SHALL transition PENDING -> PROCESSING -> READY
+- **AND** a DocumentVersion record SHALL be created with `processing_path=PATH_C`
+- **AND** Chunk records SHALL be created with status INDEXED
+- **AND** vectors SHALL be upserted to Qdrant
+- **AND** an EmbeddingProfile record SHALL be created with `pipeline_version="s4-06-path-c"`
+- **AND** the BackgroundTask SHALL have status COMPLETE, progress 100
 
 #### Scenario: Successful end-to-end pipeline execution via Path B
 
@@ -169,7 +193,7 @@ The existing `StorageService` SHALL provide a `download(object_key: str) -> byte
 
 - **WHEN** the orchestrator receives a routing decision of Path B from PathRouter
 - **THEN** the orchestrator SHALL call `handle_path_b()` with the downloaded file bytes and pipeline services
-- **AND** the Path B handler SHALL execute the existing Docling-based pipeline logic
+- **AND** the Path B handler SHALL execute the existing lightweight parsing pipeline logic
 
 #### Scenario: Orchestrator dispatches to Path A handler for multimodal formats
 
@@ -180,9 +204,11 @@ The existing `StorageService` SHALL provide a `download(object_key: str) -> byte
 
 - **WHEN** the orchestrator dispatches a PDF source to `handle_path_a()`
 - **AND** `handle_path_a()` returns a fallback signal because the extracted text exceeds `path_a_text_threshold_pdf`
-- **THEN** the orchestrator SHALL call `handle_path_b()` for the same source
-- **AND** the final persisted `DocumentVersion.processing_path` SHALL be `PATH_B`
-- **AND** the final `result_metadata["processing_path"]` SHALL be `"path_b"`
+- **THEN** the orchestrator SHALL re-dispatch to the correct downstream handler for the same source
+- **AND** the downstream target SHALL be `handle_path_b()` for the standard local-text fallback case
+- **AND** the downstream target SHALL be `handle_path_c()` when `processing_hint="external"` is active and Document AI is configured
+- **AND** the final persisted `DocumentVersion.processing_path` SHALL match the actual downstream handler used
+- **AND** the final `result_metadata["processing_path"]` SHALL match the actual downstream handler used
 
 #### Scenario: Orchestrator rejects source when PathRouter returns REJECTED
 
@@ -319,6 +345,15 @@ The worker task SHALL update `BackgroundTask.progress` at each stage boundary: S
 
 **[Modified by S3-04]** On any failure after Tx 1 has committed, the **handler** (not the orchestrator) SHALL execute a recovery transaction that marks the DocumentVersion, all associated Chunks, and the Document as FAILED. Each handler SHALL wrap its post-Tx-1 logic in a try/except block and call `mark_persisted_records_failed()` on failure. The Source SHALL be marked FAILED. The BackgroundTask SHALL be marked FAILED with `error_message` populated. Qdrant points SHALL use stable deterministic IDs derived from `chunk_id`, so re-upserts remain idempotent. If the worker cannot prove whether a Qdrant upsert wrote data, it SHALL attempt compensating deletion by those same `chunk_id` values before final failure handling. Failed records in PostgreSQL are NOT deleted; they serve as audit trail.
 
+**[Modified by S4-06]** The Path C handler SHALL follow the same error handling pattern. On failure after Tx 1, the Path C handler SHALL call `mark_persisted_records_failed()` and attempt compensating Qdrant deletion.
+
+#### Scenario: Path C handler failure marks records as FAILED
+
+- **WHEN** the Document AI call or embedding fails after Tx 1 has committed Chunk records in Path C
+- **THEN** the Path C handler SHALL catch the exception and call `mark_persisted_records_failed()`
+- **AND** the DocumentVersion, Chunks, Document, and Source statuses SHALL be FAILED
+- **AND** the BackgroundTask SHALL be FAILED with `error_message` populated
+
 #### Scenario: Failure during embedding marks all records as FAILED
 
 - **WHEN** the Gemini embedding call fails after Tx 1 has committed Chunk records
@@ -356,11 +391,42 @@ The worker task SHALL update `BackgroundTask.progress` at each stage boundary: S
 - **THEN** the Path B handler itself SHALL execute the failure cleanup (not the orchestrator)
 - **AND** cleanup SHALL mark persisted records as FAILED and attempt Qdrant point deletion
 
+- **WHEN** the Path C handler fails after Tx 1
+- **THEN** the Path C handler itself SHALL execute the failure cleanup (not the orchestrator)
+- **AND** cleanup SHALL mark persisted records as FAILED and attempt Qdrant point deletion
+
+---
+
+### Requirement: ProcessingPath enum gains PATH_C
+
+**[Added by S4-06]** The `ProcessingPath` enum at `app/db/models/enums.py` SHALL include `PATH_C` as a valid value in addition to existing `PATH_A` and `PATH_B`. An Alembic migration SHALL execute `ALTER TYPE processing_path_enum ADD VALUE IF NOT EXISTS 'path_c'` to add the new value to the PostgreSQL native enum. This migration MUST be non-reversible (PostgreSQL does not support removing enum values).
+
+> Note: The path router's `rejected` outcome is represented as `PathDecision(path=None, rejected=True)`, not as a `ProcessingPath` enum member. `REJECTED` is NOT part of the `ProcessingPath` enum.
+
+#### Scenario: PATH_C is a valid ProcessingPath value
+
+- **WHEN** `ProcessingPath.PATH_C` is referenced in code
+- **THEN** it SHALL be a valid enum member with value `"path_c"`
+
+#### Scenario: Database enum includes path_c after migration
+
+- **WHEN** the Alembic migration runs
+- **THEN** the `processing_path_enum` type in PostgreSQL SHALL include `"path_c"` as a valid value
+- **AND** a `DocumentVersion` record with `processing_path = 'path_c'` SHALL be accepted by the database
+
 ---
 
 ### Requirement: Result metadata on successful completion
 
-**[Modified by S3-04]** On success, the BackgroundTask `result_metadata` SHALL contain: `chunk_count` (int), `embedding_model` (string), `embedding_dimensions` (int), `processing_path` (string, value `"path_a"` or `"path_b"`), `snapshot_id` (UUID string), `document_id` (UUID string), `document_version_id` (UUID string), `token_count_total` (int, sum of all chunk token counts). `DocumentVersion.processing_path` and `result_metadata["processing_path"]` represent the same outcome in different forms: the database field uses the enum values `PATH_A` / `PATH_B`, while `result_metadata["processing_path"]` uses the lowercase string values `"path_a"` / `"path_b"`. The `processing_path` value in `result_metadata` SHALL reflect the actual path used: `"path_a"` for Path A handler, `"path_b"` for Path B handler. For Path A with threshold fallback to Path B, the value SHALL be `"path_b"` and the persisted `DocumentVersion.processing_path` SHALL be `PATH_B`.
+**[Modified by S3-04]** On success, the BackgroundTask `result_metadata` SHALL contain: `chunk_count` (int), `embedding_model` (string), `embedding_dimensions` (int), `processing_path` (string, value `"path_a"`, `"path_b"`, or `"path_c"`), `snapshot_id` (UUID string), `document_id` (UUID string), `document_version_id` (UUID string), `token_count_total` (int, sum of all chunk token counts). `DocumentVersion.processing_path` and `result_metadata["processing_path"]` represent the same outcome in different forms: the database field uses the enum values `PATH_A` / `PATH_B` / `PATH_C`, while `result_metadata["processing_path"]` uses the lowercase string values `"path_a"` / `"path_b"` / `"path_c"`. The `processing_path` value in `result_metadata` SHALL reflect the actual path used: `"path_a"` for Path A handler, `"path_b"` for Path B handler, `"path_c"` for Path C handler. For Path A with threshold fallback to Path B, the value SHALL be `"path_b"` and the persisted `DocumentVersion.processing_path` SHALL be `PATH_B`.
+
+**[Modified by S4-06]** The `processing_path` field now includes `"path_c"` as a valid value. The `processing_path` enum in the database now includes `PATH_C`.
+
+#### Scenario: result_metadata contains processing_path "path_c" for Path C
+
+- **WHEN** the ingestion task completes successfully via Path C
+- **THEN** `result_metadata` SHALL contain all 8 specified fields with correct types and values
+- **AND** `processing_path` SHALL be `"path_c"`
 
 #### Scenario: result_metadata contains all required fields for Path B
 
@@ -379,7 +445,17 @@ The worker task SHALL update `BackgroundTask.progress` at each stage boundary: S
 
 ### Requirement: EmbeddingProfile audit record
 
-**[Modified by S3-04]** The pipeline SHALL create one `EmbeddingProfile` record per successful ingestion pass during Tx 2. The record SHALL capture the embedding model, dimensions, task type, and pipeline metadata. The `pipeline_version` field SHALL be parameterized: `"s3-04-path-a"` for Path A ingestion, `"s2-02-path-b"` for Path B ingestion. EmbeddingProfile records SHALL never be updated; each ingestion creates a new record for audit trail. The `_finalize_pipeline_success()` helper SHALL accept `processing_path` and `pipeline_version` parameters from the handler to populate these fields.
+**[Modified by S3-04]** The pipeline SHALL create one `EmbeddingProfile` record per successful ingestion pass during Tx 2. The record SHALL capture the embedding model, dimensions, task type, and pipeline metadata. The `pipeline_version` field SHALL be parameterized: `"s3-04-path-a"` for Path A ingestion, `"s2-02-path-b"` for Path B ingestion, `"s4-06-path-c"` for Path C ingestion. EmbeddingProfile records SHALL never be updated; each ingestion creates a new record for audit trail. The `_finalize_pipeline_success()` helper SHALL accept `processing_path` and `pipeline_version` parameters from the handler to populate these fields.
+
+**[Modified by S4-06]** Added `"s4-06-path-c"` as the pipeline version for Path C ingestion.
+
+#### Scenario: EmbeddingProfile created on success via Path C
+
+- **WHEN** the ingestion pipeline completes successfully via Path C
+- **THEN** exactly one new EmbeddingProfile record SHALL exist in PostgreSQL
+- **AND** its `model_name` field SHALL match `settings.embedding_model`
+- **AND** its `dimensions` field SHALL match `settings.embedding_dimensions`
+- **AND** its `pipeline_version` field SHALL be `"s4-06-path-c"`
 
 #### Scenario: EmbeddingProfile created on success via Path B
 
@@ -401,19 +477,29 @@ The worker task SHALL update `BackgroundTask.progress` at each stage boundary: S
 
 ### Requirement: Worker service initialization
 
-**[Modified by S3-04]** The arq worker `on_startup` hook SHALL initialize and store in the worker context: a dedicated `storage_http_client` (`httpx.AsyncClient` with `base_url=settings.seaweedfs_filer_url` and `timeout=30.0`), `StorageService` (wrapping the storage HTTP client with `base_path=settings.seaweedfs_sources_path`), `DoclingParser`, `QdrantService` (async Qdrant client), `EmbeddingService` (GenAI client), `SnapshotService`, `GeminiContentService` (GenAI client for text extraction), `HuggingFaceTokenizer` (for Path A token counting), and `settings`. The worker context SHALL also store Path A configuration values from settings (`path_a_text_threshold_pdf`, `path_a_text_threshold_media`, `path_a_max_pdf_pages`, `path_a_max_audio_duration_sec`, `path_a_max_video_duration_sec`). The `on_startup` hook SHALL call `qdrant_service.ensure_collection()` (idempotent) and `storage_service.ensure_storage_root()` (idempotent). The `on_shutdown` hook SHALL close the Qdrant client connection AND call `await ctx["storage_http_client"].aclose()` to properly clean up the storage HTTP client.
+**[Modified by S3-04]** The arq worker `on_startup` hook SHALL initialize and store in the worker context: a dedicated `storage_http_client` (`httpx.AsyncClient` with `base_url=settings.seaweedfs_filer_url` and `timeout=30.0`), `StorageService` (wrapping the storage HTTP client with `base_path=settings.seaweedfs_sources_path`), `LightweightParser` (renamed from `DoclingParser`), `QdrantService` (async Qdrant client), `EmbeddingService` (GenAI client), `SnapshotService`, `GeminiContentService` (GenAI client for text extraction), `HuggingFaceTokenizer` (for Path A token counting), and `settings`. The worker context SHALL also store Path A configuration values from settings (`path_a_text_threshold_pdf`, `path_a_text_threshold_media`, `path_a_max_pdf_pages`, `path_a_max_audio_duration_sec`, `path_a_max_video_duration_sec`). The `on_startup` hook SHALL call `qdrant_service.ensure_collection()` (idempotent) and `storage_service.ensure_storage_root()` (idempotent). The `on_shutdown` hook SHALL close the Qdrant client connection AND call `await ctx["storage_http_client"].aclose()` to properly clean up the storage HTTP client.
 
-A `PipelineServices` dataclass (or equivalent container) SHALL bundle all services and configuration needed by handlers, so that handler signatures remain clean. `PipelineServices` SHALL include: `storage_service`, `docling_parser`, `qdrant_service`, `embedding_service`, `snapshot_service`, `gemini_content_service`, `tokenizer`, `settings`, and Path A configuration values.
+**[Modified by S4-06]** The `on_startup` hook SHALL conditionally instantiate `DocumentAIParser` when `DOCUMENT_AI_PROJECT_ID` is configured. If Document AI is not configured, `document_ai_parser` SHALL be `None` in the worker context. The worker context key SHALL change from `"docling_parser"` to `"document_processor"` (referencing `LightweightParser`). A separate key `"document_ai_parser"` SHALL hold the `DocumentAIParser | None` instance.
+
+A `PipelineServices` dataclass (or equivalent container) SHALL bundle all services and configuration needed by handlers, so that handler signatures remain clean. `PipelineServices` SHALL include: `storage_service`, `document_processor` (type: `DocumentProcessor`, renamed from `docling_parser`), `document_ai_parser` (type: `DocumentAIParser | None`), `qdrant_service`, `embedding_service`, `snapshot_service`, `gemini_content_service`, `tokenizer`, `settings`, and Path A configuration values.
 
 #### Scenario: All services available in worker context after startup
 
 - **WHEN** the arq worker completes startup
-- **THEN** `ctx["storage_http_client"]`, `ctx["storage_service"]`, `ctx["docling_parser"]`, `ctx["qdrant_service"]`, `ctx["embedding_service"]`, `ctx["snapshot_service"]`, `ctx["gemini_content_service"]`, `ctx["tokenizer"]`, and `ctx["settings"]` SHALL all be present and initialized
+- **THEN** `ctx["storage_http_client"]`, `ctx["storage_service"]`, `ctx["document_processor"]`, `ctx["qdrant_service"]`, `ctx["embedding_service"]`, `ctx["snapshot_service"]`, `ctx["gemini_content_service"]`, `ctx["tokenizer"]`, and `ctx["settings"]` SHALL all be present and initialized
 
-#### Scenario: PipelineServices bundles all handler dependencies
+#### Scenario: DocumentAIParser conditionally initialized
+
+- **WHEN** the arq worker starts and `DOCUMENT_AI_PROJECT_ID` is configured
+- **THEN** `ctx["document_ai_parser"]` SHALL be an initialized `DocumentAIParser` instance
+
+- **WHEN** the arq worker starts and `DOCUMENT_AI_PROJECT_ID` is not configured
+- **THEN** `ctx["document_ai_parser"]` SHALL be `None`
+
+#### Scenario: PipelineServices bundles all handler dependencies including Document AI
 
 - **WHEN** a handler is invoked by the orchestrator
-- **THEN** the handler SHALL receive a `PipelineServices` instance containing all required services and configuration
+- **THEN** the handler SHALL receive a `PipelineServices` instance containing `document_processor`, `document_ai_parser`, and all other required services
 - **AND** the handler SHALL NOT access the raw worker context directly
 
 #### Scenario: Qdrant collection ensured on startup
@@ -456,14 +542,27 @@ The pipeline SHALL use the `language` value from the Source record (persisted at
 
 ### Requirement: PathRouter integration in orchestrator
 
-**[Added by S3-04]** After downloading the source file from SeaweedFS, the orchestrator SHALL call `PathRouter.inspect_file(file_bytes, source_type)` to obtain `FileMetadata`, then call `PathRouter.determine_path(source_type, file_metadata)` to obtain a `PathDecision`. The orchestrator SHALL use the `PathDecision` to dispatch to the appropriate handler or reject the source. PathRouter is responsible only for initial metadata-based routing (page count, duration, source type); token-threshold enforcement remains the responsibility of `handle_path_a()`. If `handle_path_a()` reports a fallback condition, the orchestrator SHALL re-dispatch to `handle_path_b()` rather than having the handler call Path B directly. The PathRouter is a pure service with no database or network dependencies; it SHALL be called synchronously within the orchestrator.
+**[Added by S3-04]** After downloading the source file from SeaweedFS, the orchestrator SHALL call `PathRouter.inspect_file(file_bytes, source_type)` to obtain `FileMetadata`, then call `PathRouter.determine_path(source_type, file_metadata, processing_hint)` to obtain a `PathDecision`. The orchestrator SHALL use the `PathDecision` to dispatch to the appropriate handler or reject the source. PathRouter is responsible only for initial metadata-based routing (page count, duration, source type); token-threshold enforcement remains the responsibility of `handle_path_a()`. If `handle_path_a()` reports a fallback condition, the orchestrator SHALL re-dispatch to the correct downstream handler rather than having the handler call another path directly. The PathRouter is a pure service with no database or network dependencies; it SHALL be called synchronously within the orchestrator.
 
 #### Scenario: Orchestrator calls PathRouter after download
 
 - **WHEN** the orchestrator has downloaded the source file
 - **THEN** it SHALL call `inspect_file()` with the file bytes and source type
-- **AND** then call `determine_path()` with the source type and file metadata
+- **AND** then call `determine_path()` with the source type, file metadata, and effective `processing_hint`
 - **AND** use the resulting `PathDecision` to determine the next step
+
+#### Scenario: Explicit external hint routes eligible PDF to Path C
+
+- **WHEN** the orchestrator receives `processing_hint="external"` for a PDF
+- **AND** Document AI is configured
+- **THEN** `PathRouter.determine_path()` SHALL return `PATH_C`
+
+#### Scenario: External hint falls back when Document AI is unavailable
+
+- **WHEN** the orchestrator receives `processing_hint="external"` for a PDF
+- **AND** Document AI is not configured
+- **THEN** `PathRouter.determine_path()` SHALL return `PATH_B`
+- **AND** the router SHALL log a warning explaining that Path C is unavailable
 
 #### Scenario: PathRouter inspection failure for text formats defaults to Path B
 
@@ -486,7 +585,7 @@ The pipeline SHALL use the `language` value from the Source record (persisted at
 
 ### Requirement: Parameterized pipeline_version on EmbeddingProfile
 
-**[Added by S3-04]** The `_finalize_pipeline_success()` function SHALL accept `processing_path` and `pipeline_version` as parameters. Each handler SHALL pass its own values when calling finalization: Path A passes `processing_path=PATH_A` and `pipeline_version="s3-04-path-a"`, Path B passes `processing_path=PATH_B` and `pipeline_version="s2-02-path-b"`. This ensures the EmbeddingProfile accurately records which pipeline produced the embeddings.
+**[Added by S3-04]** The `_finalize_pipeline_success()` function SHALL accept `processing_path` and `pipeline_version` as parameters. Each handler SHALL pass its own values when calling finalization: Path A passes `processing_path=PATH_A` and `pipeline_version="s3-04-path-a"`, Path B passes `processing_path=PATH_B` and `pipeline_version="s2-02-path-b"`, Path C passes `processing_path=PATH_C` and `pipeline_version="s4-06-path-c"`. This ensures the EmbeddingProfile accurately records which pipeline produced the embeddings.
 
 #### Scenario: Path A handler passes correct pipeline_version
 
@@ -497,6 +596,11 @@ The pipeline SHALL use the `language` value from the Source record (persisted at
 
 - **WHEN** the Path B handler completes successfully and calls finalization
 - **THEN** it SHALL pass `pipeline_version="s2-02-path-b"` to `_finalize_pipeline_success()`
+
+#### Scenario: Path C handler passes correct pipeline_version
+
+- **WHEN** the Path C handler completes successfully and calls finalization
+- **THEN** it SHALL pass `pipeline_version="s4-06-path-c"` to `_finalize_pipeline_success()`
 
 ---
 

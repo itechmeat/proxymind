@@ -163,6 +163,44 @@ async def test_upload_endpoint_normalizes_blank_language_to_null(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("committed_data_cleanup")
+async def test_upload_endpoint_omits_default_processing_hint_from_task_metadata(
+    api_client,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    response = await api_client.post(
+        "/api/admin/sources",
+        data={"metadata": '{"title":"Default hint"}'},
+        files={"file": ("doc.md", b"hello world", "text/markdown")},
+    )
+
+    assert response.status_code == 202
+
+    _, tasks = await _load_source_and_task(session_factory)
+    assert len(tasks) == 1
+    assert tasks[0].result_metadata in (None, {}) or "processing_hint" not in tasks[0].result_metadata
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_upload_endpoint_persists_external_processing_hint_in_task_metadata(
+    api_client,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    response = await api_client.post(
+        "/api/admin/sources",
+        data={"metadata": '{"title":"External hint","processing_hint":"external"}'},
+        files={"file": ("report.pdf", b"%PDF-1.4", "application/pdf")},
+    )
+
+    assert response.status_code == 202
+
+    _, tasks = await _load_source_and_task(session_factory)
+    assert len(tasks) == 1
+    assert tasks[0].result_metadata == {"processing_hint": "external"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
 async def test_upload_endpoint_rejects_unsupported_extension(api_client) -> None:
     response = await api_client.post(
         "/api/admin/sources",
@@ -309,7 +347,7 @@ async def test_upload_worker_and_task_status_round_trip(
             "path_a_max_audio_duration_sec": 80,
             "path_a_max_video_duration_sec": 120,
             "storage_service": SimpleNamespace(download=AsyncMock(return_value=b"# hello world")),
-            "docling_parser": SimpleNamespace(
+            "document_processor": SimpleNamespace(
                 parse_and_chunk=AsyncMock(
                     return_value=[
                         FakeChunkData(

@@ -36,7 +36,11 @@ class Settings(BaseSettings):
     batch_max_items_per_request: int = Field(default=1000, ge=1)
     gemini_content_model: str = Field(default="gemini-2.5-flash", min_length=1)
     gemini_file_upload_threshold_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
+    document_ai_project_id: str | None = Field(default=None)
+    document_ai_location: str = Field(default="us", min_length=1)
+    document_ai_processor_id: str | None = Field(default=None)
     chunk_max_tokens: int = Field(default=1024, ge=1, le=8192)
+    path_c_min_chars_per_page: int = Field(default=50, ge=1)
     path_a_text_threshold_pdf: int = Field(default=2000, ge=1)
     path_a_text_threshold_media: int = Field(default=500, ge=1)
     path_a_max_pdf_pages: int = Field(default=6, ge=1)
@@ -91,6 +95,8 @@ class Settings(BaseSettings):
         normalized = dict(data)
         for field_name in (
             "gemini_api_key",
+            "document_ai_project_id",
+            "document_ai_processor_id",
             "llm_api_key",
             "llm_api_base",
             "rewrite_llm_model",
@@ -105,6 +111,10 @@ class Settings(BaseSettings):
     def validate_retrieval_settings(self) -> Settings:
         if self.min_retrieved_chunks > self.retrieval_top_n:
             raise ValueError("MIN_RETRIEVED_CHUNKS must be less than or equal to RETRIEVAL_TOP_N")
+        if self.document_ai_project_id and not self.document_ai_processor_id:
+            raise ValueError(
+                "DOCUMENT_AI_PROCESSOR_ID is required when DOCUMENT_AI_PROJECT_ID is set"
+            )
         if 60 % self.batch_poll_interval_seconds != 0:
             raise ValueError(
                 "BATCH_POLL_INTERVAL_SECONDS must evenly divide 60 "
@@ -136,6 +146,11 @@ class Settings(BaseSettings):
     @property
     def seaweedfs_filer_url(self) -> str:
         return f"http://{self.seaweedfs_host}:{self.seaweedfs_filer_port}"
+
+    @computed_field
+    @property
+    def document_ai_enabled(self) -> bool:
+        return bool(self.document_ai_project_id and self.document_ai_processor_id)
 
 
 @lru_cache

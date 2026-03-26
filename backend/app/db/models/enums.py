@@ -61,6 +61,7 @@ class DocumentVersionStatus(StrEnum):
 class ProcessingPath(StrEnum):
     PATH_A = "path_a"
     PATH_B = "path_b"
+    PATH_C = "path_c"
 
 
 class ChunkStatus(StrEnum):
