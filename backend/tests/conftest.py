@@ -187,6 +187,7 @@ def mock_storage_service() -> SimpleNamespace:
     return SimpleNamespace(
         generate_object_key=StorageService.generate_object_key,
         ensure_storage_root=AsyncMock(),
+        download=AsyncMock(return_value=b"avatar-bytes"),
         upload=AsyncMock(),
         delete=AsyncMock(),
     )
@@ -339,6 +340,29 @@ async def chat_client(chat_app: FastAPI) -> httpx.AsyncClient:
 @pytest_asyncio.fixture
 async def api_client(admin_app: FastAPI) -> httpx.AsyncClient:
     transport = httpx.ASGITransport(app=admin_app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        yield client
+
+
+@pytest.fixture
+def profile_app(
+    session_factory: async_sessionmaker[AsyncSession],
+    mock_storage_service: SimpleNamespace,
+) -> FastAPI:
+    from app.api.profile import admin_router as profile_admin_router
+    from app.api.profile import chat_router as profile_chat_router
+
+    app = FastAPI()
+    app.include_router(profile_chat_router)
+    app.include_router(profile_admin_router)
+    app.state.session_factory = session_factory
+    app.state.storage_service = mock_storage_service
+    return app
+
+
+@pytest_asyncio.fixture
+async def profile_client(profile_app: FastAPI) -> httpx.AsyncClient:
+    transport = httpx.ASGITransport(app=profile_app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         yield client
 

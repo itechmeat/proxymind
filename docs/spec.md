@@ -54,12 +54,13 @@ This separation ensures resilience: chat does not depend on heavy indexing, and 
 
 ### Frontend
 
-| Tool  | Min. version | Role                   |
-| ----- | ------------ | ---------------------- |
-| Bun   | 1.3.10+      | JS/TS runtime          |
-| React | 19.2.4+      | UI framework           |
-| Vite  | 8.0.0+       | Build, dev server, HMR |
-| Biome | 2.4.7+       | Linting and formatting |
+| Tool       | Min. version | Role                   |
+| ---------- | ------------ | ---------------------- |
+| Bun        | 1.3.10+      | JS/TS runtime          |
+| React      | 19.2.4+      | UI framework           |
+| TypeScript | 5.9.3+       | Type checking          |
+| Vite       | 8.0.0+       | Build, dev server, HMR |
+| Biome      | 2.4.7+       | Linting and formatting |
 
 ### Infrastructure
 

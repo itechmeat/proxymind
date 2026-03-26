@@ -44,9 +44,13 @@ Before considering an implementation complete, you MUST:
 After archiving a change (`/opsx:archive`), you MUST execute ALL steps below **before** presenting the archive summary to the user. The archive is NOT complete until every step is done. Do NOT output the archive summary and then "forget" the remaining steps.
 
 1. Mark the corresponding story checkbox in `docs/plan.md` as done (`- [x]`).
-2. Propose commit messages using the `commits` skill (conventional commits format). This step is MANDATORY — the archive summary MUST include the proposed commit message at the end.
-3. Never commit without explicit user permission.
-4. Do not archive non-Phase-1 changes as "complete" unless stable implemented behavior is already covered by tests or the gap is explicitly documented.
+2. Consult the `commits` skill in the same turn and use it to propose a conventional commit message. Paraphrasing from memory does NOT satisfy this requirement. This step is MANDATORY.
+3. Propose a branch name in the archive summary. Use the format `<type>/<change-name>` where `<type>` matches the primary conventional-commit intent (`feat`, `fix`, `docs`, `refactor`, `test`, `chore`). For normal story delivery, default to `feat/<change-name>` unless a narrower type is clearly more accurate.
+4. The archive summary MUST end with an explicit block containing both lines exactly in this form:
+   `Proposed branch name: <type>/<change-name>`
+   `Proposed commit message: <type>(<scope>): <description>`
+5. Never commit without explicit user permission.
+6. Do not archive non-Phase-1 changes as "complete" unless stable implemented behavior is already covered by tests or the gap is explicitly documented.
 
 ## Project Overview
 
@@ -95,6 +99,8 @@ Every final report MUST include at the end:
 
 - `Skills used: <list>` — if any skills were consulted
 - `Docs used: <list>` — if any external documentation was fetched, on the new line of the report
+
+If a policy or workflow step explicitly names a skill, the agent MUST actually consult that skill in the current turn before claiming compliance. Remembering the skill's guidance from an earlier turn or from memory is not sufficient.
 
 ## Delegation
 

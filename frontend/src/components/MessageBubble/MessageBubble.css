@@ -1,0 +1,114 @@
+.message-bubble {
+  display: flex;
+  width: 100%;
+  gap: 0.75rem;
+}
+
+.message-bubble--user {
+  justify-content: flex-end;
+}
+
+.message-bubble__avatar {
+  margin-top: 0.2rem;
+  border: 1px solid color-mix(in oklab, var(--border) 88%, white 12%);
+}
+
+.message-bubble__content {
+  width: min(100%, 40rem);
+}
+
+.message-bubble__card {
+  border-radius: 1.4rem;
+  padding: 0.95rem 1rem;
+  box-shadow: 0 22px 40px -34px oklch(0.18 0 0 / 0.5);
+}
+
+.message-bubble__card--assistant {
+  background: color-mix(in oklab, var(--card) 92%, oklch(0.97 0.006 95) 8%);
+  border: 1px solid color-mix(in oklab, var(--border) 84%, white 16%);
+}
+
+.message-bubble__card--user {
+  background: linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--primary) 88%, oklch(0.94 0.006 95) 12%),
+    color-mix(in oklab, var(--primary) 72%, white 28%)
+  );
+  color: var(--primary-foreground);
+}
+
+.message-bubble__text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+}
+
+.message-bubble__markdown > *:first-child {
+  margin-top: 0;
+}
+
+.message-bubble__markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+/* The remark plugin emits <sup><button>, so keep the wrapper from re-superscripting the button. */
+.message-bubble__markdown sup {
+  vertical-align: baseline;
+}
+
+.message-bubble__markdown p,
+.message-bubble__markdown ul,
+.message-bubble__markdown ol,
+.message-bubble__markdown pre {
+  margin: 0 0 0.85rem;
+}
+
+.message-bubble__markdown code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+.message-bubble__markdown pre {
+  overflow-x: auto;
+  border-radius: 1rem;
+  padding: 0.8rem 0.9rem;
+  background: color-mix(in oklab, var(--secondary) 78%, white 22%);
+}
+
+.message-bubble__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.45rem;
+  padding: 0 0.2rem;
+}
+
+.message-bubble__timestamp {
+  font-size: 0.8rem;
+  color: var(--muted-foreground);
+}
+
+.message-bubble__badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.22rem 0.55rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  background: color-mix(in oklab, var(--secondary) 88%, white 12%);
+  color: var(--secondary-foreground);
+}
+
+.message-bubble__error {
+  margin-top: 0.65rem;
+  color: color-mix(in oklab, var(--destructive) 78%, black 22%);
+  font-size: 0.92rem;
+}
+
+.message-bubble__actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 0.7rem;
+}

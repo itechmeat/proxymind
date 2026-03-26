@@ -1,31 +1,31 @@
-import "./App.css";
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router";
+
+import { appConfig } from "@/lib/config";
+import { AdminPage, SnapshotsTab, SourcesTab } from "@/pages/AdminPage";
+import { ChatPage } from "@/pages/ChatPage";
+
+function AdminRouteGuard() {
+  if (!appConfig.adminMode) {
+    return <Navigate replace to="/" />;
+  }
+
+  return <Outlet />;
+}
 
 function App() {
   return (
-    <main className="app-shell">
-      <section className="hero-panel">
-        <p className="eyebrow">ProxyMind</p>
-        <h1>Bootstrap completed</h1>
-        <p className="lead">
-          The frontend scaffold is running on Vite, the backend is expected on
-          FastAPI, and the repository is ready for the next vertical slice.
-        </p>
-        <div className="status-grid">
-          <article>
-            <span>Frontend</span>
-            <strong>React 19 + Vite 8</strong>
-          </article>
-          <article>
-            <span>Backend</span>
-            <strong>FastAPI + structlog</strong>
-          </article>
-          <article>
-            <span>Infra</span>
-            <strong>Postgres, Qdrant, MinIO, Redis</strong>
-          </article>
-        </div>
-      </section>
-    </main>
+    <BrowserRouter>
+      <Routes>
+        <Route element={<ChatPage />} path="/" />
+        <Route element={<AdminRouteGuard />} path="/admin">
+          <Route element={<AdminPage />}>
+            <Route element={<Navigate replace to="sources" />} index />
+            <Route element={<SourcesTab />} path="sources" />
+            <Route element={<SnapshotsTab />} path="snapshots" />
+          </Route>
+        </Route>
+      </Routes>
+    </BrowserRouter>
   );
 }
 

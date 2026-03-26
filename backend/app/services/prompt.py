@@ -10,7 +10,6 @@ if TYPE_CHECKING:
 
 NO_CONTEXT_REFUSAL = "I could not find an answer to that in the knowledge base."
 
-
 def format_chunk_header(
     index: int,
     chunk: RetrievedChunk,

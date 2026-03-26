@@ -1,0 +1,188 @@
+<h2>Source type indicators</h2>
+<p class="subtitle">How to visually distinguish source types in the citations block</p>
+
+<style>
+  .mock-msg {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 16px 18px;
+    font-size: 14px;
+    line-height: 1.7;
+    color: rgba(255,255,255,0.85);
+    margin-bottom: 14px;
+  }
+  .mock-msg sup {
+    color: #818cf8;
+    font-weight: 700;
+    cursor: pointer;
+    font-size: 11px;
+    margin-left: 1px;
+  }
+  .src-list {
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .src-list-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 14px;
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(255,255,255,0.5);
+    background: rgba(255,255,255,0.03);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .src-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 11px 14px;
+    font-size: 13px;
+  }
+  .src-item + .src-item { border-top: 1px solid rgba(255,255,255,0.04); }
+  .src-item .num { color: #818cf8; font-weight: 700; min-width: 18px; font-size: 13px; line-height: 1.4; }
+  .src-item .title { color: rgba(255,255,255,0.85); font-weight: 500; }
+  .src-item .title--link { color: #60a5fa; text-decoration: underline; cursor: pointer; }
+  .src-item .meta { color: rgba(255,255,255,0.35); font-size: 11px; margin-top: 3px; display: flex; align-items: center; gap: 6px; }
+  .demo-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: rgba(255,255,255,0.3);
+    margin-bottom: 10px;
+  }
+  /* Icon styles */
+  .src-icon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    opacity: 0.5;
+  }
+  .src-icon--pdf { color: #ef4444; opacity: 0.7; }
+  .src-icon--web { color: #3b82f6; opacity: 0.7; }
+  .src-icon--video { color: #a855f7; opacity: 0.7; }
+  .src-icon--audio { color: #f59e0b; opacity: 0.7; }
+  .src-icon--image { color: #10b981; opacity: 0.7; }
+  .src-icon--doc { color: #6b7280; opacity: 0.7; }
+  /* Badge styles */
+  .src-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 1px 5px;
+    border-radius: 3px;
+    line-height: 1.4;
+  }
+  .src-badge--pdf { background: rgba(239,68,68,0.15); color: #ef4444; }
+  .src-badge--web { background: rgba(59,130,246,0.15); color: #60a5fa; }
+  .src-badge--video { background: rgba(168,85,247,0.15); color: #a855f7; }
+  .src-badge--audio { background: rgba(245,158,11,0.15); color: #f59e0b; }
+  .src-badge--img { background: rgba(16,185,129,0.15); color: #10b981; }
+  .src-badge--doc { background: rgba(107,114,128,0.15); color: #9ca3af; }
+</style>
+
+<!-- Option 1: Lucide icons -->
+<div class="option" data-choice="icons" onclick="toggleSelect(this)" style="display:block; padding: 24px;">
+  <div style="display:flex; align-items:center; gap:12px; margin-bottom:18px;">
+    <div class="letter">A</div>
+    <div>
+      <h3 style="margin:0;">SVG icons (lucide-react)</h3>
+      <p style="margin:4px 0 0; font-size:13px; opacity:0.5;">Color-coded icons per type. Subtle, professional. Requires lucide-react dep.</p>
+    </div>
+  </div>
+
+  <div class="mock-msg">
+    Stoic philosophy teaches us about inner peace<sup>1</sup>. Modern research supports these ideas<sup>2</sup>, and there are great video lectures on the topic<sup>3</sup>. Historical images also capture the era<sup>4</sup>.
+  </div>
+  <div class="src-list">
+    <div class="src-list-header">&#9660; 4 sources</div>
+    <div class="src-item">
+      <span class="num">1</span>
+      <!-- PDF icon (simplified FileText) -->
+      <svg class="src-icon src-icon--pdf" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 13H8"/><path d="M16 17H8"/><path d="M16 13h-2"/></svg>
+      <div>
+        <div class="title">"Meditations", Chapter 5</div>
+        <div class="meta">PDF &middot; p. 42</div>
+      </div>
+    </div>
+    <div class="src-item">
+      <span class="num">2</span>
+      <!-- Globe icon -->
+      <svg class="src-icon src-icon--web" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+      <div>
+        <div class="title title--link">"Modern Stoicism Research"</div>
+        <div class="meta">Article &middot; example.com</div>
+      </div>
+    </div>
+    <div class="src-item">
+      <span class="num">3</span>
+      <!-- Video icon -->
+      <svg class="src-icon src-icon--video" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>
+      <div>
+        <div class="title title--link">"Stoicism Lecture Series"</div>
+        <div class="meta">Video &middot; at 03:24</div>
+      </div>
+    </div>
+    <div class="src-item">
+      <span class="num">4</span>
+      <!-- Image icon -->
+      <svg class="src-icon src-icon--image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+      <div>
+        <div class="title">"Roman Forum, 2nd century"</div>
+        <div class="meta">Image</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Option 2: CSS badges -->
+<div class="option" data-choice="badges" onclick="toggleSelect(this)" style="display:block; padding: 24px;">
+  <div style="display:flex; align-items:center; gap:12px; margin-bottom:18px;">
+    <div class="letter">B</div>
+    <div>
+      <h3 style="margin:0;">CSS-only type badges</h3>
+      <p style="margin:4px 0 0; font-size:13px; opacity:0.5;">Colored mini-labels. Zero new dependencies. Slightly less elegant.</p>
+    </div>
+  </div>
+
+  <div class="mock-msg">
+    Stoic philosophy teaches us about inner peace<sup>1</sup>. Modern research supports these ideas<sup>2</sup>, and there are great video lectures on the topic<sup>3</sup>. Historical images also capture the era<sup>4</sup>.
+  </div>
+  <div class="src-list">
+    <div class="src-list-header">&#9660; 4 sources</div>
+    <div class="src-item">
+      <span class="num">1</span>
+      <div>
+        <div class="title">"Meditations", Chapter 5</div>
+        <div class="meta"><span class="src-badge src-badge--pdf">PDF</span> p. 42</div>
+      </div>
+    </div>
+    <div class="src-item">
+      <span class="num">2</span>
+      <div>
+        <div class="title title--link">"Modern Stoicism Research"</div>
+        <div class="meta"><span class="src-badge src-badge--web">WEB</span> example.com</div>
+      </div>
+    </div>
+    <div class="src-item">
+      <span class="num">3</span>
+      <div>
+        <div class="title title--link">"Stoicism Lecture Series"</div>
+        <div class="meta"><span class="src-badge src-badge--video">VIDEO</span> at 03:24</div>
+      </div>
+    </div>
+    <div class="src-item">
+      <span class="num">4</span>
+      <div>
+        <div class="title">"Roman Forum, 2nd century"</div>
+        <div class="meta"><span class="src-badge src-badge--img">IMG</span></div>
+      </div>
+    </div>
+  </div>
+</div>

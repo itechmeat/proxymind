@@ -86,7 +86,13 @@ async def send_message(
     accumulated_content: list[str] = []
 
     def format_event(
-        event: ChatStreamMeta | ChatStreamToken | ChatStreamDone | ChatStreamError | ChatStreamCitations,
+        event: (
+            ChatStreamMeta
+            | ChatStreamToken
+            | ChatStreamDone
+            | ChatStreamError
+            | ChatStreamCitations
+        ),
     ) -> str:
         nonlocal assistant_message_id
         if isinstance(event, ChatStreamMeta):

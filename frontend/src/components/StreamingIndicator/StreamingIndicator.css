@@ -1,0 +1,36 @@
+.streaming-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  vertical-align: middle;
+}
+
+.streaming-indicator__dot {
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--foreground) 65%, white 35%);
+  animation: streaming-indicator-bounce 0.9s infinite ease-in-out;
+}
+
+.streaming-indicator__dot:nth-child(2) {
+  animation-delay: 0.12s;
+}
+
+.streaming-indicator__dot:nth-child(3) {
+  animation-delay: 0.24s;
+}
+
+@keyframes streaming-indicator-bounce {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+
+  40% {
+    transform: translateY(-0.2rem);
+    opacity: 1;
+  }
+}
