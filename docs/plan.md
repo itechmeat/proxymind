@@ -254,9 +254,9 @@ Phase outcome: improved retrieval and answer quality driven by data.
   - Tasks: BGE-M3 integration, sparse vector swap, reindex, language-specific eval
   - **Parallel pair:** S9-01 or S9-02 — separate embedding/vector concern, no overlap with chunking code
 
-### Phase 10: Agent Protocols (TOOLS.md)
+### Phase 10: Agent Protocols and Distribution
 
-Phase outcome: twin is available as an agent in the open ecosystem.
+Phase outcome: twin is available as a distribution-ready agent in the open ecosystem.
 
 - [ ] **S10-01: A2A endpoint**
       Agent Card, task intake via A2A protocol, stateful task lifecycle, streaming.
@@ -272,9 +272,29 @@ Phase outcome: twin is available as an agent in the open ecosystem.
   - Tasks: MCP server, tool registry, TOOLS.md parser, data connector adapters
   - **Parallel pair:** S10-01 (A2A endpoint) — both are transport wrappers over existing services, no shared code
 
-### Phase 11: External Channels
+- [ ] **S10-03: Distribution manifest + session contract**
+      Publish a machine-readable distribution contract for external surfaces such as marketplaces, directories, applications, and channels. The manifest exposes identity, capabilities, supported action classes, usage schema, settlement identity, optional public identity fields, and supported transports. Requests from a distribution surface carry normalized context such as `distribution_surface_id`, `distribution_profile_id`, `external_session_id`, and optional limits or allowances.
+  - **Outcome:** the same twin can be integrated into multiple external surfaces without a bespoke adapter per surface
+  - **Verification:** two simulated external surfaces load the manifest, send requests with different distribution profiles, and receive responses correlated to the correct external session and profile
+  - Tasks: manifest schema, discovery endpoint, distribution session context model, correlation persistence, profile resolver, compatibility tests
+  - **Parallel pair:** S10-04 (Usage metering + receipts) — contract boundary vs execution accounting, minimal overlap
 
-Phase outcome: the twin can operate in external messaging and social channels without a standalone ProxyMind registration flow for end users.
+- [ ] **S10-04: Usage metering + receipts**
+      Emit normalized usage events and receipts for performed actions. ProxyMind measures what the twin did and returns machine-readable receipts linked to messages, tasks, and sessions, but retail pricing remains the responsibility of the external distribution surface.
+  - **Outcome:** marketplaces and other surfaces can apply their own pricing, free modes, allowances, and settlement rules on top of standardized usage
+  - **Verification:** response produces a receipt; retry with the same idempotency key does not duplicate the receipt; audit links the receipt to the message, session, or task
+  - Tasks: action class taxonomy, metering hooks, receipt schema, idempotency, audit integration, regression tests
+  - **Parallel pair:** S10-03 (Distribution manifest + session contract) — contract boundary vs execution accounting, minimal overlap
+
+- [ ] **S10-05: Owner distribution settings**
+      Admin API and UI for owner-managed distribution settings: payout destination, allowed external surfaces, optional public identity fields, free or paid mode permissions, invitation or export policies, and minimum settlement rules. Retail pricing is not stored as a single global twin price and MAY differ per external surface.
+  - **Outcome:** the owner can safely expose the same twin through multiple marketplaces, apps, and channels with different business rules
+  - **Verification:** configure two surfaces with different policies; inbound requests honor the correct policy and payout destination
+  - Tasks: settings schema, admin endpoints, owner UI, payout configuration, allowlist and policy validation, optional public identity fields, tests
+
+### Phase 11: External Channels (v2)
+
+Phase outcome: the twin can operate in external messaging and social channels without a standalone ProxyMind registration flow for end users. This phase is intentionally outside the first distribution-ready scope because external surfaces can already integrate the twin through Phase 10.
 
 - [ ] **S11-01: External channels — identity + connectors**
       Visitor identity model: resolve or create visitors implicitly from platform identity such as `(channel_connector, external_user_id)`. Keep separate from admin auth. Integration layer for external chat platforms (Telegram, Facebook, VK, Instagram, TikTok, and similar channels). Normalize inbound/outbound events into the same internal chat flow as the web UI.

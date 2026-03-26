@@ -86,20 +86,23 @@ This is not a single system prompt string but a structured personality descripti
 
 The primary scenario is a chat on a website or in an application. A visitor communicates with the twin through a web interface, receiving responses on behalf of the prototype with references to their materials.
 
-In later stages, the twin can also operate through external messaging and social platforms via **channel connectors** (for example Telegram, Facebook, VK, Instagram, TikTok, and similar channels). In that model, the visitor chats in the native channel instead of registering in a separate ProxyMind UI. The system identifies the visitor through the platform-provided identity and maps it to an internal visitor record and session context.
+In later stages, the twin can also be exposed through third-party applications, directories, marketplaces, and external messaging or social platforms. For messaging and social platforms, ProxyMind uses **channel connectors** (for example Telegram, Facebook, VK, Instagram, TikTok, and similar channels). In that model, the visitor chats in the native channel instead of registering in a separate ProxyMind UI. The system identifies the visitor through the platform-provided identity and maps it to an internal visitor record and session context.
 
 Installation and setup are performed by a technical specialist — for themselves or as a service. The twin's owner (or their representative) uploads materials, configures the personality, and publishes the knowledge base.
 
 ## Compatibility with Agent Ecosystems
 
-ProxyMind does not exist in isolation. The twin is a full-fledged agent compatible with open protocols:
+ProxyMind does not exist in isolation. The twin is designed to participate in multiple external ecosystems without being rewritten for each one.
 
-- **A2A (Agent-to-Agent)** — external interface. The twin publishes an Agent Card, accepts tasks from other agents, participates in inter-agent interactions, and can exist on agent marketplaces.
+- **A2A (Agent-to-Agent)** — external task interface. The twin publishes an Agent Card, accepts tasks from other agents, and participates in inter-agent interactions.
 - **MCP (Model Context Protocol)** — internal interface. Standardized access to the twin's tools, data sources, and internal capabilities.
+- **Distribution surfaces** — marketplaces, directories, applications, and channels MAY package the same twin differently for their own audiences.
 
-A2A on the outside, MCP on the inside.
+A2A on the outside, MCP on the inside, and a normalized distribution boundary around the twin.
 
-The initial focus is a chat-first digital twin. A2A and MCP are built into the architecture from the start to avoid rebuilding the foundation, but are implemented in later stages.
+ProxyMind SHOULD expose identity, capabilities, usage metering, and settlement identity in a machine-readable way. Retail pricing, end-user packaging, and billing rules MAY differ across external surfaces and are not the twin's canonical responsibility.
+
+The initial focus is a chat-first digital twin. A2A, MCP, and distribution-ready boundaries are built into the architecture from the start to avoid rebuilding the foundation, but are implemented in later stages.
 
 ## Key Properties
 
@@ -110,5 +113,6 @@ The initial focus is a chat-first digital twin. A2A and MCP are built into the a
 - **Source references** — citations, inline links, and a collapsible block with relevant materials.
 - **Configurable personality** — character and behavior through files.
 - **A2A/MCP compatibility** — the twin as an agent in an open ecosystem.
+- **Distribution-ready** — the same twin can be exposed through multiple marketplaces, apps, and channels with surface-specific pricing and limits.
 - **LLM provider independence** — the reasoning model can be from any provider; embeddings are tied to the chosen embedding provider.
 - **Multilingual** — all language-dependent components (search, stemming, tokenization) are configurable for any widely-used language.

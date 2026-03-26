@@ -11,6 +11,11 @@
       "sourceType": "github",
       "computedHash": "58ce68f628890c3925aea2b5435a649251ac182057541045c68fc19a27aaa0ec"
     },
+    "architecture-md-builder": {
+      "source": "tdimino/claude-code-minoan",
+      "sourceType": "github",
+      "computedHash": "a74f9cd210d51fb33386b0896be02b806cdcc1d5386a6e450dca3ab4c3002083"
+    },
     "ask-questions-if-underspecified": {
       "source": "trailofbits/skills",
       "sourceType": "github",
@@ -44,7 +49,7 @@
     "gemini-live-api-dev": {
       "source": "google-gemini/gemini-skills",
       "sourceType": "github",
-      "computedHash": "cf4ef3b9c9a331f0507357d78fb570b4bdee3010dfd2fb40b3ee3b25269fd3c1"
+      "computedHash": "ed5a34f05d0f162dd0a8b3609ed501f23576a91ab37440a46e5778f383ab79af"
     },
     "minio": {
       "source": "vm0-ai/vm0-skills",
@@ -125,6 +130,11 @@
       "source": "vercel-labs/agent-skills",
       "sourceType": "github",
       "computedHash": "afeca00ac2f492d88fdd010e73d91719a5b57c564bb4a73325b0bd77e11323ab"
+    },
+    "vertex-ai-api-dev": {
+      "source": "google-gemini/gemini-skills",
+      "sourceType": "github",
+      "computedHash": "050cf4e9a14ebc86120007c59ea5dd0cf3924037b8a78871d960e0d05a4bac17"
     },
     "vite": {
       "source": "itechmeat/llm-code",
