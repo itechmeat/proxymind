@@ -35,7 +35,7 @@ The `ChatService` SHALL provide a `stream_answer()` method alongside the existin
 
 After the LLM response is received and citations are extracted, the system SHALL call `compute_content_type_spans()` with the response text and the `included_promotions` from `AssembledPrompt`. The resulting spans SHALL be persisted in the assistant message's `content_type_spans` JSONB column.
 
-After the assistant message is persisted with `status=complete`, the system SHALL check `memory_block.needs_summary_update`. When `True` and a `summary_enqueuer` is available, the system SHALL enqueue a `generate_session_summary` arq task with `session_id` and `memory_block.window_start_message_id`. Enqueue failure SHALL be logged but SHALL NOT fail the response.
+After the assistant message is persisted with `status=complete`, the system SHALL check `memory_block.needs_summary_update`. When `True` and a `summary_enqueuer` is available, the system SHALL enqueue a `generate_session_summary` arq task with `session_id` and `memory_block.window_start_message_id`. `window_start_message_id` MAY be `null` when the memory window is empty and all recent messages should be summarized. Enqueue failure SHALL be logged but SHALL NOT fail the response.
 
 The assistant message SHALL be created with `role=assistant`, `status=streaming`, and `parent_message_id` set to the user message's `id` before the first SSE event is emitted. Upon successful completion, the assistant message SHALL be updated to `status=complete` with `content`, `model_name`, token counts (`token_count_prompt`, `token_count_completion`), deduplicated `source_ids` from retrieved chunks, `content_type_spans` from heuristic classification, and audit hashes (`config_commit_hash`, `config_content_hash` from `context_assembler.persona_context`).
 
@@ -47,7 +47,7 @@ On every response -- both the LLM-generated response path (`chat.assistant_compl
 
 - **WHEN** `POST /api/chat/messages` is called with a valid `session_id` and `text`, and the session has an active snapshot with indexed chunks
 - **THEN** the response SHALL be 200 with `Content-Type: text/event-stream; charset=utf-8`
-- **AND** the SSE stream SHALL emit `meta` (with `message_id`, `session_id`, `snapshot_id`), then one or more `token` events, then `done` (with `token_count_prompt`, `token_count_completion`, `model_name`)
+- **AND** the SSE stream SHALL emit `meta` (with `message_id`, `session_id`, `snapshot_id`), then one or more `token` events, then `done` (with `token_count_prompt`, `token_count_completion`, `model_name`, `retrieved_chunks_count`)
 
 #### Scenario: ContextAssembler called with memory_block
 
@@ -98,7 +98,7 @@ On every response -- both the LLM-generated response path (`chat.assistant_compl
 #### Scenario: ContextAssembler used for prompt construction
 
 - **WHEN** `ChatService.stream_answer()` assembles the LLM prompt
-- **THEN** it SHALL call `ContextAssembler.assemble(chunks=retrieved_chunks, query=original_query, source_map=source_map)`
+- **THEN** it SHALL call `ContextAssembler.assemble(chunks=retrieved_chunks, query=original_query, source_map=source_map, memory_block=memory_block)`
 - **AND** SHALL pass the resulting `AssembledPrompt.messages` to the LLM service
 - **AND** SHALL NOT call `build_chat_prompt()`
 
@@ -254,12 +254,12 @@ The `ChatService` constructor SHALL accept a `context_assembler` parameter of ty
 
 ### Requirement: Summary enqueue protocol
 
-`SummaryEnqueuer` SHALL be defined as a protocol: an async callable accepting `session_id` (`str`) and `window_start_message_id` (`str`). The implementation SHALL enqueue a `generate_session_summary` arq task with `job_id=f"summary:{session_id}"` for deduplication. The enqueue SHALL be performed after the assistant message is successfully persisted. Enqueue failure SHALL be caught by `ChatService`, logged as a warning, and SHALL NOT propagate to the caller.
+`SummaryEnqueuer` SHALL be defined as a protocol: an async callable accepting `session_id` (`str`) and `window_start_message_id` (`str | null`). The implementation SHALL enqueue a `generate_session_summary` arq task with `job_id=f"summary:{session_id}"` for deduplication. The enqueue SHALL be performed after the assistant message is successfully persisted. Enqueue failure SHALL be caught by `ChatService`, logged as a warning, and SHALL NOT propagate to the caller.
 
 #### Scenario: Enqueue called with correct parameters
 
 - **WHEN** `summary_enqueuer` is called after a successful response with `needs_summary_update=True`
-- **THEN** it SHALL receive `session_id` as a string and `window_start_message_id` as a string
+- **THEN** it SHALL receive `session_id` as a string and `window_start_message_id` as either a string or `null`
 
 #### Scenario: arq job_id ensures deduplication
 

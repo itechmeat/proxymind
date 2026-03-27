@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.db.models.enums import MessageRole, MessageStatus
 from app.workers.tasks import summarize
@@ -60,9 +61,13 @@ async def test_summary_generated_and_saved() -> None:
     session = SimpleNamespace(
         get=AsyncMock(return_value=session_row),
         execute=AsyncMock(
-            return_value=SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: history))
+            side_effect=[
+                SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: history)),
+                SimpleNamespace(rowcount=1),
+            ]
         ),
         commit=AsyncMock(),
+        rollback=AsyncMock(),
     )
 
     await generate_session_summary(
@@ -112,6 +117,7 @@ async def test_summary_skipped_when_no_messages_to_summarize() -> None:
             return_value=SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: history))
         ),
         commit=AsyncMock(),
+        rollback=AsyncMock(),
     )
 
     await generate_session_summary(
@@ -155,6 +161,7 @@ async def test_summary_failure_preserves_old_summary() -> None:
             return_value=SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: history))
         ),
         commit=AsyncMock(),
+        rollback=AsyncMock(),
     )
 
     await generate_session_summary(
@@ -200,6 +207,7 @@ async def test_dedup_guard_skips_when_boundary_already_advanced() -> None:
             return_value=SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: history))
         ),
         commit=AsyncMock(),
+        rollback=AsyncMock(),
     )
 
     await generate_session_summary(
@@ -242,9 +250,13 @@ async def test_max_summary_tokens_comes_from_config() -> None:
     session = SimpleNamespace(
         get=AsyncMock(return_value=session_row),
         execute=AsyncMock(
-            return_value=SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: history))
+            side_effect=[
+                SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: history)),
+                SimpleNamespace(rowcount=1),
+            ]
         ),
         commit=AsyncMock(),
+        rollback=AsyncMock(),
     )
 
     await generate_session_summary(
@@ -287,9 +299,13 @@ async def test_summary_uses_asyncio_wait_for_timeout(monkeypatch: pytest.MonkeyP
     session = SimpleNamespace(
         get=AsyncMock(return_value=session_row),
         execute=AsyncMock(
-            return_value=SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: history))
+            side_effect=[
+                SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: history)),
+                SimpleNamespace(rowcount=1),
+            ]
         ),
         commit=AsyncMock(),
+        rollback=AsyncMock(),
     )
     captured_timeout: dict[str, float] = {}
 
@@ -315,3 +331,152 @@ async def test_summary_uses_asyncio_wait_for_timeout(monkeypatch: pytest.MonkeyP
     )
 
     assert captured_timeout["value"] == pytest.approx(1.234)
+
+
+@pytest.mark.asyncio
+async def test_summary_with_empty_window_start_summarizes_all_unsummarized_messages() -> None:
+    session_id = uuid.uuid7()
+    session_row = SimpleNamespace(
+        id=session_id,
+        summary="Existing summary",
+        summary_token_count=5,
+        summary_up_to_message_id=None,
+    )
+    history = [
+        _message(MessageRole.USER, "first question"),
+        _message(MessageRole.ASSISTANT, "first answer"),
+    ]
+    llm_service = SimpleNamespace(
+        complete=AsyncMock(return_value=SimpleNamespace(content="Updated summary"))
+    )
+    session = SimpleNamespace(
+        get=AsyncMock(return_value=session_row),
+        execute=AsyncMock(
+            side_effect=[
+                SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: history)),
+                SimpleNamespace(rowcount=1),
+            ]
+        ),
+        commit=AsyncMock(),
+        rollback=AsyncMock(),
+    )
+
+    await generate_session_summary(
+        {
+            "session_factory": lambda: _SessionContextManager(session),
+            "summary_llm_service": llm_service,
+            "settings": SimpleNamespace(
+                conversation_memory_budget=100,
+                conversation_summary_ratio=0.3,
+                conversation_summary_timeout_ms=1000,
+                conversation_summary_temperature=0.1,
+            ),
+        },
+        str(session_id),
+        None,
+    )
+
+    llm_service.complete.assert_awaited_once()
+    assert session_row.summary == "Updated summary"
+    assert session_row.summary_up_to_message_id == history[-1].id
+
+
+@pytest.mark.asyncio
+async def test_summary_stale_boundary_skips_commit() -> None:
+    session_id = uuid.uuid7()
+    boundary_id = uuid.uuid7()
+    window_start_id = uuid.uuid7()
+    session_row = SimpleNamespace(
+        id=session_id,
+        summary="Previous summary.",
+        summary_token_count=5,
+        summary_up_to_message_id=boundary_id,
+    )
+    history = [
+        _message(MessageRole.USER, "old question"),
+        _message(MessageRole.ASSISTANT, "old answer", boundary_id),
+        _message(MessageRole.USER, "middle question"),
+        _message(MessageRole.ASSISTANT, "middle answer"),
+        _message(MessageRole.USER, "latest question", window_start_id),
+    ]
+    llm_service = SimpleNamespace(
+        complete=AsyncMock(return_value=SimpleNamespace(content="Updated summary"))
+    )
+    session = SimpleNamespace(
+        get=AsyncMock(return_value=session_row),
+        execute=AsyncMock(
+            side_effect=[
+                SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: history)),
+                SimpleNamespace(rowcount=0),
+            ]
+        ),
+        commit=AsyncMock(),
+        rollback=AsyncMock(),
+    )
+
+    await generate_session_summary(
+        {
+            "session_factory": lambda: _SessionContextManager(session),
+            "summary_llm_service": llm_service,
+            "settings": SimpleNamespace(
+                conversation_memory_budget=100,
+                conversation_summary_ratio=0.3,
+                conversation_summary_timeout_ms=1000,
+                conversation_summary_temperature=0.1,
+            ),
+        },
+        str(session_id),
+        str(window_start_id),
+    )
+
+    session.rollback.assert_awaited_once()
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_summary_persistence_failure_is_best_effort() -> None:
+    session_id = uuid.uuid7()
+    window_start_id = uuid.uuid7()
+    session_row = SimpleNamespace(
+        id=session_id,
+        summary=None,
+        summary_token_count=None,
+        summary_up_to_message_id=None,
+    )
+    history = [
+        _message(MessageRole.USER, "question"),
+        _message(MessageRole.ASSISTANT, "answer"),
+        _message(MessageRole.USER, "latest", window_start_id),
+    ]
+    llm_service = SimpleNamespace(
+        complete=AsyncMock(return_value=SimpleNamespace(content="Summary"))
+    )
+    session = SimpleNamespace(
+        get=AsyncMock(return_value=session_row),
+        execute=AsyncMock(
+            side_effect=[
+                SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: history)),
+                SQLAlchemyError("db down"),
+            ]
+        ),
+        commit=AsyncMock(),
+        rollback=AsyncMock(),
+    )
+
+    await generate_session_summary(
+        {
+            "session_factory": lambda: _SessionContextManager(session),
+            "summary_llm_service": llm_service,
+            "settings": SimpleNamespace(
+                conversation_memory_budget=100,
+                conversation_summary_ratio=0.3,
+                conversation_summary_timeout_ms=1000,
+                conversation_summary_temperature=0.1,
+            ),
+        },
+        str(session_id),
+        str(window_start_id),
+    )
+
+    session.rollback.assert_awaited_once()
+    session.commit.assert_not_awaited()

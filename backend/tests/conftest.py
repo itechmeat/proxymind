@@ -16,7 +16,12 @@ from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from testcontainers.core.container import DockerContainer
 from testcontainers.postgres import PostgresContainer
 

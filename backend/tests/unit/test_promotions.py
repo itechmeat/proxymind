@@ -132,7 +132,9 @@ def test_empty_text_returns_empty_list() -> None:
 
 
 def test_invalid_priority_defaults_to_low() -> None:
-    service = PromotionsService(promotions_text="## Test\n\n- **Priority:** urgent\n\nBody text here.")
+    service = PromotionsService(
+        promotions_text="## Test\n\n- **Priority:** urgent\n\nBody text here."
+    )
     promotions = service.parse()
     assert promotions[0].priority == "low"
 

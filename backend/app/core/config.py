@@ -133,9 +133,14 @@ class Settings(BaseSettings):
                 "BATCH_POLL_INTERVAL_SECONDS must evenly divide 60 "
                 "for the current arq cron schedule"
             )
-        if self.google_genai_use_vertexai and self.google_cloud_project is None and self.gemini_api_key is None:
+        if (
+            self.google_genai_use_vertexai
+            and self.google_cloud_project is None
+            and self.gemini_api_key is None
+        ):
             raise ValueError(
-                "GOOGLE_CLOUD_PROJECT or GEMINI_API_KEY is required when GOOGLE_GENAI_USE_VERTEXAI is enabled"
+                "GOOGLE_CLOUD_PROJECT or GEMINI_API_KEY is required "
+                "when GOOGLE_GENAI_USE_VERTEXAI is enabled"
             )
         return self
 

@@ -1,0 +1,15 @@
+{
+  "pythonVersion": "3.14",
+  "include": [
+    "backend/app",
+    "backend/tests"
+  ],
+  "executionEnvironments": [
+    {
+      "root": "backend",
+      "extraPaths": [
+        "backend"
+      ]
+    }
+  ]
+}

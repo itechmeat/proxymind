@@ -33,7 +33,11 @@ FAILED_ASSISTANT_CONTENT = "Failed to generate assistant response."
 
 
 class SummaryEnqueuer(Protocol):
-    async def __call__(self, session_id: str, window_start_message_id: str) -> None: ...
+    async def __call__(
+        self,
+        session_id: str,
+        window_start_message_id: str | None,
+    ) -> None: ...
 
 
 class SessionNotFoundError(RuntimeError):
@@ -680,7 +684,6 @@ class ChatService:
         if (
             memory_block is None
             or not memory_block.needs_summary_update
-            or memory_block.window_start_message_id is None
             or self._summary_enqueuer is None
         ):
             return
@@ -688,7 +691,11 @@ class ChatService:
         try:
             await self._summary_enqueuer(
                 str(session_id),
-                str(memory_block.window_start_message_id),
+                (
+                    None
+                    if memory_block.window_start_message_id is None
+                    else str(memory_block.window_start_message_id)
+                ),
             )
         except Exception as error:
             self._logger.warning(

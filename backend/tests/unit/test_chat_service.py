@@ -423,7 +423,9 @@ async def test_answer_deduplicates_source_ids(
     )
     chat_session = await service.create_session()
 
-    await service.answer(session_id=chat_session.id, text="Question?")
+    result = await service.answer(session_id=chat_session.id, text="Question?")
+
+    assert result.assistant_message.source_ids == [shared_source_id]
 
 
 @pytest.mark.asyncio
@@ -576,9 +578,54 @@ async def test_answer_logs_enqueue_failure_without_failing_response(
     )
     chat_session = await service.create_session()
 
-    result = await service.answer(session_id=chat_session.id, text="Question?")
+    with structlog.testing.capture_logs() as captured_logs:
+        result = await service.answer(session_id=chat_session.id, text="Question?")
 
     assert result.assistant_message.content == "Grounded answer"
+    summary_enqueuer.assert_awaited_once()
+    assert any(
+        log.get("event") == "chat.summary_enqueue_failed"
+        and log.get("session_id") == str(chat_session.id)
+        for log in captured_logs
+    )
+
+
+@pytest.mark.asyncio
+async def test_answer_enqueues_summary_without_window_start_when_window_is_empty(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    memory_service = SimpleNamespace(
+        build_memory_block=MagicMock(
+            return_value=MemoryBlock(
+                summary_text="Existing summary",
+                messages=[],
+                total_tokens=4096,
+                needs_summary_update=True,
+                window_start_message_id=None,
+            )
+        )
+    )
+    summary_enqueuer = AsyncMock()
+    service, _, _ = _make_service(
+        db_session,
+        persona_context=persona_context,
+        retrieval_result=[_chunk()],
+        llm_result=LLMResponse(
+            content="Grounded answer",
+            model_name="openai/gpt-4o",
+            token_count_prompt=12,
+            token_count_completion=6,
+        ),
+        conversation_memory_service=memory_service,
+        summary_enqueuer=summary_enqueuer,
+    )
+    chat_session = await service.create_session()
+
+    await service.answer(session_id=chat_session.id, text="Question?")
+
+    summary_enqueuer.assert_awaited_once_with(str(chat_session.id), None)
 
 
 @pytest.mark.asyncio

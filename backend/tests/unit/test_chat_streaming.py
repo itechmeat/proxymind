@@ -25,13 +25,13 @@ from app.services.chat import (
     NoActiveSnapshotError,
     SessionNotFoundError,
 )
-from app.services.context_assembler import AssembledPrompt, ContextAssembler
 from app.services.citation import SourceInfo
+from app.services.context_assembler import AssembledPrompt, ContextAssembler
 from app.services.llm_types import LLMError, LLMStreamEnd, LLMToken
-from app.services.prompt import NO_CONTEXT_REFUSAL
 from app.services.promotions import PromotionsService
-from app.services.query_rewrite import RewriteResult
+from app.services.prompt import NO_CONTEXT_REFUSAL
 from app.services.qdrant import RetrievedChunk
+from app.services.query_rewrite import RewriteResult
 from app.services.snapshot import SnapshotService
 
 
@@ -299,7 +299,9 @@ async def test_stream_answer_includes_conversation_memory_and_enqueues_summary(
         needs_summary_update=True,
         window_start_message_id=uuid.uuid7(),
     )
-    conversation_memory_service = SimpleNamespace(build_memory_block=Mock(return_value=memory_block))
+    conversation_memory_service = SimpleNamespace(
+        build_memory_block=Mock(return_value=memory_block)
+    )
     summary_enqueuer = AsyncMock()
     service, _, _ = _make_service(
         db_session,
@@ -370,7 +372,10 @@ async def test_llm_prompt_uses_original_query_when_rewrite_occurs(
 
     await _collect_events(service, session_id=session.id, text="original question")
 
-    retrieval_service.search.assert_awaited_once_with("expanded query", snapshot_id=session.snapshot_id)
+    retrieval_service.search.assert_awaited_once_with(
+        "expanded query",
+        snapshot_id=session.snapshot_id,
+    )
     llm_service.stream.assert_called_once()
     assert captured_prompt_text["text"] == "original question"
 

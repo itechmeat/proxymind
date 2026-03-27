@@ -206,7 +206,10 @@ def test_empty_optional_provider_strings_are_normalized_to_none() -> None:
 def test_vertex_ai_requires_project_or_api_key() -> None:
     with pytest.raises(
         ValidationError,
-        match="GOOGLE_CLOUD_PROJECT or GEMINI_API_KEY is required when GOOGLE_GENAI_USE_VERTEXAI is enabled",
+        match=(
+            "GOOGLE_CLOUD_PROJECT or GEMINI_API_KEY is required when "
+            "GOOGLE_GENAI_USE_VERTEXAI is enabled"
+        ),
     ):
         Settings(**_base_settings(), google_genai_use_vertexai=True)
 

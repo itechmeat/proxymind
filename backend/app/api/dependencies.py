@@ -135,15 +135,16 @@ def get_chat_service(
 
     arq_pool = request.app.state.arq_pool
 
-    async def summary_enqueuer(session_id: str, window_start_message_id: str) -> None:
-        job = await arq_pool.enqueue_job(
+    async def summary_enqueuer(
+        session_id: str,
+        window_start_message_id: str | None,
+    ) -> None:
+        await arq_pool.enqueue_job(
             "generate_session_summary",
             session_id,
             window_start_message_id,
             _job_id=f"summary:{session_id}",
         )
-        if job is None:
-            raise RuntimeError("arq returned no job handle for summary task")
 
     return ChatService(
         session=session,

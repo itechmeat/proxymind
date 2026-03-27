@@ -50,7 +50,9 @@ def _make_document(
         pages=[
             SimpleNamespace(
                 page_number=1,
-                paragraphs=_items(paragraphs if paragraphs is not None else tuple(range(len(texts)))),
+                paragraphs=_items(
+                    paragraphs if paragraphs is not None else tuple(range(len(texts)))
+                ),
                 tables=_items(tables),
                 blocks=_items(blocks),
             )

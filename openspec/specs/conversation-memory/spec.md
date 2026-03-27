@@ -82,11 +82,18 @@ The `ConversationMemoryService` SHALL be initialized with `budget` (correspondin
 - **AND** the `messages` list SHALL be empty
 - **AND** `summary_text` SHALL still be included
 
+#### Scenario: Empty window still allows summary catch-up
+
+- **WHEN** `summary_token_count` equals or exceeds `budget` and unsummarized recent messages exist
+- **THEN** `needs_summary_update` SHALL remain `True`
+- **AND** `window_start_message_id` SHALL be `None`
+- **AND** the async summary task SHALL interpret `window_start_message_id=None` as "summarize all unsummarized messages"
+
 ---
 
 ### Requirement: Async summary generation
 
-The system SHALL provide an arq task `generate_session_summary` that generates an LLM summary of conversation messages. The task SHALL be triggered post-response by `ChatService` when `MemoryBlock.needs_summary_update` is `True`. The task SHALL accept `session_id` (str) and `window_start_message_id` (str) as parameters. The task SHALL load the session and messages between the summary boundary and the window start (exclusive). When an old summary exists, the summarization prompt SHALL include `"Previous summary: {old_summary}"` followed by `"New messages to incorporate:"` and the new messages. When no summary exists, the prompt SHALL contain the messages to summarize directly. The task SHALL call the LLM with `SUMMARIZE_SYSTEM_PROMPT_TEMPLATE` including `max_summary_tokens` (computed as `conversation_memory_budget * conversation_summary_ratio`). Upon success, the task SHALL atomically update the session's `summary`, `summary_token_count`, and `summary_up_to_message_id` fields. On any failure (timeout, LLM error, unexpected exception), the task SHALL log a warning and return without updating the session -- the old summary remains valid. The `needs_summary_update` flag will naturally be `True` again on the next request, providing a retry mechanism. Deduplication SHALL be enforced via arq `job_id = f"summary:{session_id}"` to ensure at most one summary task per session at a time.
+The system SHALL provide an arq task `generate_session_summary` that generates an LLM summary of conversation messages. The task SHALL be triggered post-response by `ChatService` when `MemoryBlock.needs_summary_update` is `True`. The task SHALL accept `session_id` (str) and `window_start_message_id` (`str | None`) as parameters. When `window_start_message_id` is a string, the task SHALL load the session and messages between the summary boundary and the window start (exclusive). When `window_start_message_id` is `None`, the task SHALL summarize all currently unsummarized messages after the summary boundary. When an old summary exists, the summarization prompt SHALL include `"Previous summary: {old_summary}"` followed by `"New messages to incorporate:"` and the new messages. When no summary exists, the prompt SHALL contain the messages to summarize directly. The task SHALL call the LLM with `SUMMARIZE_SYSTEM_PROMPT_TEMPLATE` including `max_summary_tokens` (computed as `conversation_memory_budget * conversation_summary_ratio`). Upon success, the task SHALL atomically update the session's `summary`, `summary_token_count`, and `summary_up_to_message_id` fields using a stale-boundary guard so an older concurrent task cannot overwrite a newer summary. On any failure (timeout, LLM error, persistence error, unexpected exception), the task SHALL log a warning and return without updating the session -- the old summary remains valid. The `needs_summary_update` flag will naturally be `True` again on the next request, providing a retry mechanism. Deduplication SHALL be enforced via arq `job_id = f"summary:{session_id}"` to ensure at most one summary task per session at a time.
 
 #### Scenario: Summary generated and saved
 
@@ -112,6 +119,18 @@ The system SHALL provide an arq task `generate_session_summary` that generates a
 - **WHEN** the LLM call fails with a timeout or exception during summary generation
 - **THEN** the session's `summary`, `summary_token_count`, and `summary_up_to_message_id` SHALL remain unchanged
 - **AND** a warning SHALL be logged
+
+#### Scenario: Persistence failure preserves old summary
+
+- **WHEN** token counting or database persistence fails after a summary was generated
+- **THEN** the session's `summary`, `summary_token_count`, and `summary_up_to_message_id` SHALL remain unchanged
+- **AND** a warning SHALL be logged
+
+#### Scenario: Stale concurrent task does not overwrite a newer summary
+
+- **WHEN** two summary tasks start from the same boundary and a newer task commits first
+- **THEN** the older task SHALL detect that `summary_up_to_message_id` changed before its write
+- **AND** the older task SHALL skip the update without overwriting the newer summary
 
 #### Scenario: Timeout enforced on LLM call
 

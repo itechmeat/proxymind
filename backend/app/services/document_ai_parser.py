@@ -86,7 +86,9 @@ class DocumentAIParser:
             page_number = int(getattr(page, "page_number", 0) or 0) or None
 
             for layout in self._iter_page_layouts(page):
-                text = normalize_whitespace(self._extract_anchor_text(document_text, layout.text_anchor))
+                text = normalize_whitespace(
+                    self._extract_anchor_text(document_text, layout.text_anchor)
+                )
                 if not text:
                     continue
 
@@ -161,7 +163,10 @@ class DocumentAIParser:
     def _layout_signature(text_anchor: Any) -> tuple[tuple[int, int], ...] | None:
         segments = list(getattr(text_anchor, "text_segments", []) or [])
         signature = tuple(
-            (int(getattr(segment, "start_index", 0) or 0), int(getattr(segment, "end_index", 0) or 0))
+            (
+                int(getattr(segment, "start_index", 0) or 0),
+                int(getattr(segment, "end_index", 0) or 0),
+            )
             for segment in segments
             if int(getattr(segment, "end_index", 0) or 0)
             > int(getattr(segment, "start_index", 0) or 0)

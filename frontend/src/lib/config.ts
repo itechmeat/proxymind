@@ -14,7 +14,15 @@ const configuredLanguage = resolveConfiguredLanguage(
   import.meta.env.VITE_DEFAULT_LANGUAGE,
 );
 
-export const appConfig = {
+type AppConfig = {
+  apiUrl: string;
+  adminMode: boolean;
+  language: string;
+  twinName: string;
+  twinAvatarUrl: string;
+};
+
+export const appConfig: AppConfig = {
   apiUrl: trimTrailingSlash((import.meta.env.VITE_API_URL ?? "").trim()),
   adminMode: (import.meta.env.VITE_ADMIN_MODE ?? "").trim() === "true",
   language: configuredLanguage,
@@ -22,6 +30,6 @@ export const appConfig = {
     (import.meta.env.VITE_TWIN_NAME ?? strings.appTitle).trim() ||
     strings.appTitle,
   twinAvatarUrl: (import.meta.env.VITE_TWIN_AVATAR_URL ?? "").trim(),
-} as const;
+};
 
 export const appLanguage = getPrimaryLanguageTag(configuredLanguage);

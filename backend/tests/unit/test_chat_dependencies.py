@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.api.dependencies import get_chat_service
 from app.api.dependencies import get_chat_service, get_conversation_memory_service
 
 
@@ -51,5 +50,43 @@ async def test_get_chat_service_uses_deduplicated_summary_job_id() -> None:
         "generate_session_summary",
         "session-123",
         "window-456",
+        _job_id="summary:session-123",
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_chat_service_treats_duplicate_summary_job_as_best_effort() -> None:
+    arq_pool = SimpleNamespace(enqueue_job=AsyncMock(return_value=None))
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                arq_pool=arq_pool,
+                settings=SimpleNamespace(
+                    min_retrieved_chunks=1,
+                    max_citations_per_response=5,
+                ),
+            )
+        )
+    )
+
+    service = get_chat_service(
+        request=request,
+        session=SimpleNamespace(),
+        snapshot_service=SimpleNamespace(),
+        retrieval_service=SimpleNamespace(),
+        llm_service=SimpleNamespace(),
+        query_rewrite_service=SimpleNamespace(),
+        context_assembler=SimpleNamespace(),
+        conversation_memory_service=SimpleNamespace(),
+    )
+
+    assert service._summary_enqueuer is not None
+
+    await service._summary_enqueuer("session-123", None)
+
+    arq_pool.enqueue_job.assert_awaited_once_with(
+        "generate_session_summary",
+        "session-123",
+        None,
         _job_id="summary:session-123",
     )

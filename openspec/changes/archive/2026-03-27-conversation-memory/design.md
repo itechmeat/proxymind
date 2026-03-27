@@ -166,7 +166,7 @@ sequenceDiagram
 9. Check needs_summary_update -> enqueue arq task         [NEW]
 ```
 
-Steps 5 and 9 are the only additions. Step 6 changes its output format from 2 messages to N messages but its caller interface gains only one optional parameter.
+Steps 4 and 9 are the only additions. Step 6 changes its output format from 2 messages to N messages but its caller interface gains only one optional parameter.
 
 ### ContextAssembler output format change
 

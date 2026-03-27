@@ -5,7 +5,7 @@ import uuid
 from typing import Any
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.db.models import Message, Session
@@ -25,7 +25,7 @@ SUMMARIZE_SYSTEM_PROMPT_TEMPLATE = (
 async def generate_session_summary(
     ctx: dict[str, Any],
     session_id: str,
-    window_start_message_id: str,
+    window_start_message_id: str | None,
 ) -> None:
     session_factory = ctx["session_factory"]
     summary_llm_service = ctx["summary_llm_service"]
@@ -36,7 +36,9 @@ async def generate_session_summary(
 
     try:
         session_uuid = uuid.UUID(session_id)
-        window_start_uuid = uuid.UUID(window_start_message_id)
+        window_start_uuid = (
+            None if window_start_message_id is None else uuid.UUID(window_start_message_id)
+        )
     except ValueError:
         logger.warning(
             "worker.summary.invalid_ids",
@@ -65,19 +67,23 @@ async def generate_session_summary(
             logger.info("worker.summary.empty_history", session_id=session_id)
             return
 
-        window_start_index = next(
-            (index for index, message in enumerate(history) if message.id == window_start_uuid),
-            None,
-        )
-        if window_start_index is None:
-            logger.warning(
-                "worker.summary.window_start_missing",
-                session_id=session_id,
-                window_start_message_id=window_start_message_id,
+        if window_start_uuid is None:
+            window_start_index = len(history)
+        else:
+            window_start_index = next(
+                (index for index, message in enumerate(history) if message.id == window_start_uuid),
+                None,
             )
-            return
+            if window_start_index is None:
+                logger.warning(
+                    "worker.summary.window_start_missing",
+                    session_id=session_id,
+                    window_start_message_id=window_start_message_id,
+                )
+                return
 
         boundary_index = None
+        original_boundary_id = chat_session.summary_up_to_message_id
         if chat_session.summary_up_to_message_id is not None:
             boundary_index = next(
                 (
@@ -128,10 +134,39 @@ async def generate_session_summary(
             logger.warning("worker.summary.empty_response", session_id=session_id)
             return
 
-        chat_session.summary = summary_text
-        chat_session.summary_token_count = estimate_tokens(summary_text)
-        chat_session.summary_up_to_message_id = messages_to_summarize[-1].id
-        await session.commit()
+        last_summarized_message_id = messages_to_summarize[-1].id
+        try:
+            summary_token_count = estimate_tokens(summary_text)
+            result = await session.execute(
+                update(Session)
+                .where(Session.id == session_uuid)
+                .where(
+                    Session.summary_up_to_message_id.is_(None)
+                    if original_boundary_id is None
+                    else Session.summary_up_to_message_id == original_boundary_id
+                )
+                .values(
+                    summary=summary_text,
+                    summary_token_count=summary_token_count,
+                    summary_up_to_message_id=last_summarized_message_id,
+                )
+            )
+            if result.rowcount != 1:
+                await session.rollback()
+                logger.info("worker.summary.stale_boundary", session_id=session_id)
+                return
+
+            chat_session.summary = summary_text
+            chat_session.summary_token_count = summary_token_count
+            chat_session.summary_up_to_message_id = last_summarized_message_id
+            await session.commit()
+        except Exception as error:
+            await session.rollback()
+            logger.warning(
+                "worker.summary.persistence_failed",
+                session_id=session_id,
+                error=error.__class__.__name__,
+            )
 
 
 def _build_summary_prompt(

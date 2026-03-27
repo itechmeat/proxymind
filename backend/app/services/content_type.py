@@ -80,7 +80,11 @@ def _is_sentence_boundary(text: str, index: int) -> bool:
 def _classify_sentence(sentence: str, promo_keywords: set[str]) -> str:
     if _CITATION_PATTERN.search(sentence):
         return "fact"
-    if promo_keywords and len(_sentence_keywords(sentence) & promo_keywords) >= _MIN_DISTINCT_PROMO_MATCHES:
+    if (
+        promo_keywords
+        and len(_sentence_keywords(sentence) & promo_keywords)
+        >= _MIN_DISTINCT_PROMO_MATCHES
+    ):
         return "promo"
     return "inference"
 

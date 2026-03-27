@@ -73,7 +73,10 @@ class SourceService:
         if skip_embedding:
             result_metadata = {"skip_embedding": True}
         if metadata.processing_hint != "auto":
-            result_metadata = {**(result_metadata or {}), "processing_hint": metadata.processing_hint}
+            result_metadata = {
+                **(result_metadata or {}),
+                "processing_hint": metadata.processing_hint,
+            }
 
         task = BackgroundTask(
             id=uuid.uuid7(),

@@ -83,6 +83,27 @@ async def _terminate_database_connections(connection, database_name: str) -> Non
     )
 
 
+async def _drop_database(connection, database_name: str) -> None:
+    await _terminate_database_connections(connection, database_name)
+    await connection.execute(text(f"DROP DATABASE IF EXISTS {_quote_identifier(database_name)}"))
+
+
+async def _run_alembic_upgrade(env: dict[str, str], revision: str) -> None:
+    previous_values = {key: os.environ.get(key) for key in env}
+    try:
+        os.environ.update(env)
+        get_settings.cache_clear()
+        config = _make_alembic_config()
+        await asyncio.to_thread(command.upgrade, config, revision)
+    finally:
+        for key, value in previous_values.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        get_settings.cache_clear()
+
+
 async def _prepare_template_database(base_env: dict[str, str], base_revision: str) -> str:
     template_db_name = _migration_template_name(base_revision)
     if template_db_name in _PREPARED_TEMPLATES:
@@ -92,31 +113,21 @@ async def _prepare_template_database(base_env: dict[str, str], base_revision: st
         make_async_database_url(base_env),
         isolation_level="AUTOCOMMIT",
     )
-    created = False
-
     try:
         async with admin_engine.connect() as connection:
-            if not await _database_exists(connection, template_db_name):
-                await connection.execute(
-                    text(f"CREATE DATABASE {_quote_identifier(template_db_name)}")
-                )
-                created = True
+            if await _database_exists(connection, template_db_name):
+                await _drop_database(connection, template_db_name)
+            await connection.execute(text(f"CREATE DATABASE {_quote_identifier(template_db_name)}"))
 
-        if created:
-            template_env = {**base_env, "POSTGRES_DB": template_db_name}
-            previous_values = {key: os.environ.get(key) for key in template_env}
-            try:
-                os.environ.update(template_env)
-                get_settings.cache_clear()
-                config = _make_alembic_config()
-                await asyncio.to_thread(command.upgrade, config, base_revision)
-            finally:
-                for key, value in previous_values.items():
-                    if value is None:
-                        os.environ.pop(key, None)
-                    else:
-                        os.environ[key] = value
-                get_settings.cache_clear()
+        try:
+            await _run_alembic_upgrade(
+                {**base_env, "POSTGRES_DB": template_db_name},
+                base_revision,
+            )
+        except Exception:
+            async with admin_engine.connect() as connection:
+                await _drop_database(connection, template_db_name)
+            raise
     finally:
         await admin_engine.dispose()
 
@@ -128,7 +139,10 @@ async def _prepare_template_database(base_env: dict[str, str], base_revision: st
 async def migration_test_env(*, base_revision: str | None = None):
     if os.environ.get("PYTEST_USE_EXISTING_POSTGRES") != "1":
         with PostgresContainer("postgres:18") as postgres:
-            yield _connection_url_to_env(postgres.get_connection_url())
+            env = _connection_url_to_env(postgres.get_connection_url())
+            if base_revision is not None:
+                await _run_alembic_upgrade(env, base_revision)
+            yield env
         return
 
     base_env = {
@@ -156,12 +170,14 @@ async def migration_test_env(*, base_revision: str | None = None):
             else:
                 await connection.execute(
                     text(
-                        f"CREATE DATABASE {_quote_identifier(temp_db_name)} TEMPLATE {_quote_identifier(template_db_name)}"
+                        "CREATE DATABASE "
+                        f"{_quote_identifier(temp_db_name)} "
+                        "TEMPLATE "
+                        f"{_quote_identifier(template_db_name)}"
                     )
                 )
         yield temp_env
     finally:
         async with admin_engine.connect() as connection:
-            await _terminate_database_connections(connection, temp_db_name)
-            await connection.execute(text(f"DROP DATABASE IF EXISTS {_quote_identifier(temp_db_name)}"))
+            await _drop_database(connection, temp_db_name)
         await admin_engine.dispose()

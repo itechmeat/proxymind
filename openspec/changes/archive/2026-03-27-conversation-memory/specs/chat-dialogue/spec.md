@@ -14,7 +14,7 @@ The `ChatService` SHALL provide a `stream_answer()` method alongside the existin
 
 After the LLM response is received and citations are extracted, the system SHALL call `compute_content_type_spans()` with the response text and the `included_promotions` from `AssembledPrompt`. The resulting spans SHALL be persisted in the assistant message's `content_type_spans` JSONB column.
 
-After the assistant message is persisted with `status=complete`, the system SHALL check `memory_block.needs_summary_update`. When `True` and a `summary_enqueuer` is available, the system SHALL enqueue a `generate_session_summary` arq task with `session_id` and `memory_block.window_start_message_id`. Enqueue failure SHALL be logged but SHALL NOT fail the response -- the summary is non-critical and will be retried on the next request.
+After the assistant message is persisted with `status=complete`, the system SHALL check `memory_block.needs_summary_update`. When `True` and a `summary_enqueuer` is available, the system SHALL enqueue a `generate_session_summary` arq task with `session_id` and `memory_block.window_start_message_id`. `window_start_message_id` MAY be `null` when no verbatim memory window fits and all unsummarized messages should be summarized. Enqueue failure SHALL be logged but SHALL NOT fail the response -- the summary is non-critical and will be retried on the next request.
 
 The assistant message SHALL be created with `role=assistant`, `status=streaming`, and `parent_message_id` set to the user message's `id` before the first SSE event is emitted. Upon successful completion, the assistant message SHALL be updated to `status=complete` with `content`, `model_name`, token counts (`token_count_prompt`, `token_count_completion`), deduplicated `source_ids` from retrieved chunks, `content_type_spans` from heuristic classification, and audit hashes (`config_commit_hash`, `config_content_hash` from `context_assembler.persona_context`).
 
@@ -216,12 +216,12 @@ The `ChatService` constructor SHALL accept a `context_assembler` parameter of ty
 
 ### Requirement: Summary enqueue protocol
 
-`SummaryEnqueuer` SHALL be defined as a protocol: an async callable accepting `session_id` (`str`) and `window_start_message_id` (`str`). The implementation SHALL enqueue a `generate_session_summary` arq task with `job_id=f"summary:{session_id}"` for deduplication. The enqueue SHALL be performed after the assistant message is successfully persisted. Enqueue failure (any exception) SHALL be caught by `ChatService`, logged as a warning via structlog, and SHALL NOT propagate to the caller -- the response MUST complete successfully regardless of enqueue outcome.
+`SummaryEnqueuer` SHALL be defined as a protocol: an async callable accepting `session_id` (`str`) and `window_start_message_id` (`str | null`). The implementation SHALL enqueue a `generate_session_summary` arq task with `job_id=f"summary:{session_id}"` for deduplication. The enqueue SHALL be performed after the assistant message is successfully persisted. Enqueue failure (any exception) SHALL be caught by `ChatService`, logged as a warning via structlog, and SHALL NOT propagate to the caller -- the response MUST complete successfully regardless of enqueue outcome.
 
 #### Scenario: Enqueue called with correct parameters
 
 - **WHEN** `summary_enqueuer` is called after a successful response with `needs_summary_update=True`
-- **THEN** it SHALL receive `session_id` as a string and `window_start_message_id` as a string
+- **THEN** it SHALL receive `session_id` as a string and `window_start_message_id` as either a string or `null`
 - **CI test:** mock enqueuer, verify argument types and values
 
 #### Scenario: arq job_id ensures deduplication

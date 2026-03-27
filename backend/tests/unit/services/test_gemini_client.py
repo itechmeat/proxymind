@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from types import ModuleType
-
 import pytest
 
 from app.services.gemini_client import create_genai_client
@@ -72,3 +70,28 @@ def test_create_genai_client_uses_vertex_ai_configuration(monkeypatch: pytest.Mo
         "project": "vertex-project",
         "location": "global",
     }
+
+
+def test_create_genai_client_normalizes_blank_vertex_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_kwargs: dict[str, object] = {}
+
+    class FakeClient:
+        def __init__(self, **kwargs: object) -> None:
+            captured_kwargs.update(kwargs)
+
+    monkeypatch.setattr("app.services.gemini_client.genai.Client", FakeClient)
+
+    with pytest.raises(
+        ValueError,
+        match="Vertex AI Gemini client requires GOOGLE_CLOUD_PROJECT or GEMINI_API_KEY",
+    ):
+        create_genai_client(
+            api_key="   ",
+            use_vertexai=True,
+            project=" ",
+            location="global",
+        )
+
+    assert captured_kwargs == {}

@@ -177,7 +177,9 @@ async def test_upload_endpoint_omits_default_processing_hint_from_task_metadata(
 
     _, tasks = await _load_source_and_task(session_factory)
     assert len(tasks) == 1
-    assert tasks[0].result_metadata in (None, {}) or "processing_hint" not in tasks[0].result_metadata
+    assert tasks[0].result_metadata in (None, {}) or (
+        "processing_hint" not in tasks[0].result_metadata
+    )
 
 
 @pytest.mark.asyncio

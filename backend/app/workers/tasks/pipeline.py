@@ -16,6 +16,7 @@ from app.db.models.enums import (
     ProcessingPath,
     SourceStatus,
 )
+from app.services.qdrant import QdrantChunkPoint
 
 logger = structlog.get_logger(__name__)
 
@@ -23,16 +24,13 @@ if TYPE_CHECKING:
     from app.core.config import Settings
     from app.services.batch_orchestrator import BatchOrchestrator
     from app.services.document_ai_parser import DocumentAIParser
-    from app.services.document_processing import ChunkData
-    from app.services.document_processing import DocumentProcessor
+    from app.services.document_processing import ChunkData, DocumentProcessor
     from app.services.embedding import EmbeddingService
     from app.services.gemini_content import GeminiContentService
     from app.services.qdrant import QdrantService
     from app.services.snapshot import SnapshotService
     from app.services.storage import StorageService
     from app.services.token_counter import ApproximateTokenizer
-
-from app.services.qdrant import QdrantChunkPoint
 
 
 @dataclass(slots=True)

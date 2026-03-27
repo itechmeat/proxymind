@@ -203,7 +203,9 @@ def test_no_summary_uses_full_budget_independent_of_summary_ratio() -> None:
 
     assert low_ratio_block.messages == high_ratio_block.messages
     assert low_ratio_block.total_tokens == high_ratio_block.total_tokens
-    assert low_ratio_block.total_tokens == estimate_tokens("abcdefgh1234") + estimate_tokens("latest-message!!")
+    assert low_ratio_block.total_tokens == (
+        estimate_tokens("abcdefgh1234") + estimate_tokens("latest-message!!")
+    )
 
 
 def test_boundary_not_found_discards_stale_summary() -> None:
@@ -249,3 +251,5 @@ def test_zero_window_budget_keeps_summary_and_drops_recent_messages() -> None:
     assert block.summary_text == "Existing summary"
     assert block.messages == []
     assert block.total_tokens == 10
+    assert block.needs_summary_update is True
+    assert block.window_start_message_id is None

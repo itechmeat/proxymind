@@ -250,6 +250,7 @@ async def test_lifespan_loads_persona_context(
         assert len(test_app.state.persona_context.config_content_hash) == 64
         assert test_app.state.persona_context.config_commit_hash != ""
         assert test_app.state.promotions_service is not None
+        assert test_app.state.conversation_memory_service is not None
 
 
 @pytest.mark.asyncio
