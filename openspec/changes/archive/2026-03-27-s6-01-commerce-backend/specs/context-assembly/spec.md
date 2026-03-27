@@ -6,14 +6,14 @@ Layered prompt orchestration with XML tags, token budget management for retrieva
 
 ### Requirement: available_products prompt layer
 
-The `ContextAssembler` SHALL build an `<available_products>` prompt layer listing all active, non-expired catalog items passed via the `catalog_items` parameter. Each item SHALL be formatted as `[product:N] "{name}" ({item_type}) — SKU: {sku}` where N is the 1-based index. The layer SHALL include introductory text instructing the LLM to use `[product:N]` markers when recommending. The layer SHALL be placed after `<promotions>` and before `<conversation_summary>` in the system message.
+The `ContextAssembler` SHALL build an `<available_products>` prompt layer listing all active, non-expired catalog items passed via the `catalog_items` parameter. Each item SHALL be formatted as `[product:N] "{name}" ({item_type}) - SKU: {sku}` where N is the 1-based index. The layer SHALL include introductory text instructing the LLM to use `[product:N]` markers when recommending. The layer SHALL be placed after `<promotions>` and before `<conversation_summary>` in the system message.
 
 #### Scenario: available_products layer with items
 
 - **WHEN** `assemble()` is called with `catalog_items` containing 2 items: "AI in Practice" (book, SKU: AI-PRACTICE-2026) and "Tech Summit 2026 Ticket" (event, SKU: TECHSUMMIT-2026)
 - **THEN** the system message SHALL contain an `<available_products>` block
-- **AND** the block SHALL list `[product:1] "AI in Practice" (book) — SKU: AI-PRACTICE-2026`
-- **AND** the block SHALL list `[product:2] "Tech Summit 2026 Ticket" (event) — SKU: TECHSUMMIT-2026`
+- **AND** the block SHALL list `[product:1] "AI in Practice" (book) - SKU: AI-PRACTICE-2026`
+- **AND** the block SHALL list `[product:2] "Tech Summit 2026 Ticket" (event) - SKU: TECHSUMMIT-2026`
 - **AND** the block SHALL include introductory text about using `[product:N]` markers
 
 #### Scenario: available_products omitted when no catalog items
@@ -136,7 +136,7 @@ The `ContextAssembler` SHALL build the system message by assembling layers in th
 
 ### Requirement: AssembledPrompt output type with metadata
 
-The `assemble()` method SHALL return an `AssembledPrompt` dataclass containing: `messages` (list of OpenAI chat API format dicts), `token_estimate` (total estimated tokens), `included_promotions` (list of Promotion objects injected), `retrieval_chunks_used` (count of chunks that fit within budget), `retrieval_chunks_total` (total chunks available from retrieval), `layer_token_counts` (dict mapping layer tag names to their individual token estimates), and `catalog_items_used` (list of CatalogItemInfo included in the prompt). When `memory_block` is `None` or has no messages, `messages` SHALL be a list of 2 dicts (system + user), identical to the pre-S4-07 behavior. When `memory_block` contains history messages, `messages` SHALL be a list of N dicts: one system message, zero or more alternating user/assistant history messages, and one final user message containing the retrieval context and current query. When `memory_block` is provided and has `total_tokens > 0`, `layer_token_counts` SHALL contain a `"conversation_memory"` key with value equal to `memory_block.total_tokens`, and SHALL NOT contain a separate `"conversation_summary"` entry.
+The `assemble()` method SHALL return an `AssembledPrompt` dataclass containing: `messages` (list of OpenAI chat API format dicts), `token_estimate` (total estimated tokens), `included_promotions` (list of Promotion objects injected), `retrieval_chunks_used` (count of chunks that fit within budget), `retrieval_chunks_total` (total chunks available from retrieval), `layer_token_counts` (dict mapping layer tag names to their individual token estimates), and `catalog_items_used` (list of CatalogItemInfo included in the prompt). When `memory_block` is `None` or has no messages, `messages` SHALL be a list of 2 dicts (system + current user message only). When `memory_block` contains history messages, `messages` SHALL be a list of N dicts: one system message, zero or more alternating user/assistant history messages, and one final user message containing the retrieval context and current query. When `memory_block` is provided and has `total_tokens > 0`, `layer_token_counts` SHALL contain a `"conversation_memory"` key with value equal to `memory_block.total_tokens`, and SHALL NOT contain a separate `"conversation_summary"` entry.
 
 #### Scenario: All metadata fields populated
 
@@ -174,7 +174,7 @@ The `assemble()` method SHALL return an `AssembledPrompt` dataclass containing: 
 
 ### Requirement: XML tag wrapping
 
-Each prompt layer SHALL be wrapped in an XML tag pair. The tag name SHALL match the layer purpose: `system_safety`, `identity`, `soul`, `behavior`, `promotions`, `available_products`, `product_instructions`, `citation_instructions`, `content_guidelines`, `knowledge_context`, `user_query`. The XML wrapping improves LLM comprehension of section boundaries and enables programmatic testing of tag presence and order.
+Each prompt layer SHALL be wrapped in an XML tag pair. The tag name SHALL match the layer purpose: `system_safety`, `identity`, `soul`, `behavior`, `promotions`, `available_products`, `conversation_summary`, `product_instructions`, `citation_instructions`, `content_guidelines`, `knowledge_context`, `user_query`. The XML wrapping improves LLM comprehension of section boundaries and enables programmatic testing of tag presence and order.
 
 #### Scenario: Each layer wrapped in named tags
 
@@ -356,7 +356,7 @@ A single `"conversation_memory"` key in `layer_token_counts` SHALL cover the tot
 
 ### Requirement: assemble() accepts optional memory_block parameter
 
-The `assemble()` method signature SHALL accept an optional `memory_block` parameter of type `MemoryBlock | None`, defaulting to `None`. When `memory_block` is `None`, the method SHALL produce output identical to the pre-S4-07 behavior. When `memory_block` is provided, the method SHALL include the conversation summary layer when `summary_text` is present, insert history messages between system and user messages, and track memory tokens under the `"conversation_memory"` key.
+The `assemble()` method signature SHALL accept an optional `memory_block` parameter of type `MemoryBlock | None`, defaulting to `None`. When `memory_block` is `None`, the method SHALL produce a two-message prompt (system + current user message). When `memory_block` is provided, the method SHALL include the conversation summary layer when `summary_text` is present, insert history messages between system and user messages, and track memory tokens under the `"conversation_memory"` key.
 
 #### Scenario: Default parameter provides backward compatibility
 
@@ -364,7 +364,7 @@ The `assemble()` method signature SHALL accept an optional `memory_block` parame
 - **THEN** the method SHALL execute without error
 - **AND** the output SHALL be identical to calling with `memory_block=None`
 
-#### Scenario: memory_block=None produces pre-S4-07 output
+#### Scenario: memory_block=None produces a two-message prompt
 
 - **WHEN** `assemble(chunks=[...], query="...", source_map={...}, memory_block=None)` is called
 - **THEN** the system message SHALL NOT contain `<conversation_summary>`

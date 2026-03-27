@@ -107,6 +107,18 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 UPLOAD_READ_CHUNK_SIZE = 64 * 1024
 
 
+def get_admin_agent_id() -> uuid.UUID:
+    return DEFAULT_AGENT_ID
+
+
+def get_admin_knowledge_base_id() -> uuid.UUID:
+    return DEFAULT_KNOWLEDGE_BASE_ID
+
+
+AdminAgentId = Annotated[uuid.UUID, Depends(get_admin_agent_id)]
+AdminKnowledgeBaseId = Annotated[uuid.UUID, Depends(get_admin_knowledge_base_id)]
+
+
 def _raise_snapshot_http_error(error: Exception) -> None:
     if isinstance(error, SnapshotNotFoundError):
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -391,7 +403,7 @@ async def list_catalog_items(
     is_active: bool = True,
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
+    agent_id: AdminAgentId = DEFAULT_AGENT_ID,
 ) -> CatalogItemListResponse:
     items, total = await catalog_service.list_items(
         agent_id=agent_id,
@@ -418,7 +430,7 @@ async def list_catalog_items(
 async def get_catalog_item(
     catalog_item_id: uuid.UUID,
     catalog_service: Annotated[CatalogService, Depends(get_catalog_service)],
-    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
+    agent_id: AdminAgentId = DEFAULT_AGENT_ID,
 ) -> CatalogItemDetail:
     try:
         item = await catalog_service.get_by_id(catalog_item_id, agent_id=agent_id)
@@ -443,7 +455,7 @@ async def get_catalog_item(
 async def create_catalog_item(
     payload: CatalogItemCreate,
     catalog_service: Annotated[CatalogService, Depends(get_catalog_service)],
-    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
+    agent_id: AdminAgentId = DEFAULT_AGENT_ID,
 ) -> CatalogItemResponse:
     try:
         item = await catalog_service.create(payload, agent_id=agent_id)
@@ -457,7 +469,7 @@ async def update_catalog_item(
     catalog_item_id: uuid.UUID,
     payload: CatalogItemUpdate,
     catalog_service: Annotated[CatalogService, Depends(get_catalog_service)],
-    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
+    agent_id: AdminAgentId = DEFAULT_AGENT_ID,
 ) -> CatalogItemResponse:
     try:
         item = await catalog_service.update(catalog_item_id, payload, agent_id=agent_id)
@@ -472,7 +484,7 @@ async def update_catalog_item(
 async def delete_catalog_item(
     catalog_item_id: uuid.UUID,
     catalog_service: Annotated[CatalogService, Depends(get_catalog_service)],
-    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
+    agent_id: AdminAgentId = DEFAULT_AGENT_ID,
 ) -> CatalogItemResponse:
     try:
         item = await catalog_service.soft_delete(catalog_item_id, agent_id=agent_id)
@@ -495,8 +507,8 @@ async def get_batch_job_detail(
 @router.get("/sources", response_model=list[SourceListItem])
 async def list_sources(
     session: Annotated[AsyncSession, Depends(get_session)],
-    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
-    knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
+    agent_id: AdminAgentId = DEFAULT_AGENT_ID,
+    knowledge_base_id: AdminKnowledgeBaseId = DEFAULT_KNOWLEDGE_BASE_ID,
 ) -> list[SourceListItem]:
     # TODO(S7-01): Protect /api/admin/* with Bearer auth before any non-local deployment.
     sources = (
@@ -519,8 +531,8 @@ async def update_source(
     payload: SourceUpdateRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
     catalog_service: Annotated[CatalogService, Depends(get_catalog_service)],
-    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
-    knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
+    agent_id: AdminAgentId = DEFAULT_AGENT_ID,
+    knowledge_base_id: AdminKnowledgeBaseId = DEFAULT_KNOWLEDGE_BASE_ID,
 ) -> SourceListItem:
     source = await session.scalar(
         select(Source).where(
@@ -557,8 +569,8 @@ async def delete_source(
     source_id: uuid.UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
     qdrant_service: Annotated[QdrantService, Depends(get_qdrant_service)],
-    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
-    knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
+    agent_id: AdminAgentId = DEFAULT_AGENT_ID,
+    knowledge_base_id: AdminKnowledgeBaseId = DEFAULT_KNOWLEDGE_BASE_ID,
 ) -> SourceDeleteResponse:
     service = SourceDeleteService(session, qdrant_service=qdrant_service)
     try:
@@ -594,8 +606,8 @@ async def get_task_status(
 @router.get("/snapshots", response_model=list[SnapshotResponse])
 async def list_snapshots(
     snapshot_service: Annotated[SnapshotService, Depends(get_snapshot_service)],
-    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
-    knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
+    agent_id: AdminAgentId = DEFAULT_AGENT_ID,
+    knowledge_base_id: AdminKnowledgeBaseId = DEFAULT_KNOWLEDGE_BASE_ID,
     status_filters: Annotated[list[SnapshotStatus] | None, Query(alias="status")] = None,
     include_archived: bool = False,
 ) -> list[SnapshotResponse]:
@@ -616,8 +628,8 @@ async def list_snapshots(
 async def create_snapshot(
     session: Annotated[AsyncSession, Depends(get_session)],
     snapshot_service: Annotated[SnapshotService, Depends(get_snapshot_service)],
-    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
-    knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
+    agent_id: AdminAgentId = DEFAULT_AGENT_ID,
+    knowledge_base_id: AdminKnowledgeBaseId = DEFAULT_KNOWLEDGE_BASE_ID,
 ) -> SnapshotResponse:
     # TODO(S7-01): Protect /api/admin/* with Bearer auth before any non-local deployment.
     snapshot = await snapshot_service.get_or_create_draft(
@@ -634,8 +646,8 @@ async def create_snapshot(
 async def get_snapshot(
     snapshot_id: uuid.UUID,
     snapshot_service: Annotated[SnapshotService, Depends(get_snapshot_service)],
-    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
-    knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
+    agent_id: AdminAgentId = DEFAULT_AGENT_ID,
+    knowledge_base_id: AdminKnowledgeBaseId = DEFAULT_KNOWLEDGE_BASE_ID,
 ) -> SnapshotResponse:
     snapshot = await snapshot_service.get_snapshot(
         snapshot_id,
@@ -652,8 +664,8 @@ async def publish_snapshot(
     snapshot_id: uuid.UUID,
     snapshot_service: Annotated[SnapshotService, Depends(get_snapshot_service)],
     activate: bool = False,
-    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
-    knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
+    agent_id: AdminAgentId = DEFAULT_AGENT_ID,
+    knowledge_base_id: AdminKnowledgeBaseId = DEFAULT_KNOWLEDGE_BASE_ID,
 ) -> SnapshotResponse:
     try:
         snapshot = await snapshot_service.publish(
@@ -672,8 +684,8 @@ async def publish_snapshot(
 async def activate_snapshot(
     snapshot_id: uuid.UUID,
     snapshot_service: Annotated[SnapshotService, Depends(get_snapshot_service)],
-    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
-    knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
+    agent_id: AdminAgentId = DEFAULT_AGENT_ID,
+    knowledge_base_id: AdminKnowledgeBaseId = DEFAULT_KNOWLEDGE_BASE_ID,
 ) -> SnapshotResponse:
     try:
         snapshot = await snapshot_service.activate(
@@ -691,8 +703,8 @@ async def activate_snapshot(
 async def rollback_snapshot(
     snapshot_id: uuid.UUID,
     snapshot_service: Annotated[SnapshotService, Depends(get_snapshot_service)],
-    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
-    knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
+    agent_id: AdminAgentId = DEFAULT_AGENT_ID,
+    knowledge_base_id: AdminKnowledgeBaseId = DEFAULT_KNOWLEDGE_BASE_ID,
 ) -> RollbackResponse:
     try:
         rolled_back_from, rolled_back_to = await snapshot_service.rollback(
@@ -717,8 +729,8 @@ async def test_draft_snapshot(
     embedding_service: Annotated[EmbeddingService, Depends(get_embedding_service)],
     qdrant_service: Annotated[QdrantService, Depends(get_qdrant_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
-    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
-    knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
+    agent_id: AdminAgentId = DEFAULT_AGENT_ID,
+    knowledge_base_id: AdminKnowledgeBaseId = DEFAULT_KNOWLEDGE_BASE_ID,
 ) -> DraftTestResponse:
     try:
         snapshot = await snapshot_service.get_snapshot(

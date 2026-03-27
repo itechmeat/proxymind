@@ -11,6 +11,7 @@ from app.services.catalog import CatalogService
 def _make_item(
     *,
     sku: str,
+    item_type: CatalogItemType = CatalogItemType.BOOK,
     is_active: bool = True,
     valid_from: datetime | None = None,
     valid_until: datetime | None = None,
@@ -21,7 +22,7 @@ def _make_item(
         agent_id=uuid.uuid7(),
         sku=sku,
         name=f"Item {sku}",
-        item_type=CatalogItemType.BOOK,
+        item_type=item_type,
         url=f"https://example.com/{sku.lower()}",
         image_url=f"https://example.com/{sku.lower()}.png",
         is_active=is_active,
@@ -60,10 +61,10 @@ def test_filter_active_treats_same_day_datetime_as_valid() -> None:
 
 def test_build_sku_map_returns_lightweight_lookup() -> None:
     first = _make_item(sku="BOOK-001")
-    second = _make_item(sku="EVENT-001")
+    second = _make_item(sku="EVENT-001", item_type=CatalogItemType.EVENT)
 
     result = CatalogService.build_sku_map([first, second])
 
     assert list(result) == ["BOOK-001", "EVENT-001"]
     assert result["BOOK-001"].name == first.name
-    assert result["EVENT-001"].item_type is CatalogItemType.BOOK
+    assert result["EVENT-001"].item_type is CatalogItemType.EVENT

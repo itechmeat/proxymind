@@ -201,8 +201,8 @@ class CatalogService:
     def _is_sku_conflict(self, error: IntegrityError) -> bool:
         original_error = getattr(error, "orig", None)
         constraint_name = getattr(original_error, "constraint_name", None)
-        if constraint_name == "ix_catalog_items_sku":
+        if constraint_name == "uq_catalog_items_agent_id_sku":
             return True
 
         message = str(original_error or error)
-        return "ix_catalog_items_sku" in message
+        return "uq_catalog_items_agent_id_sku" in message

@@ -194,6 +194,7 @@ def test_citation_instructions_present_when_chunks_exist() -> None:
     result = _assembler().assemble(chunks=[chunk], query="Q?", source_map=source_map)
     assert "<citation_instructions>" in result.messages[0]["content"]
     assert "[source:N]" in result.messages[0]["content"]
+    assert "Maximum 5 citations per response." not in result.messages[0]["content"]
 
 
 def test_all_chunks_fit_in_budget() -> None:

@@ -79,7 +79,7 @@ The system SHALL batch-load source metadata (title, public_url, source_type) fro
 
 ### Requirement: Citation extraction with purchase enrichment
 
-After the LLM stream completes, `CitationService.extract()` SHALL parse all `[source:N]` markers from the accumulated content and build citation objects. For each citation, after constructing the base fields (index, source_id, source_title, source_type, url, anchor, text_citation), the method SHALL check `source_info.catalog_item_active`. If `True` and `catalog_item_url` is not `None`, the citation SHALL be enriched with `purchase_url = source_info.catalog_item_url`, `purchase_title = source_info.catalog_item_name`, `catalog_item_type = source_info.catalog_item_type`. If `catalog_item_active` is `False`, purchase fields SHALL remain `None`.
+After the LLM stream completes, `CitationService.extract()` SHALL parse all `[source:N]` markers from the accumulated content and build citation objects. For each citation, after constructing the base fields (index, source_id, source_title, source_type, url, anchor, text_citation), the method SHALL check `source_info.catalog_item_active`. If `True`, the citation SHALL be enriched with `purchase_title = source_info.catalog_item_name` and `catalog_item_type = source_info.catalog_item_type`. `purchase_url` SHALL be populated only when `source_info.catalog_item_url` is not `None`. If `catalog_item_active` is `False`, purchase fields SHALL remain `None`.
 
 #### Scenario: Citation enriched with purchase data for active catalog item
 

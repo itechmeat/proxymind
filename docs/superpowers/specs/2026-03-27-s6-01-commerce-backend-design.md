@@ -25,36 +25,37 @@
 
 ## Design Decisions
 
-| #   | Decision                                  | Choice                                                                      | Rationale                                                                                                                                                              |
-| --- | ----------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1  | Catalog item identifier for PROMOTIONS.md | `sku` field (String(64), unique, required) on CatalogItem                   | Human-readable for manual editing, stable across renames, unique by definition. UUID is reliable but unreadable; name matching is fragile. SKU is the practical middle ground for v1. |
-| D2  | Recommendation delivery mechanism         | Hybrid `[product:N]` markers — LLM optionally places marker if recommending | LLM decides if recommendation is appropriate. If marker present → backend enriches with URL. If absent → no forced product card. Consistent with `[source:N]` citation pattern. |
-| D3  | Citation enrichment trigger               | Automatic: source has active catalog_item with url → purchase_url in citation | Zero configuration needed. Source ↔ catalog_item link (existing FK) is the sole trigger. Inactive or expired items are excluded. |
-| D4  | "Citation takes priority" implementation  | Knowledge citation is primary; purchase link is supplementary metadata       | Citation remains knowledge-first (source_title, anchor). Purchase link is an additional field, not a replacement. Frontend decides how to render (e.g., "Buy" button next to citation). |
-| D5  | Max recommendations per response          | Enforced at two levels: prompt (max_promotions=1) + extraction (first marker only) | Belt and suspenders. Prompt-level prevents LLM from seeing multiple promo contexts. Extraction-level prevents edge cases where LLM places multiple markers despite instructions. |
-| D6  | Catalog items in prompt scope             | All active, non-expired catalog items included                              | One twin = one prototype = small catalog (5–20 items). No filtering needed. Token overhead is ~200–400 tokens — negligible. |
-| D7  | PROMOTIONS.md SKU not found in DB         | Warning in structlog, promotion works as text-only (no `[product:N]`)       | Graceful degradation. Owner may have a typo or the item may not be created yet. The promotion still provides context hints to LLM. |
-| D8  | Catalog item soft-deleted with linked sources | Soft delete keeps FK intact; `ON DELETE SET NULL` is a safety net for hard deletes only | Sources remain linked (restorable). Citation enrichment disabled by application-level `is_active`/`deleted_at` filtering. Published snapshots not affected. |
-| D9  | SSE event for product recommendations     | New `type: "products"` event after `citations`, before `done`               | Separate from citations — different data structure, different frontend rendering. Consistent with existing SSE event pattern. |
-| D10 | Source ↔ catalog linking API              | Existing: `catalog_item_id` in source upload. New: `PATCH /sources/:id` for re-linking | Upload-time linking already works. PATCH enables linking existing sources without re-upload. |
-| D11 | Catalog CRUD API style                    | PATCH semantics (partial update), soft delete, pagination with limit/offset | Matches existing admin API patterns (batch-jobs list, source list). No new patterns introduced. |
-| D12 | Product recommendation tracking in audit  | `recommended_product_ids: list[UUID]` in audit log metadata                 | Enables analytics: which products are recommended, how often, in what contexts. Stored alongside existing `source_ids` and `snapshot_id`. |
+| #   | Decision                                      | Choice                                                                                            | Rationale                                                                                                                                                                                                     |
+| --- | --------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | Catalog item identifier for PROMOTIONS.md     | `sku` field (String(64), required) on CatalogItem with per-agent uniqueness                       | Human-readable for manual editing, stable across renames, and scoped to the twin that owns the catalog. UUID is reliable but unreadable; name matching is fragile. SKU is the practical middle ground for v1. |
+| D2  | Recommendation delivery mechanism             | Hybrid `[product:N]` markers — LLM optionally places marker if recommending                       | LLM decides if recommendation is appropriate. If marker present → backend enriches with URL. If absent → no forced product card. Consistent with `[source:N]` citation pattern.                               |
+| D3  | Citation enrichment trigger                   | Automatic: source has active catalog_item with url → purchase_url in citation                     | Zero configuration needed. Source ↔ catalog_item link (existing FK) is the sole trigger. Inactive or expired items are excluded.                                                                              |
+| D4  | "Citation takes priority" implementation      | Knowledge citation is primary; purchase link is supplementary metadata                            | Citation remains knowledge-first (source_title, anchor). Purchase link is an additional field, not a replacement. Frontend decides how to render (e.g., "Buy" button next to citation).                       |
+| D5  | Max recommendations per response              | Enforced at two levels: prompt (max_promotions=1) + extraction (first marker only)                | Belt and suspenders. Prompt-level prevents LLM from seeing multiple promo contexts. Extraction-level prevents edge cases where LLM places multiple markers despite instructions.                              |
+| D6  | Catalog items in prompt scope                 | All active, non-expired catalog items included                                                    | One twin = one prototype = small catalog (5–20 items). No filtering needed. Token overhead is ~200–400 tokens — negligible.                                                                                   |
+| D7  | PROMOTIONS.md SKU not found in DB             | Warning in structlog, promotion works as text-only (no `[product:N]`)                             | Graceful degradation. Owner may have a typo or the item may not be created yet. The promotion still provides context hints to LLM.                                                                            |
+| D8  | Catalog item soft-deleted with linked sources | Soft delete keeps FK intact; `ON DELETE SET NULL` is a safety net for hard deletes only           | Sources remain linked (restorable). Citation enrichment disabled by application-level `is_active`/`deleted_at` filtering. Published snapshots not affected.                                                   |
+| D9  | SSE event for product recommendations         | New `type: "products"` event after `citations`, before `done`                                     | Separate from citations — different data structure, different frontend rendering. Consistent with existing SSE event pattern.                                                                                 |
+| D10 | Source ↔ catalog linking API                  | Existing: `catalog_item_id` in source upload. New: `PATCH /api/admin/sources/{id}` for re-linking | Upload-time linking already works. PATCH enables linking existing sources without re-upload.                                                                                                                  |
+| D11 | Catalog CRUD API style                        | PATCH semantics (partial update), soft delete, pagination with limit/offset                       | Matches existing admin API patterns (batch-jobs list, source list). No new patterns introduced.                                                                                                               |
+| D12 | Product recommendation tracking in audit      | `recommended_product_ids: list[UUID]` in audit log metadata                                       | Enables analytics: which products are recommended, how often, in what contexts. Stored alongside existing `source_ids` and `snapshot_id`.                                                                     |
 
 ## Data Model Changes
 
 ### CatalogItem — new field
 
-```
-sku: String(64), unique, not null, indexed
+```text
+sku: String(64), not null, indexed
+UNIQUE(agent_id, sku)
 ```
 
-Alembic migration adds the column with a unique index (`ix_catalog_items_sku`). Existing rows (if any) MUST be backfilled with unique SKU values using the full UUID before the unique index is created (`sku = 'LEGACY-' || id::text` — full UUID guarantees uniqueness). Existing CatalogItem fields remain unchanged: `name`, `description`, `item_type`, `url`, `image_url`, `is_active`, `valid_from`, `valid_until`.
+Alembic migration adds the column with a plain index (`ix_catalog_items_sku`) plus a composite unique constraint on `(agent_id, sku)`. Existing rows (if any) MUST be backfilled with unique SKU values using the full UUID before the per-agent unique constraint is created (`sku = 'LEGACY-' || id::text` — full UUID guarantees uniqueness inside the existing default agent scope). Existing CatalogItem fields remain unchanged: `name`, `description`, `item_type`, `url`, `image_url`, `is_active`, `valid_from`, `valid_until`.
 
 **Date type note:** The existing model stores `valid_from` and `valid_until` as `datetime` (not `date`). API schemas accept `date` for user convenience, but service-layer filtering MUST handle `datetime` ↔ `date` comparison safely (convert `datetime` to `date` before comparison).
 
 ### Source — FK behavior
 
-```
+```python
 catalog_item_id: ForeignKey("catalog_items.id", ondelete="SET NULL")
 ```
 
@@ -62,7 +63,7 @@ The FK already exists. Ensure `ondelete="SET NULL"` is set (verify in migration;
 
 ### Message — new JSONB field
 
-```
+```python
 products: JSONB, nullable
 ```
 
@@ -76,17 +77,18 @@ All data fits existing tables. No new tables required.
 
 ### Endpoints
 
-| Method | Path                       | Description                              | Response |
-| ------ | -------------------------- | ---------------------------------------- | -------- |
-| GET    | /api/admin/catalog         | List catalog items (paginated, filtered) | JSON     |
-| GET    | /api/admin/catalog/:id     | Catalog item detail with linked sources  | JSON     |
-| POST   | /api/admin/catalog         | Create catalog item                      | JSON     |
-| PATCH  | /api/admin/catalog/:id     | Update catalog item (partial)            | JSON     |
-| DELETE | /api/admin/catalog/:id     | Soft delete catalog item                 | JSON     |
+| Method | Path                   | Description                              | Response |
+| ------ | ---------------------- | ---------------------------------------- | -------- |
+| GET    | /api/admin/catalog     | List catalog items (paginated, filtered) | JSON     |
+| GET    | /api/admin/catalog/:id | Catalog item detail with linked sources  | JSON     |
+| POST   | /api/admin/catalog     | Create catalog item                      | JSON     |
+| PATCH  | /api/admin/catalog/:id | Update catalog item (partial)            | JSON     |
+| DELETE | /api/admin/catalog/:id | Soft delete catalog item                 | JSON     |
 
 ### Schemas
 
 **CatalogItemCreate** (request body for POST):
+
 - `sku: str` — required, 1–64 chars, unique
 - `name: str` — required, 1–255 chars
 - `description: str | None`
@@ -97,12 +99,15 @@ All data fits existing tables. No new tables required.
 - `valid_until: datetime | None` — matches the DB model type (`datetime`, not `date`)
 
 **CatalogItemUpdate** (request body for PATCH):
+
 - All fields optional. Only provided fields are updated.
 
 **CatalogItemResponse** (list item):
+
 - All model fields + `id`, `is_active`, `created_at`, `updated_at`, `linked_sources_count: int`
 
 **CatalogItemDetail** (single item):
+
 - CatalogItemResponse + `linked_sources: list[LinkedSourceInfo]`
 - `LinkedSourceInfo`: `id`, `title`, `source_type`, `status`
 
@@ -116,6 +121,7 @@ All data fits existing tables. No new tables required.
 ### Source re-linking
 
 **PATCH /api/admin/sources/:id** — new endpoint:
+
 - Request body: `{ "catalog_item_id": "uuid | null" }`
 - Uses `exclude_unset` Pydantic pattern: if `catalog_item_id` is absent from the body, it is not changed; if explicitly `null`, it unlinks the source from the catalog item; if a UUID, it links to that catalog item
 - Returns updated `SourceListItem`
@@ -125,7 +131,8 @@ All data fits existing tables. No new tables required.
 ### Changes to `CitationService`
 
 **Extended `SourceInfo` dataclass:**
-```
+
+```python
 SourceInfo:
   id: UUID
   title: str
@@ -138,7 +145,8 @@ SourceInfo:
 ```
 
 **Extended `Citation` dataclass:**
-```
+
+```python
 Citation:
   ... (existing fields unchanged)
   + purchase_url: str | None        # From catalog_item.url (only if active)
@@ -147,11 +155,14 @@ Citation:
 ```
 
 **Enrichment logic in `extract()`:**
+
 - After building a Citation, check if `source_info.catalog_item_active` is True
-- If yes and `catalog_item_url` is not None → populate `purchase_url`, `purchase_title`, `catalog_item_type`
+- If yes → populate `purchase_title` and `catalog_item_type`
+- If `catalog_item_url` is not None → also populate `purchase_url`
 - If no → leave purchase fields as None
 
 **Source map population (caller side):**
+
 - Query: `SELECT sources.*, catalog_items.* FROM sources LEFT JOIN catalog_items ON sources.catalog_item_id = catalog_items.id WHERE sources.id IN (:source_ids)`
 - Filter: `catalog_items.is_active = true AND (valid_from IS NULL OR valid_from <= today) AND (valid_until IS NULL OR valid_until >= today)`
 - Build `source_map` with catalog item data included
@@ -165,7 +176,8 @@ Location: `backend/app/services/product_recommendation.py`
 Stateless service with static methods, mirroring `CitationService`.
 
 **Dataclass `ProductRecommendation`:**
-```
+
+```python
 ProductRecommendation:
   index: int                     # 1-based position in available_products list
   catalog_item_id: UUID
@@ -178,6 +190,7 @@ ProductRecommendation:
 ```
 
 **Method `extract(response_text: str, catalog_items: list[CatalogItemInfo]) -> list[ProductRecommendation]`:**
+
 - Parse `[product:N]` markers using regex `\[product:(\d+)\]`
 - Map indices to catalog_items list (1-based)
 - Invalid indices (0, out-of-range) silently ignored
@@ -186,12 +199,13 @@ ProductRecommendation:
 - Return list (0 or 1 items)
 
 **Method `strip_markers(response_text: str) -> str`:**
+
 - Remove `[product:N]` markers from final response text
 - Analogous to how `[source:N]` markers are stripped after extraction
 
 ### Dataclass `CatalogItemInfo` (prompt-time data)
 
-```
+```python
 CatalogItemInfo:
   id: UUID
   sku: str
@@ -224,6 +238,7 @@ New optional metadata field: `Catalog item:` containing the SKU of a catalog ite
 ### Changes to `PromotionsService`
 
 **Extended `Promotion` dataclass:**
+
 ```
 Promotion:
   title: str
@@ -236,6 +251,7 @@ Promotion:
 ```
 
 **Parser changes:**
+
 - Extract `Catalog item:` metadata line (case-insensitive key matching, consistent with existing parser)
 - Store as `catalog_item_sku` (stripped, as-is)
 - Missing field → `None` (backward-compatible)
@@ -265,8 +281,8 @@ to the current conversation, reference it using its [product:N] marker.
 Only recommend when naturally appropriate. Never force a recommendation.
 Maximum one product recommendation per response.
 
-[product:1] "AI in Practice" (book) — SKU: AI-PRACTICE-2026
-[product:2] "Tech Summit 2026 Ticket" (event) — SKU: TECHSUMMIT-2026
+[product:1] "AI in Practice" (book) - SKU: AI-PRACTICE-2026
+[product:2] "Tech Summit 2026 Ticket" (event) - SKU: TECHSUMMIT-2026
 </available_products>
 ```
 
@@ -277,11 +293,11 @@ Placed after `citation_instructions`:
 ```xml
 <product_instructions>
 When recommending a product, place [product:N] after mentioning it.
-Do NOT generate URLs — the system substitutes real links.
+Do NOT generate URLs - the system substitutes real links.
 Do NOT recommend products not listed in available_products.
 If no product is relevant to the conversation, do not recommend anything.
 A recommendation should feel natural, like a real person mentioning
-something they genuinely find relevant — not like an advertisement.
+something they genuinely find relevant - not like an advertisement.
 </product_instructions>
 ```
 
@@ -308,7 +324,7 @@ This block is only included when `available_products` is non-empty.
 
 ### ContextAssembler constructor changes
 
-```
+```python
 ContextAssembler.__init__():
   ... (existing params)
   + catalog_items: list[CatalogItemInfo] | None = None
@@ -318,7 +334,7 @@ New attribute stored for use in prompt assembly and returned in `AssembledPrompt
 
 ### AssembledPrompt extension
 
-```
+```python
 AssembledPrompt:
   ... (existing fields)
   + catalog_items_used: list[CatalogItemInfo]   # Items included in prompt
@@ -377,39 +393,40 @@ Fields `purchase_url`, `purchase_title`, `catalog_item_type` are `null` when the
 ### Persisted message format (GET sessions/:id)
 
 Extended with:
+
 - `products: list[ProductRecommendation] | None` — recommended products (new)
 - Citation objects gain `purchase_url`, `purchase_title`, `catalog_item_type` (nullable)
 
 ## Error Handling & Edge Cases
 
-| Scenario                                    | Behavior                                                                 |
-| ------------------------------------------- | ------------------------------------------------------------------------ |
-| SKU in PROMOTIONS.md not found in DB        | Warning in structlog, promotion works as text-only (no `[product:N]`)    |
-| Catalog item inactive (`is_active=false`)   | Excluded from prompt, excluded from citation enrichment                  |
-| Catalog item expired (`valid_until < today`) | Same as inactive                                                        |
-| Source soft-deleted but has catalog_item     | Catalog item remains. Link preserved in published snapshots              |
-| Catalog item soft-deleted                   | `source.catalog_item_id` remains (FK NOT nullified). Enrichment disabled by `is_active` filtering. Links restorable. |
-| LLM uses invalid `[product:N]` index       | Marker silently ignored (consistent with `[source:N]` behavior)          |
-| LLM places multiple `[product:N]` markers  | Only first valid one is extracted (max 1 recommendation)                 |
-| Catalog item has no `url`                   | Recommendation without link: name + type only (like offline citation)    |
-| PROMOTIONS.md missing or empty              | No promotions layer; catalog items still in prompt as available_products for `[product:N]` mechanism; citation enrichment works independently at response processing level |
-| No active catalog items                     | `available_products` layer omitted; `product_instructions` omitted       |
-| Duplicate SKU on create                     | 409 Conflict with clear error message                                    |
+| Scenario                                     | Behavior                                                                                                                                                                   |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SKU in PROMOTIONS.md not found in DB         | Warning in structlog, promotion works as text-only (no `[product:N]`)                                                                                                      |
+| Catalog item inactive (`is_active=false`)    | Excluded from prompt, excluded from citation enrichment                                                                                                                    |
+| Catalog item expired (`valid_until < today`) | Same as inactive                                                                                                                                                           |
+| Source soft-deleted but has catalog_item     | Catalog item remains. Link preserved in published snapshots                                                                                                                |
+| Catalog item soft-deleted                    | `source.catalog_item_id` remains (FK NOT nullified). Enrichment disabled by `is_active` filtering. Links restorable.                                                       |
+| LLM uses invalid `[product:N]` index         | Marker silently ignored (consistent with `[source:N]` behavior)                                                                                                            |
+| LLM places multiple `[product:N]` markers    | Only first valid one is extracted (max 1 recommendation)                                                                                                                   |
+| Catalog item has no `url`                    | Recommendation without link: name + type only (like offline citation)                                                                                                      |
+| PROMOTIONS.md missing or empty               | No promotions layer; catalog items still in prompt as available_products for `[product:N]` mechanism; citation enrichment works independently at response processing level |
+| No active catalog items                      | `available_products` layer omitted; `product_instructions` omitted                                                                                                         |
+| Duplicate SKU on create                      | 409 Conflict with clear error message                                                                                                                                      |
 
 ## Testing Strategy
 
 ### Unit tests (CI, deterministic)
 
-| Component                           | What to test                                                                          |
-| ----------------------------------- | ------------------------------------------------------------------------------------- |
-| Catalog CRUD service                | Create with SKU, uniqueness violation, update (partial), soft delete, list + filters  |
-| `ProductRecommendationService`      | Parse `[product:N]`, invalid indices, max 1 limit, deduplication, strip_markers       |
-| `CitationService` (extended)        | Purchase_url enrichment, inactive item → no enrichment, no catalog → null fields      |
-| `PromotionsService` (extended)      | Parse `Catalog item:` metadata, missing field → None, unknown SKU handling            |
-| `ContextAssembler` (extended)       | `available_products` layer, `product_instructions`, token counting, empty catalog      |
-| Source ↔ Catalog linking            | PATCH source with catalog_item_id, SET NULL on catalog delete                         |
-| SSE serialization                   | New `products` event, enriched `citations` event, event ordering                      |
-| Pydantic schemas                    | CatalogItemCreate validation (SKU format, required fields), CatalogItemUpdate partial |
+| Component                      | What to test                                                                          |
+| ------------------------------ | ------------------------------------------------------------------------------------- |
+| Catalog CRUD service           | Create with SKU, uniqueness violation, update (partial), soft delete, list + filters  |
+| `ProductRecommendationService` | Parse `[product:N]`, invalid indices, max 1 limit, deduplication, strip_markers       |
+| `CitationService` (extended)   | Purchase_url enrichment, inactive item → no enrichment, no catalog → null fields      |
+| `PromotionsService` (extended) | Parse `Catalog item:` metadata, missing field → None, unknown SKU handling            |
+| `ContextAssembler` (extended)  | `available_products` layer, `product_instructions`, token counting, empty catalog     |
+| Source ↔ Catalog linking       | PATCH source with catalog_item_id, SET NULL on catalog delete                         |
+| SSE serialization              | New `products` event, enriched `citations` event, event ordering                      |
+| Pydantic schemas               | CatalogItemCreate validation (SKU format, required fields), CatalogItemUpdate partial |
 
 ### Integration tests (CI, in Docker)
 

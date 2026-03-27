@@ -15,6 +15,7 @@ async def _create_catalog_item(
     session_factory: async_sessionmaker[AsyncSession],
     *,
     sku: str,
+    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
     name: str = "Catalog item",
     item_type: CatalogItemType = CatalogItemType.BOOK,
     is_active: bool = True,
@@ -23,7 +24,7 @@ async def _create_catalog_item(
     async with session_factory() as session:
         item = CatalogItem(
             id=uuid.uuid7(),
-            agent_id=DEFAULT_AGENT_ID,
+            agent_id=agent_id,
             sku=sku,
             name=name,
             item_type=item_type,
@@ -205,6 +206,27 @@ async def test_patch_catalog_item_handles_conflict_and_explicit_null_clears(
         json={"sku": "BOOK-011"},
     )
     assert conflict.status_code == 409
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_catalog_allows_same_sku_for_different_agents(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    first = await _create_catalog_item(
+        session_factory,
+        sku="SHARED-001",
+        agent_id=DEFAULT_AGENT_ID,
+    )
+    second = await _create_catalog_item(
+        session_factory,
+        sku="SHARED-001",
+        agent_id=uuid.uuid7(),
+        name="Other tenant item",
+    )
+
+    assert first.sku == second.sku
+    assert first.agent_id != second.agent_id
 
 
 @pytest.mark.asyncio

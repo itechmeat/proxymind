@@ -222,7 +222,7 @@ The `POST /api/chat/messages` endpoint SHALL accept an optional `idempotency_key
 
 1. Look up a user message with the given `idempotency_key` in the database.
 2. If found, find the paired assistant message via `parent_message_id`:
-   - **COMPLETE** — replay the saved response as an SSE stream: `meta` event, a single `token` event with the full saved content, then `citations` event reconstructed from the `Message.citations` DB field, then `products` event reconstructed from `Message.products` DB field (if non-null), then `done` event with saved usage stats.
+   - **COMPLETE** — replay the saved response as an SSE stream: `meta` event, a single `token` event with the full saved content, then `citations` event reconstructed from the `Message.citations` DB field, then `products` event reconstructed from `Message.products` DB field (only when it contains a non-empty array), then `done` event with saved usage stats.
    - **STREAMING** — return HTTP 409 Conflict (the original request is still being processed).
    - **PARTIAL or FAILED** — proceed with a new generation (re-generate).
 3. If not found — proceed with normal message processing.
@@ -233,7 +233,7 @@ Replay of a COMPLETE message SHALL be allowed even if another stream is active i
 
 - **WHEN** `POST /api/chat/messages` is called with an `idempotency_key` that matches a user message whose paired assistant message has status COMPLETE
 - **THEN** the response SHALL be 200 with an SSE stream
-- **AND** the stream SHALL emit `meta`, then a single `token` event with the full saved content, then `citations` event reconstructed from `Message.citations`, then `products` event if `Message.products` is non-null, then `done`
+- **AND** the stream SHALL emit `meta`, then a single `token` event with the full saved content, then `citations` event reconstructed from `Message.citations`, then `products` event if `Message.products` contains a non-empty array, then `done`
 - **AND** no new LLM call SHALL be made
 
 #### Scenario: Idempotency replay includes empty citations
@@ -327,6 +327,7 @@ The `LLMService` SHALL provide a `stream()` method alongside the existing `compl
 The method SHALL use `litellm.acompletion(..., stream=True, stream_options={"include_usage": True})`. It SHALL yield `LLMToken` events for each non-empty content chunk, and a final `LLMStreamEnd` event with usage statistics (when available from the provider). On provider failure, it SHALL raise `LLMError`.
 
 **Stream event types:**
+
 - `LLMToken` — dataclass with `content: str`
 - `LLMStreamEnd` — dataclass with `model_name: str | None`, `token_count_prompt: int | None`, `token_count_completion: int | None`
 - `LLMStreamEvent = LLMToken | LLMStreamEnd` (typed union)

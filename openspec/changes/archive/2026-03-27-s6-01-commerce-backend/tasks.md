@@ -88,4 +88,4 @@
 - [x] 11.4 Verify catalog list endpoint returns both items
 - [ ] 11.5 Upload source linked to a catalog item, publish snapshot, chat — verify citation contains purchase_url
       Blocked in live env: upload and publish succeed, but chat retrieval requires `GEMINI_API_KEY`; unit/integration coverage for citation enrichment and products passes.
-- [x] 11.6 Run full test suite `pytest tests/ -v`, confirm all tests pass
+- [x] 11.6 Run full test suite `docker compose exec api pytest tests/ -v`, confirm all tests pass

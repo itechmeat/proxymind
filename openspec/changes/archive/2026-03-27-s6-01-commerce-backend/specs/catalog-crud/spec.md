@@ -6,13 +6,18 @@ Admin API for catalog item management: CRUD endpoints, SKU uniqueness, source li
 
 ### Requirement: CatalogItem SKU field
 
-The `CatalogItem` model SHALL have a `sku` field of type `String(64)`, unique, not null, and indexed (`ix_catalog_items_sku`). SKU is the human-readable identifier used for matching catalog items to PROMOTIONS.md entries. Existing rows (if any at migration time) SHALL be backfilled with `'LEGACY-' || id::text` before the unique index is created.
+The `CatalogItem` model SHALL have a `sku` field of type `String(64)`, not null, and indexed (`ix_catalog_items_sku`). SKU uniqueness SHALL be enforced per agent via the composite unique constraint `uq_catalog_items_agent_id_sku` on `(agent_id, sku)`. SKU is the human-readable identifier used for matching catalog items to PROMOTIONS.md entries. Existing rows (if any at migration time) SHALL be backfilled with `'LEGACY-' || id::text` before the per-agent unique constraint is created.
 
-#### Scenario: SKU field present and unique
+#### Scenario: SKU field present and unique within one agent
 
 - **WHEN** a `CatalogItem` is inspected in the database
 - **THEN** it SHALL have a non-null `sku` field of at most 64 characters
-- **AND** no two catalog items SHALL share the same `sku` value
+- **AND** no two catalog items for the same `agent_id` SHALL share the same `sku` value
+
+#### Scenario: Different agents may reuse the same SKU
+
+- **WHEN** two different agents each create a catalog item with `sku = "BOOK-001"`
+- **THEN** both rows SHALL be accepted because uniqueness is scoped by `agent_id`
 
 #### Scenario: Legacy backfill during migration
 

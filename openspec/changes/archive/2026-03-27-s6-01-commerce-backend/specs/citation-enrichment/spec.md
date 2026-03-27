@@ -6,7 +6,7 @@ Automatic enrichment of knowledge citations with purchase links when the cited s
 
 ### Requirement: Automatic enrichment trigger
 
-When building a citation, the system SHALL automatically enrich it with purchase link data if the cited source has an active linked catalog item. The trigger is the existence of a source ↔ catalog_item link where the catalog item is active, not expired, and has a non-null URL. No manual configuration or per-request flags are needed.
+When building a citation, the system SHALL automatically enrich it with purchase data if the cited source has an active linked catalog item. The trigger is the existence of a source ↔ catalog_item link where the catalog item is active and not expired. `purchase_url` is optional and remains `None` when the active catalog item has no URL. No manual configuration or per-request flags are needed.
 
 #### Scenario: Citation enriched when source has active catalog item
 

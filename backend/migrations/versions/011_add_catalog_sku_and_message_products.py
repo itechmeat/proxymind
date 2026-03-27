@@ -25,7 +25,12 @@ def upgrade() -> None:
     )
     op.execute("UPDATE catalog_items SET sku = 'LEGACY-' || id::text WHERE sku IS NULL")
     op.alter_column("catalog_items", "sku", existing_type=sa.String(length=64), nullable=False)
-    op.create_index("ix_catalog_items_sku", "catalog_items", ["sku"], unique=True)
+    op.create_index("ix_catalog_items_sku", "catalog_items", ["sku"])
+    op.create_unique_constraint(
+        "uq_catalog_items_agent_id_sku",
+        "catalog_items",
+        ["agent_id", "sku"],
+    )
 
     op.add_column(
         "messages",
@@ -55,5 +60,6 @@ def downgrade() -> None:
 
     op.drop_column("messages", "products")
 
+    op.drop_constraint("uq_catalog_items_agent_id_sku", "catalog_items", type_="unique")
     op.drop_index("ix_catalog_items_sku", table_name="catalog_items")
     op.drop_column("catalog_items", "sku")

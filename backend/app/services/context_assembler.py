@@ -221,7 +221,6 @@ class ContextAssembler:
                 "- Cite only chunks you actually use.",
                 "- Place citations inline, immediately after the relevant statement.",
                 "- Never generate URLs - only use [source:N] markers.",
-                f"- Maximum {self._max_citations} citations per response.",
             ]
         )
 

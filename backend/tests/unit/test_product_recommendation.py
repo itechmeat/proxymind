@@ -72,7 +72,7 @@ def test_strip_markers_removes_all_product_references() -> None:
         "Book [product:1] and event [product:2]."
     )
 
-    assert result == "Book  and event ."
+    assert result == "Book and event."
 
 
 def test_to_dict_and_from_dict_round_trip() -> None:
