@@ -3,7 +3,12 @@ import { initReactI18next, useTranslation } from "react-i18next";
 
 import { appLanguage } from "@/lib/config";
 import en from "@/locales/en";
-import type { SnapshotStatus, SourceStatus, SourceType } from "@/types/admin";
+import type {
+  CatalogItemType,
+  SnapshotStatus,
+  SourceStatus,
+  SourceType,
+} from "@/types/admin";
 
 const resources = {
   en: {
@@ -44,6 +49,10 @@ export function translateSnapshotStatus(status: SnapshotStatus) {
 
 export function translateSourceType(sourceType: SourceType) {
   return translate(`admin.source.type.${sourceType}`);
+}
+
+export function translateCatalogItemType(itemType: CatalogItemType) {
+  return translate(`admin.catalog.type.${itemType}`);
 }
 
 export default i18n;

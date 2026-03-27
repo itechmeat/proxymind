@@ -20,7 +20,7 @@ import {
 } from "@/lib/i18n";
 import { getSourceIcon } from "@/lib/source-icons";
 import { formatRelativeTime } from "@/lib/strings";
-import type { SourceListItem } from "@/types/admin";
+import type { CatalogItem, SourceListItem } from "@/types/admin";
 
 function sourceStatusVariant(status: SourceListItem["status"]) {
   switch (status) {
@@ -60,14 +60,112 @@ function StatusBadge({ status }: { status: SourceListItem["status"] }) {
 }
 
 interface SourceListProps {
+  catalogItems: CatalogItem[];
+  catalogLoadError: string | null;
   deletingSourceId: string | null;
+  linkingSourceId: string | null;
   onDelete: (source: SourceListItem) => void;
+  onLinkCatalogItem: (sourceId: string, catalogItemId: string | null) => void;
   sources: SourceListItem[];
 }
 
+function productOptionLabel(item: CatalogItem) {
+  return `${item.name} (${item.sku})`;
+}
+
+function findSelectedCatalogItem(
+  source: SourceListItem,
+  catalogItems: CatalogItem[],
+) {
+  if (!source.catalog_item_id) {
+    return null;
+  }
+
+  return (
+    catalogItems.find((item) => item.id === source.catalog_item_id) ?? {
+      id: source.catalog_item_id,
+      label: "fallback",
+    }
+  );
+}
+
+function ProductSelect({
+  catalogItems,
+  catalogLoadError,
+  disabled,
+  id,
+  onChange,
+  source,
+}: {
+  catalogItems: CatalogItem[];
+  catalogLoadError: string | null;
+  disabled: boolean;
+  id?: string;
+  onChange: (catalogItemId: string | null) => void;
+  source: SourceListItem;
+}) {
+  const { t } = useAppTranslation();
+  const selectedItem = findSelectedCatalogItem(source, catalogItems);
+  const isStale =
+    selectedItem !== null &&
+    !catalogItems.some((item) => item.id === source.catalog_item_id);
+  const showCatalogLoadFailedOption =
+    catalogLoadError !== null && catalogItems.length === 0;
+  const showNoProductsOption =
+    catalogLoadError === null && catalogItems.length === 0;
+  const isDisabled = disabled || (catalogItems.length === 0 && !isStale);
+  const value = source.catalog_item_id
+    ? source.catalog_item_id
+    : showCatalogLoadFailedOption
+      ? "__load_failed__"
+      : showNoProductsOption
+        ? "__empty__"
+        : "";
+
+  return (
+    <select
+      aria-label={`${t("admin.sourceLink.label")} ${source.title}`}
+      className="w-full rounded-full border border-stone-200 bg-white px-3 py-2 text-sm text-stone-950 outline-none disabled:cursor-not-allowed disabled:opacity-60"
+      disabled={isDisabled}
+      id={id}
+      onChange={(event) => {
+        const value = event.target.value;
+        onChange(value || null);
+      }}
+      value={value}
+    >
+      <option value="">{t("admin.sourceLink.placeholder")}</option>
+      {isStale && source.catalog_item_id ? (
+        <option value={source.catalog_item_id}>
+          ({t("admin.sourceLink.unknownProduct")})
+        </option>
+      ) : null}
+      {showCatalogLoadFailedOption ? (
+        <option disabled value="__load_failed__">
+          {t("admin.sourceLink.loadFailed")}
+        </option>
+      ) : null}
+      {showNoProductsOption ? (
+        <option disabled value="__empty__">
+          {t("admin.sourceLink.noProducts")}
+        </option>
+      ) : null}
+      {catalogItems.map((item) => (
+        <option key={item.id} value={item.id}>
+          {productOptionLabel(item)}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 export function SourceList({
+  catalogItems,
+  catalogLoadError,
   deletingSourceId,
+  linkingSourceId,
   onDelete,
+  onLinkCatalogItem,
   sources,
 }: SourceListProps) {
   const { t } = useAppTranslation();
@@ -104,6 +202,9 @@ export function SourceList({
                 {t("admin.source.table.status")}
               </th>
               <th className="px-5 py-4 font-medium">
+                {t("admin.sourceLink.label")}
+              </th>
+              <th className="px-5 py-4 font-medium">
                 {t("admin.source.table.created")}
               </th>
               <th className="px-5 py-4 font-medium text-right">
@@ -131,6 +232,18 @@ export function SourceList({
                 </td>
                 <td className="px-5 py-4 align-top">
                   <StatusBadge status={source.status} />
+                </td>
+                <td className="px-5 py-4 align-top">
+                  <ProductSelect
+                    catalogItems={catalogItems}
+                    catalogLoadError={catalogLoadError}
+                    disabled={linkingSourceId === source.id}
+                    id={`source-product-${source.id}`}
+                    onChange={(catalogItemId) => {
+                      onLinkCatalogItem(source.id, catalogItemId);
+                    }}
+                    source={source}
+                  />
                 </td>
                 <td className="px-5 py-4 align-top text-sm text-stone-500">
                   {formatRelativeTime(source.created_at)}
@@ -169,6 +282,21 @@ export function SourceList({
                     {translateSourceType(source.source_type)}
                   </Badge>
                   <StatusBadge status={source.status} />
+                </div>
+                <div className="grid gap-2 text-sm text-stone-600">
+                  <label htmlFor={`source-product-mobile-${source.id}`}>
+                    {t("admin.sourceLink.label")}
+                  </label>
+                  <ProductSelect
+                    catalogItems={catalogItems}
+                    catalogLoadError={catalogLoadError}
+                    disabled={linkingSourceId === source.id}
+                    id={`source-product-mobile-${source.id}`}
+                    onChange={(catalogItemId) => {
+                      onLinkCatalogItem(source.id, catalogItemId);
+                    }}
+                    source={source}
+                  />
                 </div>
                 <p className="m-0 text-sm text-stone-500">
                   {t("admin.source.addedAt", {

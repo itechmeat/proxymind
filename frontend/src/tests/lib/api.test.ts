@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-import { type ApiError, createSession, getSession } from "@/lib/api";
+import {
+  type ApiError,
+  buildApiUrl,
+  createSession,
+  getSession,
+} from "@/lib/api";
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -40,7 +44,7 @@ describe("api client", () => {
 
     const session = await createSession();
 
-    expect(fetchMock).toHaveBeenCalledWith("/api/chat/sessions", {
+    expect(fetchMock).toHaveBeenCalledWith(buildApiUrl("/api/chat/sessions"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -75,12 +79,15 @@ describe("api client", () => {
 
     const session = await getSession("session-1");
 
-    expect(fetchMock).toHaveBeenCalledWith("/api/chat/sessions/session-1", {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
+    expect(fetchMock).toHaveBeenCalledWith(
+      buildApiUrl("/api/chat/sessions/session-1"),
+      {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+        },
       },
-    });
+    );
     expect(session.messages).toHaveLength(1);
   });
 

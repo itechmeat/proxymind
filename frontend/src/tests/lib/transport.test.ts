@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { buildApiUrl } from "@/lib/api";
 import { strings } from "@/lib/strings";
 import { ProxyMindTransport } from "@/lib/transport";
 import type { ChatMessage } from "@/types/chat";
@@ -101,7 +102,7 @@ describe("ProxyMindTransport", () => {
     const request = fetchMock.mock.calls[0];
     const body = JSON.parse(String(request[1]?.body));
 
-    expect(request[0]).toBe("/api/chat/messages");
+    expect(request[0]).toBe(buildApiUrl("/api/chat/messages"));
     expect(body).toEqual({
       session_id: "session-1",
       text: "Hello",

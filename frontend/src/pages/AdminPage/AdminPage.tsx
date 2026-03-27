@@ -121,6 +121,7 @@ export function AdminPage() {
               <TabsLink to="/admin/snapshots">
                 {t("admin.tabs.snapshots")}
               </TabsLink>
+              <TabsLink to="/admin/catalog">{t("admin.catalog.tab")}</TabsLink>
             </TabsList>
           </div>
 

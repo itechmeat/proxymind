@@ -1,7 +1,12 @@
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router";
 
 import { appConfig } from "@/lib/config";
-import { AdminPage, SnapshotsTab, SourcesTab } from "@/pages/AdminPage";
+import {
+  AdminPage,
+  CatalogTab,
+  SnapshotsTab,
+  SourcesTab,
+} from "@/pages/AdminPage";
 import { ChatPage } from "@/pages/ChatPage";
 
 function AdminRouteGuard() {
@@ -22,6 +27,7 @@ function App() {
             <Route element={<Navigate replace to="sources" />} index />
             <Route element={<SourcesTab />} path="sources" />
             <Route element={<SnapshotsTab />} path="snapshots" />
+            <Route element={<CatalogTab />} path="catalog" />
           </Route>
         </Route>
       </Routes>

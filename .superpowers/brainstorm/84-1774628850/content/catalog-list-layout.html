@@ -1,0 +1,387 @@
+<h2>Catalog list layout</h2>
+<p class="subtitle">
+  How should the admin see catalog items? Table (like Sources tab) or cards with
+  richer visuals?
+</p>
+
+<div class="cards">
+  <div
+    class="card"
+    data-choice="table"
+    onclick="toggleSelect(this)"
+    onkeydown="
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        toggleSelect(this);
+      }
+    "
+    role="button"
+    tabindex="0"
+  >
+    <div class="card-image" style="padding: 16px; background: #fafaf9">
+      <div class="mockup" style="margin: 0">
+        <div class="mockup-header">Catalog &mdash; Table View</div>
+        <div class="mockup-body" style="padding: 0; font-size: 13px">
+          <table style="width: 100%; border-collapse: collapse">
+            <thead>
+              <tr style="background: #f5f5f4; text-align: left">
+                <th style="padding: 8px 12px; font-weight: 600; color: #57534e">
+                  Name
+                </th>
+                <th style="padding: 8px 12px; font-weight: 600; color: #57534e">
+                  SKU
+                </th>
+                <th style="padding: 8px 12px; font-weight: 600; color: #57534e">
+                  Type
+                </th>
+                <th style="padding: 8px 12px; font-weight: 600; color: #57534e">
+                  Status
+                </th>
+                <th style="padding: 8px 12px; font-weight: 600; color: #57534e">
+                  Sources
+                </th>
+                <th style="padding: 8px 12px; font-weight: 600; color: #57534e">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-top: 1px solid #e7e5e4">
+                <td style="padding: 8px 12px; font-weight: 500">
+                  Advanced React Patterns
+                </td>
+                <td
+                  style="
+                    padding: 8px 12px;
+                    color: #78716c;
+                    font-family: monospace;
+                    font-size: 12px;
+                  "
+                >
+                  BOOK-001
+                </td>
+                <td style="padding: 8px 12px">
+                  <span
+                    style="
+                      background: #dbeafe;
+                      color: #1d4ed8;
+                      padding: 2px 8px;
+                      border-radius: 9999px;
+                      font-size: 11px;
+                    "
+                    >Book</span
+                  >
+                </td>
+                <td style="padding: 8px 12px">
+                  <span
+                    style="
+                      background: #dcfce7;
+                      color: #15803d;
+                      padding: 2px 8px;
+                      border-radius: 9999px;
+                      font-size: 11px;
+                    "
+                    >Active</span
+                  >
+                </td>
+                <td style="padding: 8px 12px; color: #78716c">3 linked</td>
+                <td style="padding: 8px 12px">
+                  <span style="color: #0284c7; cursor: pointer">Edit</span>
+                  &middot;
+                  <span style="color: #dc2626; cursor: pointer">Delete</span>
+                </td>
+              </tr>
+              <tr style="border-top: 1px solid #e7e5e4">
+                <td style="padding: 8px 12px; font-weight: 500">
+                  System Design Masterclass
+                </td>
+                <td
+                  style="
+                    padding: 8px 12px;
+                    color: #78716c;
+                    font-family: monospace;
+                    font-size: 12px;
+                  "
+                >
+                  COURSE-042
+                </td>
+                <td style="padding: 8px 12px">
+                  <span
+                    style="
+                      background: #fef3c7;
+                      color: #a16207;
+                      padding: 2px 8px;
+                      border-radius: 9999px;
+                      font-size: 11px;
+                    "
+                    >Course</span
+                  >
+                </td>
+                <td style="padding: 8px 12px">
+                  <span
+                    style="
+                      background: #dcfce7;
+                      color: #15803d;
+                      padding: 2px 8px;
+                      border-radius: 9999px;
+                      font-size: 11px;
+                    "
+                    >Active</span
+                  >
+                </td>
+                <td style="padding: 8px 12px; color: #78716c">1 linked</td>
+                <td style="padding: 8px 12px">
+                  <span style="color: #0284c7; cursor: pointer">Edit</span>
+                  &middot;
+                  <span style="color: #dc2626; cursor: pointer">Delete</span>
+                </td>
+              </tr>
+              <tr style="border-top: 1px solid #e7e5e4">
+                <td style="padding: 8px 12px; font-weight: 500">
+                  Tech Conference 2026
+                </td>
+                <td
+                  style="
+                    padding: 8px 12px;
+                    color: #78716c;
+                    font-family: monospace;
+                    font-size: 12px;
+                  "
+                >
+                  EVT-007
+                </td>
+                <td style="padding: 8px 12px">
+                  <span
+                    style="
+                      background: #f3e8ff;
+                      color: #7e22ce;
+                      padding: 2px 8px;
+                      border-radius: 9999px;
+                      font-size: 11px;
+                    "
+                    >Event</span
+                  >
+                </td>
+                <td style="padding: 8px 12px">
+                  <span
+                    style="
+                      background: #fef9c3;
+                      color: #a16207;
+                      padding: 2px 8px;
+                      border-radius: 9999px;
+                      font-size: 11px;
+                    "
+                    >Scheduled</span
+                  >
+                </td>
+                <td style="padding: 8px 12px; color: #78716c">0 linked</td>
+                <td style="padding: 8px 12px">
+                  <span style="color: #0284c7; cursor: pointer">Edit</span>
+                  &middot;
+                  <span style="color: #dc2626; cursor: pointer">Delete</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div
+        style="
+          margin-top: 12px;
+          padding: 8px 12px;
+          background: #f0fdf4;
+          border-radius: 8px;
+          font-size: 12px;
+          color: #15803d;
+        "
+      >
+        Consistent with SourceList table pattern already used in Sources tab
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A &mdash; Table</h3>
+      <p>
+        Dense, scannable. Consistent with Sources tab. Works well for 10-50
+        items. Actions inline.
+      </p>
+    </div>
+  </div>
+
+  <div
+    class="card"
+    data-choice="cards"
+    onclick="toggleSelect(this)"
+    onkeydown="
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        toggleSelect(this);
+      }
+    "
+    role="button"
+    tabindex="0"
+  >
+    <div class="card-image" style="padding: 16px; background: #fafaf9">
+      <div class="mockup" style="margin: 0">
+        <div class="mockup-header">Catalog &mdash; Card View</div>
+        <div class="mockup-body" style="padding: 16px">
+          <div
+            style="
+              display: grid;
+              grid-template-columns: repeat(2, 1fr);
+              gap: 12px;
+            "
+          >
+            <div
+              style="
+                border: 1px solid #e7e5e4;
+                border-radius: 12px;
+                overflow: hidden;
+              "
+            >
+              <div
+                style="
+                  height: 48px;
+                  background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                "
+              >
+                <span aria-label="Book icon" role="img" style="font-size: 20px"
+                  >&#128214;</span
+                >
+              </div>
+              <div style="padding: 10px">
+                <div style="font-weight: 600; font-size: 13px">
+                  Advanced React Patterns
+                </div>
+                <div style="font-size: 11px; color: #78716c; margin-top: 2px">
+                  BOOK-001 &middot; 3 sources
+                </div>
+                <div style="margin-top: 6px">
+                  <span
+                    style="
+                      background: #dcfce7;
+                      color: #15803d;
+                      padding: 2px 6px;
+                      border-radius: 9999px;
+                      font-size: 10px;
+                    "
+                    >Active</span
+                  >
+                </div>
+              </div>
+            </div>
+            <div
+              style="
+                border: 1px solid #e7e5e4;
+                border-radius: 12px;
+                overflow: hidden;
+              "
+            >
+              <div
+                style="
+                  height: 48px;
+                  background: linear-gradient(135deg, #fef3c7, #fde68a);
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                "
+              >
+                <span
+                  aria-label="Graduation cap icon"
+                  role="img"
+                  style="font-size: 20px"
+                  >&#127891;</span
+                >
+              </div>
+              <div style="padding: 10px">
+                <div style="font-weight: 600; font-size: 13px">
+                  System Design Masterclass
+                </div>
+                <div style="font-size: 11px; color: #78716c; margin-top: 2px">
+                  COURSE-042 &middot; 1 source
+                </div>
+                <div style="margin-top: 6px">
+                  <span
+                    style="
+                      background: #dcfce7;
+                      color: #15803d;
+                      padding: 2px 6px;
+                      border-radius: 9999px;
+                      font-size: 10px;
+                    "
+                    >Active</span
+                  >
+                </div>
+              </div>
+            </div>
+            <div
+              style="
+                border: 1px solid #e7e5e4;
+                border-radius: 12px;
+                overflow: hidden;
+              "
+            >
+              <div
+                style="
+                  height: 48px;
+                  background: linear-gradient(135deg, #f3e8ff, #e9d5ff);
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                "
+              >
+                <span
+                  aria-label="Ticket icon"
+                  role="img"
+                  style="font-size: 20px"
+                  >&#127915;</span
+                >
+              </div>
+              <div style="padding: 10px">
+                <div style="font-weight: 600; font-size: 13px">
+                  Tech Conference 2026
+                </div>
+                <div style="font-size: 11px; color: #78716c; margin-top: 2px">
+                  EVT-007 &middot; 0 sources
+                </div>
+                <div style="margin-top: 6px">
+                  <span
+                    style="
+                      background: #fef9c3;
+                      color: #a16207;
+                      padding: 2px 6px;
+                      border-radius: 9999px;
+                      font-size: 10px;
+                    "
+                    >Scheduled</span
+                  >
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        style="
+          margin-top: 12px;
+          padding: 8px 12px;
+          background: #fefce8;
+          border-radius: 8px;
+          font-size: 12px;
+          color: #a16207;
+        "
+      >
+        More visual but inconsistent with existing admin patterns
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B &mdash; Cards</h3>
+      <p>
+        Visual, good with image_url. But breaks consistency with SourceList.
+        Harder to scan with many items.
+      </p>
+    </div>
+  </div>
+</div>

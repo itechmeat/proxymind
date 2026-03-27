@@ -19,8 +19,11 @@ export type SnapshotStatus = "draft" | "published" | "active" | "archived";
 
 export type RetrievalMode = "hybrid" | "dense" | "sparse";
 
+export type CatalogItemType = "book" | "course" | "event" | "merch" | "other";
+
 export interface SourceListItem {
   id: string;
+  catalog_item_id: string | null;
   title: string;
   source_type: SourceType;
   status: SourceStatus;
@@ -129,4 +132,63 @@ export interface DraftTestResponse {
   mode: RetrievalMode;
   results: DraftTestResult[];
   total_chunks_in_draft: number;
+}
+
+export interface CatalogItem {
+  id: string;
+  sku: string;
+  name: string;
+  description: string | null;
+  item_type: CatalogItemType;
+  url: string | null;
+  image_url: string | null;
+  is_active: boolean;
+  valid_from: string | null;
+  valid_until: string | null;
+  created_at: string;
+  updated_at: string;
+  linked_sources_count: number;
+}
+
+export interface LinkedSource {
+  id: string;
+  title: string;
+  source_type: SourceType;
+  status: SourceStatus;
+}
+
+export interface CatalogItemDetail extends CatalogItem {
+  linked_sources: LinkedSource[];
+}
+
+export interface CatalogItemCreate {
+  sku: string;
+  name: string;
+  description?: string | null;
+  item_type: CatalogItemType;
+  url?: string | null;
+  image_url?: string | null;
+  valid_from?: string | null;
+  valid_until?: string | null;
+}
+
+export interface CatalogItemUpdate {
+  sku?: string;
+  name?: string;
+  description?: string | null;
+  item_type?: CatalogItemType;
+  url?: string | null;
+  image_url?: string | null;
+  is_active?: boolean;
+  valid_from?: string | null;
+  valid_until?: string | null;
+}
+
+export interface CatalogItemListResponse {
+  items: CatalogItem[];
+  total: number;
+}
+
+export interface SourceUpdateRequest {
+  catalog_item_id: string | null;
 }

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "@/App";
 import { SESSION_STORAGE_KEY } from "@/hooks/useSession";
+import { buildApiUrl } from "@/lib/api";
 import { strings } from "@/lib/strings";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -106,6 +107,10 @@ function getRequestUrl(input: RequestInfo | URL) {
   return input.url;
 }
 
+function matchesRequestUrl(input: RequestInfo | URL, pathname: string) {
+  return getRequestUrl(input) === buildApiUrl(pathname);
+}
+
 describe("ChatPage integration", () => {
   beforeEach(() => {
     stubLocalStorage();
@@ -126,7 +131,7 @@ describe("ChatPage integration", () => {
     fetchMock.mockImplementation(async (input, init) => {
       const url = getRequestUrl(input);
 
-      if (url === "/api/chat/twin" && init?.method === "GET") {
+      if (url === buildApiUrl("/api/chat/twin") && init?.method === "GET") {
         return jsonResponse(
           twinProfileResponse({
             name: "Marcus Aurelius",
@@ -134,11 +139,17 @@ describe("ChatPage integration", () => {
         );
       }
 
-      if (url === "/api/chat/sessions" && init?.method === "POST") {
+      if (
+        url === buildApiUrl("/api/chat/sessions") &&
+        init?.method === "POST"
+      ) {
         return jsonResponse(activeSessionResponse(), 201);
       }
 
-      if (url === "/api/chat/messages" && init?.method === "POST") {
+      if (
+        url === buildApiUrl("/api/chat/messages") &&
+        init?.method === "POST"
+      ) {
         return streamResponse([
           {
             value: eventChunk("meta", {
@@ -197,8 +208,8 @@ describe("ChatPage integration", () => {
       expect(screen.queryByLabelText(strings.streamingLabel)).toBeNull();
     });
 
-    const messageRequest = fetchMock.mock.calls.find(
-      ([input]) => getRequestUrl(input) === "/api/chat/messages",
+    const messageRequest = fetchMock.mock.calls.find(([input]) =>
+      matchesRequestUrl(input, "/api/chat/messages"),
     );
 
     expect(messageRequest).toBeDefined();
@@ -221,11 +232,14 @@ describe("ChatPage integration", () => {
     fetchMock.mockImplementation(async (input, init) => {
       const url = getRequestUrl(input);
 
-      if (url === "/api/chat/twin" && init?.method === "GET") {
+      if (url === buildApiUrl("/api/chat/twin") && init?.method === "GET") {
         return jsonResponse(twinProfileResponse());
       }
 
-      if (url === "/api/chat/sessions" && init?.method === "POST") {
+      if (
+        url === buildApiUrl("/api/chat/sessions") &&
+        init?.method === "POST"
+      ) {
         return new Promise<Response>((resolve) => {
           resolveSession = resolve;
         });
@@ -249,11 +263,14 @@ describe("ChatPage integration", () => {
     fetchMock.mockImplementation(async (input, init) => {
       const url = getRequestUrl(input);
 
-      if (url === "/api/chat/twin" && init?.method === "GET") {
+      if (url === buildApiUrl("/api/chat/twin") && init?.method === "GET") {
         return jsonResponse({ detail: "Profile unavailable" }, 503);
       }
 
-      if (url === "/api/chat/sessions" && init?.method === "POST") {
+      if (
+        url === buildApiUrl("/api/chat/sessions") &&
+        init?.method === "POST"
+      ) {
         return jsonResponse(activeSessionResponse(), 201);
       }
 
@@ -276,12 +293,12 @@ describe("ChatPage integration", () => {
     fetchMock.mockImplementation(async (input, init) => {
       const url = getRequestUrl(input);
 
-      if (url === "/api/chat/twin" && init?.method === "GET") {
+      if (url === buildApiUrl("/api/chat/twin") && init?.method === "GET") {
         return jsonResponse(twinProfileResponse());
       }
 
       if (
-        url === "/api/chat/sessions/session-restored" &&
+        url === buildApiUrl("/api/chat/sessions/session-restored") &&
         init?.method === "GET"
       ) {
         return jsonResponse(
@@ -361,15 +378,21 @@ describe("ChatPage integration", () => {
     fetchMock.mockImplementation(async (input, init) => {
       const url = getRequestUrl(input);
 
-      if (url === "/api/chat/twin" && init?.method === "GET") {
+      if (url === buildApiUrl("/api/chat/twin") && init?.method === "GET") {
         return jsonResponse(twinProfileResponse());
       }
 
-      if (url === "/api/chat/sessions" && init?.method === "POST") {
+      if (
+        url === buildApiUrl("/api/chat/sessions") &&
+        init?.method === "POST"
+      ) {
         return jsonResponse(activeSessionResponse(), 201);
       }
 
-      if (url === "/api/chat/messages" && init?.method === "POST") {
+      if (
+        url === buildApiUrl("/api/chat/messages") &&
+        init?.method === "POST"
+      ) {
         return jsonResponse({ detail: "No active snapshot" }, 422);
       }
 
@@ -395,15 +418,21 @@ describe("ChatPage integration", () => {
     fetchMock.mockImplementation(async (input, init) => {
       const url = getRequestUrl(input);
 
-      if (url === "/api/chat/twin" && init?.method === "GET") {
+      if (url === buildApiUrl("/api/chat/twin") && init?.method === "GET") {
         return jsonResponse(twinProfileResponse());
       }
 
-      if (url === "/api/chat/sessions" && init?.method === "POST") {
+      if (
+        url === buildApiUrl("/api/chat/sessions") &&
+        init?.method === "POST"
+      ) {
         return jsonResponse(activeSessionResponse(), 201);
       }
 
-      if (url === "/api/chat/messages" && init?.method === "POST") {
+      if (
+        url === buildApiUrl("/api/chat/messages") &&
+        init?.method === "POST"
+      ) {
         return jsonResponse({ detail: "Concurrent stream active" }, 409);
       }
 
@@ -427,15 +456,21 @@ describe("ChatPage integration", () => {
     fetchMock.mockImplementation(async (input, init) => {
       const url = getRequestUrl(input);
 
-      if (url === "/api/chat/twin" && init?.method === "GET") {
+      if (url === buildApiUrl("/api/chat/twin") && init?.method === "GET") {
         return jsonResponse(twinProfileResponse());
       }
 
-      if (url === "/api/chat/sessions" && init?.method === "POST") {
+      if (
+        url === buildApiUrl("/api/chat/sessions") &&
+        init?.method === "POST"
+      ) {
         return jsonResponse(activeSessionResponse(), 201);
       }
 
-      if (url === "/api/chat/messages" && init?.method === "POST") {
+      if (
+        url === buildApiUrl("/api/chat/messages") &&
+        init?.method === "POST"
+      ) {
         messageAttempts += 1;
 
         if (messageAttempts === 1) {
@@ -474,8 +509,8 @@ describe("ChatPage integration", () => {
     ).toBeInTheDocument();
 
     await waitFor(() => {
-      const messageRequests = fetchMock.mock.calls.filter(
-        ([input]) => getRequestUrl(input) === "/api/chat/messages",
+      const messageRequests = fetchMock.mock.calls.filter(([input]) =>
+        matchesRequestUrl(input, "/api/chat/messages"),
       );
 
       expect(messageRequests).toHaveLength(2);
@@ -490,18 +525,21 @@ describe("ChatPage integration", () => {
     fetchMock.mockImplementation(async (input, init) => {
       const url = getRequestUrl(input);
 
-      if (url === "/api/chat/twin" && init?.method === "GET") {
+      if (url === buildApiUrl("/api/chat/twin") && init?.method === "GET") {
         return jsonResponse(twinProfileResponse());
       }
 
       if (
-        url === "/api/chat/sessions/session-broken" &&
+        url === buildApiUrl("/api/chat/sessions/session-broken") &&
         init?.method === "GET"
       ) {
         return jsonResponse({ detail: "Backend unavailable" }, 503);
       }
 
-      if (url === "/api/chat/sessions" && init?.method === "POST") {
+      if (
+        url === buildApiUrl("/api/chat/sessions") &&
+        init?.method === "POST"
+      ) {
         return jsonResponse(
           activeSessionResponse({ id: "session-recovered" }),
           201,
