@@ -17,6 +17,7 @@ from app.api.profile import chat_router as profile_chat_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db import create_database_engine, create_session_factory
+from app.middleware.rate_limit import RateLimitMiddleware
 from app.persona import PersonaLoader
 
 
@@ -193,6 +194,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="ProxyMind API", version="0.1.0", lifespan=lifespan)
+app.add_middleware(RateLimitMiddleware)
 app.include_router(admin_router)
 app.include_router(profile_admin_router)
 app.include_router(chat_router)

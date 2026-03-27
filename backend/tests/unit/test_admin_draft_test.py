@@ -18,6 +18,10 @@ from app.db.session import get_session
 from app.services.qdrant import RetrievedChunk
 
 
+def _admin_headers(admin_app) -> dict[str, str]:
+    return {"Authorization": f"Bearer {admin_app.state.settings.admin_api_key}"}
+
+
 def _retrieved_chunk(
     *, text_content: str = "This is test content about quantum physics."
 ) -> RetrievedChunk:
@@ -71,7 +75,11 @@ async def test_draft_test_endpoint_returns_results_for_hybrid_mode(admin_app) ->
 
     try:
         transport = httpx.ASGITransport(app=admin_app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+            headers=_admin_headers(admin_app),
+        ) as client:
             response = await client.post(
                 f"/api/admin/snapshots/{draft_snapshot_id}/test",
                 json={"query": "  quantum physics  ", "mode": "hybrid", "top_n": 5},
@@ -137,7 +145,11 @@ async def test_draft_test_endpoint_uses_dense_search_for_dense_mode(admin_app) -
 
     try:
         transport = httpx.ASGITransport(app=admin_app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+            headers=_admin_headers(admin_app),
+        ) as client:
             response = await client.post(
                 f"/api/admin/snapshots/{draft_snapshot_id}/test",
                 json={"query": "dense query", "mode": "dense", "top_n": 2},
@@ -185,7 +197,11 @@ async def test_draft_test_endpoint_skips_embeddings_for_sparse_mode(admin_app) -
 
     try:
         transport = httpx.ASGITransport(app=admin_app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+            headers=_admin_headers(admin_app),
+        ) as client:
             response = await client.post(
                 f"/api/admin/snapshots/{draft_snapshot_id}/test",
                 json={"query": "sparse query", "mode": "sparse"},
@@ -229,7 +245,11 @@ async def test_draft_test_endpoint_truncates_text_content_to_500_unicode_chars(a
 
     try:
         transport = httpx.ASGITransport(app=admin_app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+            headers=_admin_headers(admin_app),
+        ) as client:
             response = await client.post(
                 f"/api/admin/snapshots/{draft_snapshot_id}/test",
                 json={"query": "unicode query", "mode": "hybrid"},

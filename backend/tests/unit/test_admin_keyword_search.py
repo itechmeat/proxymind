@@ -12,6 +12,10 @@ from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
 from app.services.qdrant import RetrievedChunk
 
 
+def _admin_headers(admin_app) -> dict[str, str]:
+    return {"Authorization": f"Bearer {admin_app.state.settings.admin_api_key}"}
+
+
 def _retrieved_chunk() -> RetrievedChunk:
     return RetrievedChunk(
         chunk_id=uuid.uuid4(),
@@ -44,7 +48,11 @@ async def test_keyword_search_endpoint_returns_results_using_active_snapshot_def
 
     try:
         transport = httpx.ASGITransport(app=admin_app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+            headers=_admin_headers(admin_app),
+        ) as client:
             response = await client.post(
                 "/api/admin/search/keyword",
                 json={"query": "deployment"},
@@ -92,7 +100,11 @@ async def test_keyword_search_endpoint_returns_422_when_active_snapshot_missing(
 
     try:
         transport = httpx.ASGITransport(app=admin_app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+            headers=_admin_headers(admin_app),
+        ) as client:
             response = await client.post(
                 "/api/admin/search/keyword",
                 json={"query": "deployment"},
@@ -121,7 +133,11 @@ async def test_keyword_search_endpoint_uses_explicit_snapshot_id_without_active_
 
     try:
         transport = httpx.ASGITransport(app=admin_app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+            headers=_admin_headers(admin_app),
+        ) as client:
             response = await client.post(
                 "/api/admin/search/keyword",
                 json={
@@ -156,7 +172,11 @@ async def test_keyword_search_endpoint_rejects_empty_query(admin_app) -> None:
 
     try:
         transport = httpx.ASGITransport(app=admin_app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+            headers=_admin_headers(admin_app),
+        ) as client:
             response = await client.post(
                 "/api/admin/search/keyword",
                 json={"query": "   "},

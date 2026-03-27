@@ -49,6 +49,10 @@ def _settings() -> SimpleNamespace:
         promotions_file_path="/config/PROMOTIONS.md",
         conversation_memory_budget=4096,
         conversation_summary_ratio=0.3,
+        admin_api_key=None,
+        chat_rate_limit=60,
+        chat_rate_window_seconds=60,
+        trusted_proxy_depth=1,
     )
 
 
@@ -251,6 +255,14 @@ async def test_lifespan_loads_persona_context(
         assert test_app.state.persona_context.config_commit_hash != ""
         assert test_app.state.promotions_service is not None
         assert test_app.state.conversation_memory_service is not None
+
+
+def test_rate_limit_middleware_is_mounted() -> None:
+    from app.middleware.rate_limit import RateLimitMiddleware
+
+    middleware_classes = [middleware.cls for middleware in app_main.app.user_middleware]
+
+    assert RateLimitMiddleware in middleware_classes
 
 
 @pytest.mark.asyncio
