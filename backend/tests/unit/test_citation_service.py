@@ -11,12 +11,20 @@ def _source_info(
     title: str = "Test Source",
     public_url: str | None = None,
     source_type: str = "pdf",
+    catalog_item_url: str | None = None,
+    catalog_item_name: str | None = None,
+    catalog_item_type: str | None = None,
+    catalog_item_active: bool = False,
 ) -> SourceInfo:
     return SourceInfo(
         id=source_id,
         title=title,
         public_url=public_url,
         source_type=source_type,
+        catalog_item_url=catalog_item_url,
+        catalog_item_name=catalog_item_name,
+        catalog_item_type=catalog_item_type,
+        catalog_item_active=catalog_item_active,
     )
 
 
@@ -179,6 +187,71 @@ class TestCitationServiceExtract:
         )
 
         assert result == []
+
+    def test_purchase_url_added_when_catalog_item_active(self) -> None:
+        source_id = uuid.uuid4()
+
+        result = CitationService.extract(
+            "See [source:1].",
+            [_chunk(source_id)],
+            {
+                source_id: _source_info(
+                    source_id,
+                    catalog_item_url="https://store.example.com/book",
+                    catalog_item_name="AI in Practice",
+                    catalog_item_type="book",
+                    catalog_item_active=True,
+                )
+            },
+            max_citations=5,
+        )
+
+        assert result[0].purchase_url == "https://store.example.com/book"
+        assert result[0].purchase_title == "AI in Practice"
+        assert result[0].catalog_item_type == "book"
+
+    def test_inactive_catalog_item_does_not_enrich_citation(self) -> None:
+        source_id = uuid.uuid4()
+
+        result = CitationService.extract(
+            "See [source:1].",
+            [_chunk(source_id)],
+            {
+                source_id: _source_info(
+                    source_id,
+                    catalog_item_url="https://store.example.com/book",
+                    catalog_item_name="AI in Practice",
+                    catalog_item_type="book",
+                    catalog_item_active=False,
+                )
+            },
+            max_citations=5,
+        )
+
+        assert result[0].purchase_url is None
+        assert result[0].purchase_title is None
+        assert result[0].catalog_item_type is None
+
+    def test_catalog_item_without_url_keeps_title_and_type(self) -> None:
+        source_id = uuid.uuid4()
+
+        result = CitationService.extract(
+            "See [source:1].",
+            [_chunk(source_id)],
+            {
+                source_id: _source_info(
+                    source_id,
+                    catalog_item_name="Offline Event",
+                    catalog_item_type="event",
+                    catalog_item_active=True,
+                )
+            },
+            max_citations=5,
+        )
+
+        assert result[0].purchase_url is None
+        assert result[0].purchase_title == "Offline Event"
+        assert result[0].catalog_item_type == "event"
 
 
 class TestTextCitation:

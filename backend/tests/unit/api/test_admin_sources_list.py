@@ -72,6 +72,7 @@ async def test_list_sources_returns_non_deleted_sources_in_descending_order(
     assert [item["id"] for item in body] == [str(newer.id), str(older.id)]
     assert body[0] == {
         "id": str(newer.id),
+        "catalog_item_id": None,
         "title": "newer",
         "source_type": "markdown",
         "status": "processing",

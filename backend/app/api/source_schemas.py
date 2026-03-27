@@ -12,6 +12,7 @@ class SourceListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    catalog_item_id: uuid.UUID | None
     title: str
     source_type: SourceType
     status: SourceStatus

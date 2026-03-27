@@ -19,6 +19,7 @@ from app.services.chat import (
     ChatStreamDone,
     ChatStreamError,
     ChatStreamMeta,
+    ChatStreamProducts,
     ChatStreamToken,
     ConcurrentStreamError,
     IdempotencyConflictError,
@@ -33,6 +34,7 @@ from app.services.prompt import NO_CONTEXT_REFUSAL
 from app.services.qdrant import RetrievedChunk
 from app.services.query_rewrite import RewriteResult
 from app.services.snapshot import SnapshotService
+from app.services.catalog import CatalogItemInfo
 
 
 async def _create_snapshot(
@@ -99,6 +101,7 @@ def _make_service(
     rewrite_error: Exception | None = None,
     conversation_memory_service: object | None = None,
     summary_enqueuer: AsyncMock | None = None,
+    catalog_items: list[CatalogItemInfo] | None = None,
 ) -> tuple[ChatService, SimpleNamespace, SimpleNamespace]:
     retrieval_service = SimpleNamespace(search=AsyncMock())
     if isinstance(retrieval_result, Exception):
@@ -123,6 +126,7 @@ def _make_service(
     context_assembler = ContextAssembler(
         persona_context=persona_context,
         promotions_service=PromotionsService(promotions_text=""),
+        catalog_items=catalog_items,
         retrieval_context_budget=4096,
         max_citations=max_citations_per_response,
         min_retrieved_chunks=min_retrieved_chunks,
@@ -166,6 +170,19 @@ async def _message_rows(db_session: AsyncSession, session_id: uuid.UUID) -> list
                 select(Message).where(Message.session_id == session_id).order_by(Message.created_at)
             )
         ).all()
+    )
+
+
+def _catalog_item() -> CatalogItemInfo:
+    from app.db.models.enums import CatalogItemType
+
+    return CatalogItemInfo(
+        id=uuid.uuid7(),
+        sku="AI-PRACTICE-2026",
+        name="AI in Practice",
+        item_type=CatalogItemType.BOOK,
+        url="https://store.example.com/book",
+        image_url=None,
     )
 
 
@@ -323,6 +340,7 @@ async def test_stream_answer_includes_conversation_memory_and_enqueues_summary(
             ],
             token_estimate=1,
             included_promotions=[],
+            catalog_items_used=[],
             retrieval_chunks_used=len(chunks),
             retrieval_chunks_total=len(chunks),
             layer_token_counts={"conversation_memory": 12},
@@ -363,6 +381,7 @@ async def test_llm_prompt_uses_original_query_when_rewrite_occurs(
             messages=[{"role": "user", "content": query}],
             token_estimate=1,
             included_promotions=[],
+            catalog_items_used=[],
             retrieval_chunks_used=len(chunks),
             retrieval_chunks_total=len(chunks),
             layer_token_counts={},
@@ -526,6 +545,93 @@ async def test_idempotent_replay_includes_citations_event(
         if isinstance(event, ChatStreamCitations)
         for citation in event.citations
     ]
+
+
+@pytest.mark.asyncio
+async def test_stream_answer_emits_products_event_after_citations(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    source_id = uuid.uuid4()
+    source_info = SourceInfo(
+        id=source_id,
+        title="Test Source",
+        public_url=None,
+        source_type="pdf",
+    )
+    service, _, _ = _make_service(
+        db_session,
+        persona_context=persona_context,
+        retrieval_result=[_chunk(source_id=source_id)],
+        stream_tokens=("Answer [source:1] and try this [product:1].",),
+        catalog_items=[_catalog_item()],
+    )
+    service._load_source_map = AsyncMock(return_value={source_id: source_info})
+    session = await service.create_session()
+
+    events = await _collect_events(service, session_id=session.id, text="Q?")
+
+    event_types = [type(event).__name__ for event in events]
+    assert event_types.index("ChatStreamCitations") < event_types.index("ChatStreamProducts")
+    assert event_types.index("ChatStreamProducts") < event_types.index("ChatStreamDone")
+
+    product_events = [event for event in events if isinstance(event, ChatStreamProducts)]
+    assert len(product_events) == 1
+    assert product_events[0].products[0].sku == "AI-PRACTICE-2026"
+
+    messages = await _message_rows(db_session, session.id)
+    assert messages[1].products is not None
+    assert messages[1].products[0]["sku"] == "AI-PRACTICE-2026"
+    assert "[product:1]" not in messages[1].content
+
+
+@pytest.mark.asyncio
+async def test_stream_answer_does_not_emit_products_without_markers(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    service, _, _ = _make_service(
+        db_session,
+        persona_context=persona_context,
+        retrieval_result=[_chunk()],
+        stream_tokens=("Answer without product marker.",),
+        catalog_items=[_catalog_item()],
+    )
+    session = await service.create_session()
+
+    events = await _collect_events(service, session_id=session.id, text="Q?")
+
+    assert not any(isinstance(event, ChatStreamProducts) for event in events)
+
+
+@pytest.mark.asyncio
+async def test_idempotent_replay_includes_products_event(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    service, _, _ = _make_service(
+        db_session,
+        persona_context=persona_context,
+        retrieval_result=[_chunk()],
+        stream_tokens=("Try this [product:1].",),
+        catalog_items=[_catalog_item()],
+    )
+    session = await service.create_session()
+
+    await _collect_events(service, session_id=session.id, text="Q?", idempotency_key="key-1")
+    replay_events = await _collect_events(
+        service,
+        session_id=session.id,
+        text="Q?",
+        idempotency_key="key-1",
+    )
+
+    product_events = [event for event in replay_events if isinstance(event, ChatStreamProducts)]
+    assert len(product_events) == 1
+    assert product_events[0].products[0].sku == "AI-PRACTICE-2026"
 
 
 @pytest.mark.asyncio

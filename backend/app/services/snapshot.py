@@ -4,7 +4,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -100,20 +100,9 @@ class SnapshotService:
         knowledge_base_id: uuid.UUID,
     ) -> KnowledgeSnapshot:
         db_session = self._resolve_session(session)
-        statement = (
-            insert(KnowledgeSnapshot)
-            .values(
-                id=uuid.uuid7(),
-                agent_id=agent_id,
-                knowledge_base_id=knowledge_base_id,
-                name="Auto draft",
-                description="Automatically created draft snapshot for ingestion.",
-                status=SnapshotStatus.DRAFT,
-            )
-            .on_conflict_do_nothing(
-                index_elements=["agent_id", "knowledge_base_id"],
-                index_where=KnowledgeSnapshot.status == SnapshotStatus.DRAFT,
-            )
+        statement = self._build_create_draft_statement(
+            agent_id=agent_id,
+            knowledge_base_id=knowledge_base_id,
         )
         await db_session.execute(statement)
 
@@ -127,6 +116,28 @@ class SnapshotService:
         if snapshot is None:
             raise RuntimeError("Failed to create or load draft knowledge snapshot")
         return snapshot
+
+    def _build_create_draft_statement(
+        self,
+        *,
+        agent_id: uuid.UUID,
+        knowledge_base_id: uuid.UUID,
+    ):
+        return (
+            insert(KnowledgeSnapshot)
+            .values(
+                id=uuid.uuid7(),
+                agent_id=agent_id,
+                knowledge_base_id=knowledge_base_id,
+                name="Auto draft",
+                description="Automatically created draft snapshot for ingestion.",
+                status=SnapshotStatus.DRAFT,
+            )
+            .on_conflict_do_nothing(
+                index_elements=["agent_id", "knowledge_base_id"],
+                index_where=text("status = 'draft'"),
+            )
+        )
 
     async def ensure_draft_or_rebind(
         self,

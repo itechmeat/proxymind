@@ -69,6 +69,7 @@ services:
   api:
     build:
       context: ./backend
+      target: runtime
       args:
         GIT_COMMIT_SHA: ${GIT_COMMIT_SHA:-}
     entrypoint:
@@ -107,6 +108,7 @@ services:
   worker:
     build:
       context: ./backend
+      target: runtime
       args:
         GIT_COMMIT_SHA: ${GIT_COMMIT_SHA:-}
     command:

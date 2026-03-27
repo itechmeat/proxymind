@@ -5,9 +5,11 @@ from arq.connections import ArqRedis
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import DEFAULT_AGENT_ID
 from app.db.session import get_session
 from app.persona.loader import PersonaContext
 from app.services.chat import ChatService
+from app.services.catalog import CatalogService
 from app.services.context_assembler import ContextAssembler
 from app.services.conversation_memory import ConversationMemoryService
 from app.services.embedding import EmbeddingService
@@ -63,6 +65,12 @@ def get_source_service(
     return SourceService(session=session, task_enqueuer=task_enqueuer)
 
 
+def get_catalog_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> CatalogService:
+    return CatalogService(session=session)
+
+
 def get_snapshot_service(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SnapshotService:
@@ -95,15 +103,18 @@ def get_conversation_memory_service(request: Request) -> ConversationMemoryServi
     return getattr(request.app.state, "conversation_memory_service", None)
 
 
-def get_context_assembler(
+async def get_context_assembler(
     request: Request,
     persona_context: Annotated[PersonaContext, Depends(get_persona_context)],
     promotions_service: Annotated[PromotionsService, Depends(get_promotions_service)],
+    catalog_service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> ContextAssembler:
     settings = request.app.state.settings
+    active_catalog_items = await catalog_service.get_active_items(agent_id=DEFAULT_AGENT_ID)
     return ContextAssembler(
         persona_context=persona_context,
         promotions_service=promotions_service,
+        catalog_items=list(CatalogService.build_sku_map(active_catalog_items).values()),
         retrieval_context_budget=settings.retrieval_context_budget,
         max_citations=settings.max_citations_per_response,
         min_retrieved_chunks=settings.min_retrieved_chunks,

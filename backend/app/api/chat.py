@@ -23,6 +23,7 @@ from app.services.chat import (
     ChatStreamDone,
     ChatStreamError,
     ChatStreamMeta,
+    ChatStreamProducts,
     ChatStreamToken,
     ConcurrentStreamError,
     IdempotencyConflictError,
@@ -92,6 +93,7 @@ async def send_message(
             | ChatStreamDone
             | ChatStreamError
             | ChatStreamCitations
+            | ChatStreamProducts
         ),
     ) -> str:
         nonlocal assistant_message_id
@@ -112,6 +114,11 @@ async def send_message(
             return _format_sse(
                 "citations",
                 {"citations": [citation.to_dict() for citation in event.citations]},
+            )
+        if isinstance(event, ChatStreamProducts):
+            return _format_sse(
+                "products",
+                {"products": [product.to_dict() for product in event.products]},
             )
         if isinstance(event, ChatStreamDone):
             return _format_sse(

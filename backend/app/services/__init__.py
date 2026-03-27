@@ -1,6 +1,10 @@
 from importlib import import_module
 
 _EXPORTS = {
+    "CatalogItemConflictError": ("app.services.catalog", "CatalogItemConflictError"),
+    "CatalogItemInfo": ("app.services.catalog", "CatalogItemInfo"),
+    "CatalogItemNotFoundError": ("app.services.catalog", "CatalogItemNotFoundError"),
+    "CatalogService": ("app.services.catalog", "CatalogService"),
     "ChatService": ("app.services.chat", "ChatService"),
     "ChunkData": ("app.services.document_processing", "ChunkData"),
     "DocumentAIParser": ("app.services.document_ai_parser", "DocumentAIParser"),
@@ -19,6 +23,14 @@ _EXPORTS = {
     "NoActiveSnapshotError": ("app.services.chat", "NoActiveSnapshotError"),
     "NO_CONTEXT_REFUSAL": ("app.services.prompt", "NO_CONTEXT_REFUSAL"),
     "PathDecision": ("app.services.path_router", "PathDecision"),
+    "ProductRecommendation": (
+        "app.services.product_recommendation",
+        "ProductRecommendation",
+    ),
+    "ProductRecommendationService": (
+        "app.services.product_recommendation",
+        "ProductRecommendationService",
+    ),
     "QdrantChunkPoint": ("app.services.qdrant", "QdrantChunkPoint"),
     "QdrantService": ("app.services.qdrant", "QdrantService"),
     "RetrievedChunk": ("app.services.qdrant", "RetrievedChunk"),
@@ -55,6 +67,10 @@ def __dir__() -> list[str]:
     return sorted(list(globals()) + list(_EXPORTS))
 
 __all__ = [
+    "CatalogItemConflictError",
+    "CatalogItemInfo",
+    "CatalogItemNotFoundError",
+    "CatalogService",
     "ChunkData",
     "ChatService",
     "CollectionSchemaMismatchError",
@@ -71,6 +87,8 @@ __all__ = [
     "NoActiveSnapshotError",
     "NO_CONTEXT_REFUSAL",
     "PathDecision",
+    "ProductRecommendation",
+    "ProductRecommendationService",
     "QdrantChunkPoint",
     "QdrantService",
     "RetrievedChunk",

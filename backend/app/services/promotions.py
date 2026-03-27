@@ -23,6 +23,7 @@ class Promotion:
     valid_to: dt.date | None
     context: str
     body: str
+    catalog_item_sku: str | None = None
 
 
 class PromotionsService:
@@ -128,6 +129,7 @@ class PromotionsService:
             valid_to=valid_to,
             context=metadata.get("context", ""),
             body=body,
+            catalog_item_sku=metadata.get("catalog item") or None,
         )
 
     @staticmethod

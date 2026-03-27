@@ -33,6 +33,7 @@ class Agent(PrimaryKeyMixin, TimestampMixin, Base):
 class CatalogItem(PrimaryKeyMixin, TenantMixin, TimestampMixin, SoftDeleteMixin, Base):
     __tablename__ = "catalog_items"
 
+    sku: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     item_type: Mapped[CatalogItemType] = mapped_column(

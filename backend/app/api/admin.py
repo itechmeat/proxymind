@@ -26,7 +26,17 @@ from app.api.batch_schemas import (
     BatchJobListResponse,
     BatchJobResponse,
 )
+from app.api.catalog_schemas import (
+    CatalogItemCreate,
+    CatalogItemDetail,
+    CatalogItemListResponse,
+    CatalogItemResponse,
+    CatalogItemUpdate,
+    LinkedSourceInfo,
+    SourceUpdateRequest,
+)
 from app.api.dependencies import (
+    get_catalog_service,
     get_embedding_service,
     get_qdrant_service,
     get_snapshot_service,
@@ -59,6 +69,7 @@ from app.db.models.enums import (
     BackgroundTaskStatus,
     BackgroundTaskType,
     BatchOperationType,
+    CatalogItemType,
     BatchStatus,
     ChunkStatus,
     SnapshotStatus,
@@ -66,6 +77,11 @@ from app.db.models.enums import (
 )
 from app.db.session import get_session
 from app.services.embedding import EmbeddingService
+from app.services.catalog import (
+    CatalogItemConflictError,
+    CatalogItemNotFoundError,
+    CatalogService,
+)
 from app.services.qdrant import QdrantService
 from app.services.snapshot import (
     SnapshotConflictError,
@@ -368,6 +384,103 @@ async def list_batch_jobs(
     )
 
 
+@router.get("/catalog", response_model=CatalogItemListResponse)
+async def list_catalog_items(
+    catalog_service: Annotated[CatalogService, Depends(get_catalog_service)],
+    item_type: CatalogItemType | None = None,
+    is_active: bool = True,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
+) -> CatalogItemListResponse:
+    items, total = await catalog_service.list_items(
+        agent_id=agent_id,
+        item_type=item_type,
+        is_active=is_active,
+        limit=limit,
+        offset=offset,
+    )
+    response_items = [
+        CatalogItemResponse.model_validate(item).model_copy(
+            update={
+                "linked_sources_count": sum(1 for source in item.sources if source.deleted_at is None)
+            }
+        )
+        for item in items
+    ]
+    return CatalogItemListResponse(
+        items=response_items,
+        total=total,
+    )
+
+
+@router.get("/catalog/{catalog_item_id}", response_model=CatalogItemDetail)
+async def get_catalog_item(
+    catalog_item_id: uuid.UUID,
+    catalog_service: Annotated[CatalogService, Depends(get_catalog_service)],
+    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
+) -> CatalogItemDetail:
+    try:
+        item = await catalog_service.get_by_id(catalog_item_id, agent_id=agent_id)
+    except CatalogItemNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+    linked_sources = [
+        LinkedSourceInfo.model_validate(source)
+        for source in item.sources
+        if source.deleted_at is None
+    ]
+    base_response = CatalogItemResponse.model_validate(item).model_copy(
+        update={"linked_sources_count": len(linked_sources)}
+    )
+    return CatalogItemDetail(
+        **base_response.model_dump(),
+        linked_sources=linked_sources,
+    )
+
+
+@router.post("/catalog", response_model=CatalogItemResponse, status_code=status.HTTP_201_CREATED)
+async def create_catalog_item(
+    payload: CatalogItemCreate,
+    catalog_service: Annotated[CatalogService, Depends(get_catalog_service)],
+    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
+) -> CatalogItemResponse:
+    try:
+        item = await catalog_service.create(payload, agent_id=agent_id)
+    except CatalogItemConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return CatalogItemResponse.model_validate(item)
+
+
+@router.patch("/catalog/{catalog_item_id}", response_model=CatalogItemResponse)
+async def update_catalog_item(
+    catalog_item_id: uuid.UUID,
+    payload: CatalogItemUpdate,
+    catalog_service: Annotated[CatalogService, Depends(get_catalog_service)],
+    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
+) -> CatalogItemResponse:
+    try:
+        item = await catalog_service.update(catalog_item_id, payload, agent_id=agent_id)
+    except CatalogItemNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except CatalogItemConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return CatalogItemResponse.model_validate(item)
+
+
+@router.delete("/catalog/{catalog_item_id}", response_model=CatalogItemResponse)
+async def delete_catalog_item(
+    catalog_item_id: uuid.UUID,
+    catalog_service: Annotated[CatalogService, Depends(get_catalog_service)],
+    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
+) -> CatalogItemResponse:
+    try:
+        item = await catalog_service.soft_delete(catalog_item_id, agent_id=agent_id)
+    except CatalogItemNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return CatalogItemResponse.model_validate(item)
+
+
 @router.get("/batch-jobs/{batch_job_id}", response_model=BatchJobDetailResponse)
 async def get_batch_job_detail(
     batch_job_id: uuid.UUID,
@@ -398,6 +511,45 @@ async def list_sources(
         )
     ).all()
     return [SourceListItem.model_validate(source) for source in sources]
+
+
+@router.patch("/sources/{source_id}", response_model=SourceListItem)
+async def update_source(
+    source_id: uuid.UUID,
+    payload: SourceUpdateRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    catalog_service: Annotated[CatalogService, Depends(get_catalog_service)],
+    agent_id: uuid.UUID = DEFAULT_AGENT_ID,
+    knowledge_base_id: uuid.UUID = DEFAULT_KNOWLEDGE_BASE_ID,
+) -> SourceListItem:
+    source = await session.scalar(
+        select(Source).where(
+            Source.id == source_id,
+            Source.agent_id == agent_id,
+            Source.knowledge_base_id == knowledge_base_id,
+            Source.deleted_at.is_(None),
+            Source.status != SourceStatus.DELETED,
+        )
+    )
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    update_data = payload.model_dump(exclude_unset=True)
+    if "catalog_item_id" in update_data:
+        catalog_item_id = update_data["catalog_item_id"]
+        if catalog_item_id is None:
+            source.catalog_item_id = None
+        else:
+            try:
+                await catalog_service.get_by_id(catalog_item_id, agent_id=agent_id)
+            except CatalogItemNotFoundError as error:
+                raise HTTPException(status_code=404, detail=str(error)) from error
+            source.catalog_item_id = catalog_item_id
+
+        await session.commit()
+        await session.refresh(source)
+
+    return SourceListItem.model_validate(source)
 
 
 @router.delete("/sources/{source_id}", response_model=SourceDeleteResponse)
