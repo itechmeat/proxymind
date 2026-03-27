@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -54,13 +54,13 @@ async def test_list_sources_returns_non_deleted_sources_in_descending_order(
 ) -> None:
     older = await _create_source(
         session_factory,
-        created_at=datetime(2026, 3, 25, 12, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 3, 25, 12, 0, tzinfo=UTC),
         title="older",
         status=SourceStatus.READY,
     )
     newer = await _create_source(
         session_factory,
-        created_at=datetime(2026, 3, 25, 13, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 3, 25, 13, 0, tzinfo=UTC),
         title="newer",
         status=SourceStatus.PROCESSING,
     )

@@ -13,8 +13,15 @@ All tools and dependencies MUST be installed at versions equal to or greater tha
 ### Container-Only Backend Rule
 
 - Backend dependencies, checks, tests, migrations, and runtime validation MUST run only inside Docker containers. Do not install or verify backend Python packages in the host operating system.
+- Backend package, tool, runtime, and library installation is allowed only inside Docker containers. Do not install anything for the backend on the host machine unless the user has given explicit permission.
 - Before any backend verification, use `docker compose` to build or run the relevant backend container and execute commands there.
 - Local ML frameworks and heavyweight inference runtimes are strictly forbidden in the project and its Docker images. Do not install `torch`, `torchvision`, `transformers`, CUDA runtimes, OCR/vision ML stacks, or similar packages.
+
+### Execution Timeout Discipline
+
+- No single waiting period for a command, build, install, test run, service startup, migration, or log observation may exceed 5 minutes.
+- If the operation is still progressing, the agent may continue in additional 5-minute waiting periods, but no more than 3 consecutive periods total for the same operation.
+- Every time an operation does not complete within a 5-minute period, the agent MUST treat that as an investigation trigger and report the current blocker, the most likely causes, and probable repair options before continuing.
 
 ## Product Language Policy
 

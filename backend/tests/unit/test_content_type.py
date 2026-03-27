@@ -33,7 +33,10 @@ def test_plain_sentence_is_inference() -> None:
 
 
 def test_fact_wins_over_promo() -> None:
-    spans = compute_content_type_spans("The AI Book is available [source:1].", promotions=[_promo()])
+    spans = compute_content_type_spans(
+        "The AI Book is available [source:1].",
+        promotions=[_promo()],
+    )
     assert spans[0].type == "fact"
 
 

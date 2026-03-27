@@ -254,7 +254,7 @@ async def test_persona_content_reaches_llm_prompt(
     sent_messages = mock_llm_service.stream.call_args.args[0]
     system_message = sent_messages[0]["content"]
 
-    assert system_message.startswith(SYSTEM_SAFETY_POLICY)
+    assert SYSTEM_SAFETY_POLICY in system_message
     assert "Test twin identity" in system_message
     assert "Test twin soul" in system_message
     assert "Test twin behavior" in system_message

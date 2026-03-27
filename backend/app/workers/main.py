@@ -10,7 +10,12 @@ from qdrant_client import AsyncQdrantClient
 
 from app.core.config import get_settings
 from app.db import create_database_engine, create_session_factory
-from app.workers.tasks import poll_active_batches, process_batch_embed, process_ingestion
+from app.workers.tasks import (
+    generate_session_summary,
+    poll_active_batches,
+    process_batch_embed,
+    process_ingestion,
+)
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -24,6 +29,7 @@ async def on_startup(ctx: dict[str, Any]) -> None:
     from app.services.embedding import EmbeddingService
     from app.services.gemini_content import GeminiContentService
     from app.services.lightweight_parser import LightweightParser
+    from app.services.llm import LLMService
     from app.services.qdrant import QdrantService
     from app.services.snapshot import SnapshotService
     from app.services.storage import StorageService
@@ -50,12 +56,18 @@ async def on_startup(ctx: dict[str, Any]) -> None:
         dimensions=settings.embedding_dimensions,
         batch_size=settings.embedding_batch_size,
         api_key=settings.gemini_api_key,
+        use_vertexai=settings.google_genai_use_vertexai,
+        project=settings.google_cloud_project,
+        location=settings.google_cloud_location,
         file_upload_threshold_bytes=settings.gemini_file_upload_threshold_bytes,
     )
     gemini_content_service = GeminiContentService(
         model=settings.gemini_content_model,
         upload_threshold_bytes=settings.gemini_file_upload_threshold_bytes,
         api_key=settings.gemini_api_key,
+        use_vertexai=settings.google_genai_use_vertexai,
+        project=settings.google_cloud_project,
+        location=settings.google_cloud_location,
     )
     batch_embedding_client = BatchEmbeddingClient(
         model=settings.embedding_model,
@@ -66,10 +78,19 @@ async def on_startup(ctx: dict[str, Any]) -> None:
             DEFAULT_EMBEDDING_TASK_TYPE,
         ),
         api_key=settings.gemini_api_key,
+        use_vertexai=settings.google_genai_use_vertexai,
+        project=settings.google_cloud_project,
+        location=settings.google_cloud_location,
     )
     batch_orchestrator = BatchOrchestrator(
         batch_client=batch_embedding_client,
         qdrant_service=qdrant_service,
+    )
+    summary_llm_service = LLMService(
+        model=settings.conversation_summary_model or settings.llm_model,
+        api_key=settings.llm_api_key,
+        api_base=settings.llm_api_base,
+        temperature=settings.conversation_summary_temperature,
     )
     tokenizer = ApproximateTokenizer()
     document_ai_parser = (
@@ -93,6 +114,7 @@ async def on_startup(ctx: dict[str, Any]) -> None:
     ctx["gemini_content_service"] = gemini_content_service
     ctx["batch_embedding_client"] = batch_embedding_client
     ctx["batch_orchestrator"] = batch_orchestrator
+    ctx["summary_llm_service"] = summary_llm_service
     ctx["tokenizer"] = tokenizer
     ctx["qdrant_service"] = qdrant_service
     ctx["snapshot_service"] = SnapshotService()
@@ -136,7 +158,12 @@ async def on_shutdown(ctx: dict[str, Any]) -> None:
 
 
 class WorkerSettings:
-    functions = [process_ingestion, process_batch_embed, poll_active_batches]
+    functions = [
+        process_ingestion,
+        process_batch_embed,
+        poll_active_batches,
+        generate_session_summary,
+    ]
     cron_jobs = [
         cron(
             poll_active_batches,

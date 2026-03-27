@@ -3,29 +3,17 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
-from urllib.parse import urlparse
 
 import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
-from testcontainers.postgres import PostgresContainer
 
 from app.core.config import get_settings
+from tests.integration._migration_db import make_async_database_url, migration_test_env
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
-
-
-def _connection_url_to_env(url: str) -> dict[str, str]:
-    parsed = urlparse(url)
-    return {
-        "POSTGRES_HOST": parsed.hostname or "127.0.0.1",
-        "POSTGRES_PORT": str(parsed.port or 5432),
-        "POSTGRES_USER": parsed.username or "postgres",
-        "POSTGRES_PASSWORD": parsed.password or "postgres",
-        "POSTGRES_DB": parsed.path.lstrip("/") or "postgres",
-    }
 
 
 def _make_alembic_config() -> Config:
@@ -34,25 +22,17 @@ def _make_alembic_config() -> Config:
     return config
 
 
-def _make_async_database_url(env: dict[str, str]) -> str:
-    return (
-        f"postgresql+asyncpg://{env['POSTGRES_USER']}:{env['POSTGRES_PASSWORD']}"
-        f"@{env['POSTGRES_HOST']}:{env['POSTGRES_PORT']}/{env['POSTGRES_DB']}"
-    )
-
-
 @pytest.mark.asyncio
 async def test_batch_embedding_migration_adds_enum_value_and_columns() -> None:
-    with PostgresContainer("postgres:18") as postgres:
-        env = _connection_url_to_env(postgres.get_connection_url())
+    async with migration_test_env(base_revision="005") as env:
         previous_values = {key: os.environ.get(key) for key in env}
         engine = None
         try:
             os.environ.update(env)
             get_settings.cache_clear()
-            engine = create_async_engine(_make_async_database_url(env))
+            engine = create_async_engine(make_async_database_url(env))
             config = _make_alembic_config()
-            await asyncio.to_thread(command.upgrade, config, "head")
+            await asyncio.to_thread(command.upgrade, config, "006")
 
             async with engine.connect() as connection:
                 task_type_values = [

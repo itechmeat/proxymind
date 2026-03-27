@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from sqlalchemy import select
@@ -25,13 +25,13 @@ from app.services.chat import (
     NoActiveSnapshotError,
     SessionNotFoundError,
 )
-from app.services.context_assembler import AssembledPrompt, ContextAssembler
 from app.services.citation import SourceInfo
+from app.services.context_assembler import AssembledPrompt, ContextAssembler
 from app.services.llm_types import LLMError, LLMStreamEnd, LLMToken
-from app.services.prompt import NO_CONTEXT_REFUSAL
 from app.services.promotions import PromotionsService
-from app.services.query_rewrite import RewriteResult
+from app.services.prompt import NO_CONTEXT_REFUSAL
 from app.services.qdrant import RetrievedChunk
+from app.services.query_rewrite import RewriteResult
 from app.services.snapshot import SnapshotService
 
 
@@ -97,6 +97,8 @@ def _make_service(
     max_citations_per_response: int = 5,
     rewritten_query: str | None = None,
     rewrite_error: Exception | None = None,
+    conversation_memory_service: object | None = None,
+    summary_enqueuer: AsyncMock | None = None,
 ) -> tuple[ChatService, SimpleNamespace, SimpleNamespace]:
     retrieval_service = SimpleNamespace(search=AsyncMock())
     if isinstance(retrieval_result, Exception):
@@ -136,6 +138,8 @@ def _make_service(
         context_assembler=context_assembler,
         min_retrieved_chunks=min_retrieved_chunks,
         max_citations_per_response=max_citations_per_response,
+        conversation_memory_service=conversation_memory_service,
+        summary_enqueuer=summary_enqueuer,
     )
     return service, retrieval_service, llm_service
 
@@ -282,6 +286,61 @@ async def test_stream_answer_refusal_when_no_chunks(
 
 
 @pytest.mark.asyncio
+async def test_stream_answer_includes_conversation_memory_and_enqueues_summary(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    memory_block = SimpleNamespace(
+        summary_text="Earlier context.",
+        messages=[{"role": "user", "content": "Earlier question"}],
+        total_tokens=12,
+        needs_summary_update=True,
+        window_start_message_id=uuid.uuid7(),
+    )
+    conversation_memory_service = SimpleNamespace(
+        build_memory_block=Mock(return_value=memory_block)
+    )
+    summary_enqueuer = AsyncMock()
+    service, _, _ = _make_service(
+        db_session,
+        persona_context=persona_context,
+        retrieval_result=[_chunk()],
+        stream_tokens=("answer",),
+        conversation_memory_service=conversation_memory_service,
+        summary_enqueuer=summary_enqueuer,
+    )
+    session = await service.create_session()
+    captured_memory: dict[str, object] = {}
+
+    def _capture_assemble(*, chunks, query, source_map, memory_block=None):
+        captured_memory["block"] = memory_block
+        return AssembledPrompt(
+            messages=[
+                {"role": "system", "content": "system"},
+                {"role": "user", "content": query},
+            ],
+            token_estimate=1,
+            included_promotions=[],
+            retrieval_chunks_used=len(chunks),
+            retrieval_chunks_total=len(chunks),
+            layer_token_counts={"conversation_memory": 12},
+        )
+
+    monkeypatch.setattr(service._context_assembler, "assemble", _capture_assemble)
+
+    await _collect_events(service, session_id=session.id, text="Q?")
+
+    conversation_memory_service.build_memory_block.assert_called_once()
+    assert captured_memory["block"] is memory_block
+    summary_enqueuer.assert_awaited_once_with(
+        str(session.id),
+        str(memory_block.window_start_message_id),
+    )
+
+
+@pytest.mark.asyncio
 async def test_llm_prompt_uses_original_query_when_rewrite_occurs(
     db_session: AsyncSession,
     persona_context: PersonaContext,
@@ -298,7 +357,7 @@ async def test_llm_prompt_uses_original_query_when_rewrite_occurs(
     session = await service.create_session()
     captured_prompt_text: dict[str, str] = {}
 
-    def _capture_assemble(*, chunks, query, source_map):
+    def _capture_assemble(*, chunks, query, source_map, memory_block=None):
         captured_prompt_text["text"] = query
         return AssembledPrompt(
             messages=[{"role": "user", "content": query}],
@@ -313,7 +372,10 @@ async def test_llm_prompt_uses_original_query_when_rewrite_occurs(
 
     await _collect_events(service, session_id=session.id, text="original question")
 
-    retrieval_service.search.assert_awaited_once_with("expanded query", snapshot_id=session.snapshot_id)
+    retrieval_service.search.assert_awaited_once_with(
+        "expanded query",
+        snapshot_id=session.snapshot_id,
+    )
     llm_service.stream.assert_called_once()
     assert captured_prompt_text["text"] == "original question"
 

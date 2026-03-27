@@ -8,6 +8,7 @@ import httpx
 import pytest
 from qdrant_client import models
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
+from tenacity import wait_none
 
 from app.db.models.enums import ChunkStatus, SourceType
 from app.services.qdrant import (
@@ -408,6 +409,7 @@ async def test_upsert_chunks_retries_transient_connection_errors(
         )
     )
     service, _logger = _service(monkeypatch, client=client, embedding_dimensions=3)
+    service._upsert_points.retry.wait = wait_none()
     point = QdrantChunkPoint(
         chunk_id=uuid.uuid4(),
         vector=[0.1, 0.2, 0.3],
@@ -800,6 +802,7 @@ async def test_hybrid_search_retries_on_transient_error(
         )
     )
     service, _logger = _service(monkeypatch, client=client, embedding_dimensions=3)
+    service._search_points.retry.wait = wait_none()
 
     results = await service.hybrid_search(
         text="deployment",
@@ -945,6 +948,7 @@ async def test_keyword_search_retries_transient_connection_errors(
         )
     )
     service, _logger = _service(monkeypatch, client=client, embedding_dimensions=3)
+    service._search_points.retry.wait = wait_none()
 
     await service.keyword_search(
         text="deployment",

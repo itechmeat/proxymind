@@ -24,6 +24,7 @@ class DocumentAIParser:
         processor_id: str | None,
         chunk_max_tokens: int,
         client: documentai.DocumentProcessorServiceClient | None = None,
+        retry_wait: Any | None = None,
     ) -> None:
         if not project_id or not processor_id:
             raise ValueError("Document AI project_id and processor_id are required")
@@ -33,6 +34,11 @@ class DocumentAIParser:
         )
         self._processor_name = self._client.processor_path(project_id, location, processor_id)
         self._chunker = TextChunker(chunk_max_tokens=chunk_max_tokens)
+        self._retry_wait = (
+            retry_wait
+            if retry_wait is not None
+            else wait_exponential(multiplier=1, min=1, max=8)
+        )
 
     async def parse_and_chunk(
         self,
@@ -49,7 +55,7 @@ class DocumentAIParser:
     async def _process_document(self, content: bytes) -> documentai.Document:
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(3),
-            wait=wait_exponential(multiplier=1, min=1, max=8),
+            wait=self._retry_wait,
             retry=retry_if_exception_type((ServiceUnavailable, DeadlineExceeded)),
             reraise=True,
         ):
@@ -80,7 +86,9 @@ class DocumentAIParser:
             page_number = int(getattr(page, "page_number", 0) or 0) or None
 
             for layout in self._iter_page_layouts(page):
-                text = normalize_whitespace(self._extract_anchor_text(document_text, layout.text_anchor))
+                text = normalize_whitespace(
+                    self._extract_anchor_text(document_text, layout.text_anchor)
+                )
                 if not text:
                     continue
 
@@ -155,7 +163,10 @@ class DocumentAIParser:
     def _layout_signature(text_anchor: Any) -> tuple[tuple[int, int], ...] | None:
         segments = list(getattr(text_anchor, "text_segments", []) or [])
         signature = tuple(
-            (int(getattr(segment, "start_index", 0) or 0), int(getattr(segment, "end_index", 0) or 0))
+            (
+                int(getattr(segment, "start_index", 0) or 0),
+                int(getattr(segment, "end_index", 0) or 0),
+            )
             for segment in segments
             if int(getattr(segment, "end_index", 0) or 0)
             > int(getattr(segment, "start_index", 0) or 0)

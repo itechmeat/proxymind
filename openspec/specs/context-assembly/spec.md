@@ -4,12 +4,12 @@ Layered prompt orchestration with XML tags, token budget management for retrieva
 
 ### Requirement: Layer ordering in system message
 
-The `ContextAssembler` SHALL build the system message by assembling layers in the following fixed order: safety, identity, soul, behavior, promotions, citation instructions, content guidelines. Each layer SHALL be wrapped in XML tags (`<tag_name>...</tag_name>`). The layer order SHALL NOT be configurable — it is a design invariant defined by the prompt engineering spec.
+The `ContextAssembler` SHALL build the system message by assembling layers in the following fixed order: safety, identity, soul, behavior, promotions, conversation_summary, citation instructions, content guidelines. Each layer SHALL be wrapped in XML tags (`<tag_name>...</tag_name>`). The layer order SHALL NOT be configurable.
 
 #### Scenario: All layers present in correct order
 
-- **WHEN** `assemble()` is called with active promotions and retrieval chunks
-- **THEN** the system message SHALL contain XML tags in this order: `<system_safety>`, `<identity>`, `<soul>`, `<behavior>`, `<promotions>`, `<citation_instructions>`, `<content_guidelines>`
+- **WHEN** `assemble()` is called with active promotions, retrieval chunks, and a `memory_block` containing `summary_text`
+- **THEN** the system message SHALL contain XML tags in this order: `<system_safety>`, `<identity>`, `<soul>`, `<behavior>`, `<promotions>`, `<conversation_summary>`, `<citation_instructions>`, `<content_guidelines>`
 - **AND** each opening tag SHALL have a corresponding closing tag
 
 #### Scenario: Persona layers always present even when empty
@@ -17,6 +17,11 @@ The `ContextAssembler` SHALL build the system message by assembling layers in th
 - **WHEN** `assemble()` is called with empty identity, soul, and behavior persona content
 - **THEN** the system message SHALL still contain `<identity>`, `<soul>`, and `<behavior>` tags (with empty content)
 - **AND** `<system_safety>` SHALL always be present with the safety policy text
+
+#### Scenario: Conversation summary placed between promotions and citation instructions
+
+- **WHEN** `assemble()` is called with a `memory_block` containing `summary_text`
+- **THEN** the `<conversation_summary>` tag SHALL appear after `<promotions>` (or after `<behavior>` if no promotions) and before `<citation_instructions>`
 
 ---
 
@@ -117,18 +122,6 @@ The `min_retrieved_chunks` setting SHALL act as a hard override on the retrieval
 
 ---
 
-### Requirement: Conversation memory slot reservation
-
-The `ContextAssembler` SHALL contain a `TODO(S4-07)` placeholder in the layer assembly sequence between the promotions layer and the citation instructions layer. This placeholder SHALL reference the future `_build_memory_layer()` method and the S4-07 story. No stub code or empty prompt block SHALL be generated — only a code comment.
-
-#### Scenario: Memory slot is a code comment only
-
-- **WHEN** the `ContextAssembler` source code is inspected
-- **THEN** there SHALL be a `TODO(S4-07)` comment between the promotions and citation instructions layers
-- **AND** no `<conversation_memory>` tag SHALL appear in any assembled prompt
-
----
-
 ### Requirement: Token estimation using CHARS_PER_TOKEN
 
 All token estimation within the `ContextAssembler` SHALL use the shared `estimate_tokens()` function from `services/token_counter.py`, which applies the `CHARS_PER_TOKEN=3` constant. This ensures consistent token estimation across query rewriting and context assembly.
@@ -147,19 +140,131 @@ All token estimation within the `ContextAssembler` SHALL use the shared `estimat
 
 ### Requirement: AssembledPrompt output type with metadata
 
-The `assemble()` method SHALL return an `AssembledPrompt` dataclass containing: `messages` (list of OpenAI chat API format dicts), `token_estimate` (total estimated tokens), `included_promotions` (list of Promotion objects injected), `retrieval_chunks_used` (count of chunks that fit within budget), `retrieval_chunks_total` (total chunks available from retrieval), and `layer_token_counts` (dict mapping layer tag names to their individual token estimates). This metadata supports observability and debugging.
+The `assemble()` method SHALL return an `AssembledPrompt` dataclass containing: `messages` (list of OpenAI chat API format dicts), `token_estimate` (total estimated tokens), `included_promotions` (list of Promotion objects injected), `retrieval_chunks_used` (count of chunks that fit within budget), `retrieval_chunks_total` (total chunks available from retrieval), and `layer_token_counts` (dict mapping layer tag names to their individual token estimates). When `memory_block` is `None` or has no messages, `messages` SHALL be a list of 2 dicts (system + user), identical to the pre-S4-07 behavior. When `memory_block` contains history messages, `messages` SHALL be a list of N dicts: one system message, zero or more alternating user/assistant history messages, and one final user message containing the retrieval context and current query. When `memory_block` is provided and has `total_tokens > 0`, `layer_token_counts` SHALL contain a `"conversation_memory"` key with value equal to `memory_block.total_tokens`, and SHALL NOT contain a separate `"conversation_summary"` entry.
 
 #### Scenario: All metadata fields populated
 
-- **WHEN** `assemble()` is called with promotions and chunks
+- **WHEN** `assemble()` is called with promotions, chunks, and a `memory_block`
 - **THEN** `AssembledPrompt` SHALL have non-null values for all metadata fields
-- **AND** `layer_token_counts` SHALL contain entries for `system_safety`, `identity`, `soul`, `behavior`, `promotions`, `citation_instructions`, and `content_guidelines`
+- **AND** `layer_token_counts` SHALL contain entries for `system_safety`, `identity`, `soul`, `behavior`, `promotions`, `citation_instructions`, `content_guidelines`, and `conversation_memory`
 
-#### Scenario: Messages in OpenAI chat API format
+#### Scenario: Messages as 2 dicts when no memory block
 
-- **WHEN** `assemble()` is called
+- **WHEN** `assemble()` is called with `memory_block=None`
 - **THEN** `AssembledPrompt.messages` SHALL be a list of 2 dicts: one with `role=system` and one with `role=user`
 - **AND** each dict SHALL have `role` and `content` string keys
+
+#### Scenario: Messages as N dicts with memory block history
+
+- **WHEN** `assemble()` is called with a `memory_block` containing 2 history messages (user + assistant)
+- **THEN** `AssembledPrompt.messages` SHALL be a list of 4 dicts: system, user (history), assistant (history), user (current query)
+- **AND** each dict SHALL have `role` and `content` string keys
+
+#### Scenario: conversation_memory key in layer_token_counts
+
+- **WHEN** `assemble()` is called with a `memory_block` having `total_tokens=50`
+- **THEN** `layer_token_counts["conversation_memory"]` SHALL be `50`
+- **AND** `layer_token_counts` SHALL NOT contain a `"conversation_summary"` key
+
+#### Scenario: No conversation_memory key when memory_block is None
+
+- **WHEN** `assemble()` is called with `memory_block=None`
+- **THEN** `layer_token_counts` SHALL NOT contain a `"conversation_memory"` key
+
+---
+
+### Requirement: Conversation summary layer conditional inclusion
+
+The `<conversation_summary>` layer SHALL be included in the system message only when `memory_block` is provided and `memory_block.summary_text` is not `None` and not empty. The layer content SHALL be `"Earlier in this conversation:\n{summary_text}"` wrapped in `<conversation_summary>` XML tags. When no summary exists, the `<conversation_summary>` block SHALL be omitted entirely.
+
+#### Scenario: Summary included when present
+
+- **WHEN** `assemble()` is called with a `memory_block` containing `summary_text="User asked about machine learning."`
+- **THEN** the system message SHALL contain `<conversation_summary>` with text `"Earlier in this conversation:\nUser asked about machine learning."`
+
+#### Scenario: Summary omitted when None
+
+- **WHEN** `assemble()` is called with a `memory_block` containing `summary_text=None`
+- **THEN** the system message SHALL NOT contain `<conversation_summary>` or `</conversation_summary>`
+
+#### Scenario: Summary omitted when memory_block is None
+
+- **WHEN** `assemble()` is called with `memory_block=None`
+- **THEN** the system message SHALL NOT contain `<conversation_summary>` or `</conversation_summary>`
+
+---
+
+### Requirement: Multi-turn message format
+
+When `memory_block` contains history messages, the messages SHALL be inserted between the system message and the final user message as alternating user/assistant dicts. The final user message SHALL remain the last element in the messages list. This is backward compatible: when `memory_block` is `None` or `memory_block.messages` is empty, the output SHALL be the same 2-message format as before S4-07.
+
+#### Scenario: Multi-turn messages in correct order
+
+- **WHEN** `assemble()` is called with a `memory_block` containing `[{"role": "user", "content": "Hello"}, {"role": "assistant", "content": "Hi there!"}]`
+- **THEN** `messages[0]` SHALL have `role=system`
+- **AND** `messages[1]` SHALL have `role=user`, `content="Hello"`
+- **AND** `messages[2]` SHALL have `role=assistant`, `content="Hi there!"`
+- **AND** `messages[3]` SHALL have `role=user` for the current query
+
+#### Scenario: Backward compatible when no memory
+
+- **WHEN** `assemble()` is called with `memory_block=None`
+- **THEN** `messages` SHALL have exactly 2 elements: system and user
+
+#### Scenario: Empty history produces 2-message output
+
+- **WHEN** `assemble()` is called with a `memory_block` containing `messages=[]`
+- **THEN** `messages` SHALL have exactly 2 elements: system and user
+- **AND** the summary SHALL still appear in the system message if `summary_text` is present
+
+---
+
+### Requirement: Unified conversation memory token accounting
+
+A single `"conversation_memory"` key in `layer_token_counts` SHALL cover the total tokens consumed by conversation memory (summary + history messages combined). The value SHALL equal `memory_block.total_tokens`. The `conversation_summary` layer is added to the system prompt for content rendering, but its token estimate SHALL NOT appear as a separate `"conversation_summary"` entry in `layer_token_counts`.
+
+#### Scenario: Summary-only memory tracked under conversation_memory
+
+- **WHEN** `assemble()` is called with a `memory_block` containing `summary_text` but `messages=[]` and `total_tokens=15`
+- **THEN** `layer_token_counts["conversation_memory"]` SHALL be `15`
+- **AND** `layer_token_counts` SHALL NOT contain `"conversation_summary"`
+
+#### Scenario: History-only memory tracked under conversation_memory
+
+- **WHEN** `assemble()` is called with a `memory_block` containing `summary_text=None`, non-empty `messages`, and `total_tokens=30`
+- **THEN** `layer_token_counts["conversation_memory"]` SHALL be `30`
+
+#### Scenario: Combined summary + history tracked under conversation_memory
+
+- **WHEN** `assemble()` is called with a `memory_block` containing both `summary_text` and `messages` with `total_tokens=50`
+- **THEN** `layer_token_counts["conversation_memory"]` SHALL be `50`
+- **AND** `layer_token_counts` SHALL NOT contain `"conversation_summary"`
+
+---
+
+### Requirement: assemble() accepts optional memory_block parameter
+
+The `assemble()` method signature SHALL accept an optional `memory_block` parameter of type `MemoryBlock | None`, defaulting to `None`. When `memory_block` is `None`, the method SHALL produce output identical to the pre-S4-07 behavior. When `memory_block` is provided, the method SHALL include the conversation summary layer when `summary_text` is present, insert history messages between system and user messages, and track memory tokens under the `"conversation_memory"` key.
+
+#### Scenario: Default parameter provides backward compatibility
+
+- **WHEN** `assemble()` is called without the `memory_block` argument
+- **THEN** the method SHALL execute without error
+- **AND** the output SHALL be identical to calling with `memory_block=None`
+
+#### Scenario: memory_block=None produces pre-S4-07 output
+
+- **WHEN** `assemble(chunks=[...], query="...", source_map={...}, memory_block=None)` is called
+- **THEN** the system message SHALL NOT contain `<conversation_summary>`
+- **AND** `messages` SHALL be a list of 2 dicts
+- **AND** `layer_token_counts` SHALL NOT contain `"conversation_memory"`
+
+#### Scenario: memory_block with data produces multi-turn output
+
+- **WHEN** `assemble()` is called with a `memory_block` containing summary and history
+- **THEN** the system message SHALL contain `<conversation_summary>`
+- **AND** `messages` SHALL contain history messages between system and user
+- **AND** `layer_token_counts` SHALL contain `"conversation_memory"`
 
 ---
 

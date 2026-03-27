@@ -89,7 +89,9 @@ def _ctx(
         "path_a_max_video_duration_sec": 120,
         "path_c_min_chars_per_page": 50,
         "storage_service": SimpleNamespace(download=AsyncMock(return_value=file_bytes)),
-        "document_processor": SimpleNamespace(parse_and_chunk=AsyncMock(return_value=path_b_chunks)),
+        "document_processor": SimpleNamespace(
+            parse_and_chunk=AsyncMock(return_value=path_b_chunks)
+        ),
         "document_ai_parser": (
             None
             if path_c_chunks is None
@@ -98,7 +100,9 @@ def _ctx(
         "embedding_service": SimpleNamespace(
             model="gemini-embedding-2-preview",
             dimensions=3,
-            embed_texts=AsyncMock(side_effect=lambda texts, **kwargs: [[0.1, 0.2, 0.3] for _ in texts]),
+            embed_texts=AsyncMock(
+                side_effect=lambda texts, **kwargs: [[0.1, 0.2, 0.3] for _ in texts]
+            ),
             embed_file=AsyncMock(return_value=[0.1, 0.2, 0.3]),
         ),
         "gemini_content_service": SimpleNamespace(

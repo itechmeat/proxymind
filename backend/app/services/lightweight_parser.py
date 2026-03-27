@@ -142,7 +142,9 @@ class LightweightParser:
             paragraph = normalize_whitespace(" ".join(paragraph_lines))
             paragraph_lines.clear()
             if paragraph:
-                blocks.append(ParsedBlock(text=paragraph, headings=_current_headings(heading_stack)))
+                blocks.append(
+                    ParsedBlock(text=paragraph, headings=_current_headings(heading_stack))
+                )
 
         for raw_line in text.splitlines():
             line = raw_line.strip()
@@ -206,7 +208,11 @@ class LightweightParser:
             if not text:
                 continue
             style = paragraph.find("w:pPr/w:pStyle", _WORD_NAMESPACE)
-            style_value = style.get(f"{{{_WORD_NAMESPACE['w']}}}val", "") if style is not None else ""
+            style_value = (
+                style.get(f"{{{_WORD_NAMESPACE['w']}}}val", "")
+                if style is not None
+                else ""
+            )
             level = _docx_heading_level(style_value)
             if level is not None:
                 heading_stack[level - 1] = text

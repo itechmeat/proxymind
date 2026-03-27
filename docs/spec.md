@@ -302,6 +302,16 @@ Each twin response is formed based on three artifacts:
 
 For audit and evals: when logging a response, `snapshot_id`, `config_commit_hash` (full git commit), and `config_content_hash` (SHA256 of `persona/` + `config/` contents) are recorded. The content hash distinguishes configuration changes from code/documentation changes.
 
+## Implementation defaults
+
+| Parameter | Default | Description |
+| --------- | ------- | ----------- |
+| `conversation_memory_budget` | 4096 tokens | Maximum tokens for conversation memory in the prompt, including summary and verbatim sliding window. |
+| `conversation_summary_ratio` | 0.3 | Soft target for summary generation length as a fraction of the memory budget. Actual summary tokens are deducted at face value. |
+| `conversation_summary_model` | same as `llm_model` | Optional separate model for conversation summarization. Falls back to the main LLM model when unset. |
+| `conversation_summary_temperature` | 0.1 | Temperature for summary generation calls in the background worker. |
+| `conversation_summary_timeout_ms` | 10000 | Timeout in milliseconds for the summary LLM call executed by the arq worker. |
+
 ## Testing strategy
 
 Two contours:

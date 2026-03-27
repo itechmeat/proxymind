@@ -9,7 +9,7 @@ dependencies = [
   "asyncpg>=0.31.0",
   "fastapi>=0.135.2",
   "google-cloud-documentai>=3.0.0",
-  "google-genai>=1.14.0",
+  "google-genai>=1.55.0",
   "httpx>=0.28.1",
   "litellm",
   "pydantic-settings>=2.12.5",

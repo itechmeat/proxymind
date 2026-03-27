@@ -18,6 +18,9 @@ def _settings() -> SimpleNamespace:
         embedding_dimensions=3,
         embedding_batch_size=16,
         gemini_api_key=None,
+        google_genai_use_vertexai=False,
+        google_cloud_project=None,
+        google_cloud_location="global",
         qdrant_url="http://localhost:6333",
         qdrant_collection="proxymind_chunks",
         bm25_language="english",
@@ -44,6 +47,8 @@ def _settings() -> SimpleNamespace:
         persona_dir="/persona",
         config_dir="/config",
         promotions_file_path="/config/PROMOTIONS.md",
+        conversation_memory_budget=4096,
+        conversation_summary_ratio=0.3,
     )
 
 
@@ -245,6 +250,7 @@ async def test_lifespan_loads_persona_context(
         assert len(test_app.state.persona_context.config_content_hash) == 64
         assert test_app.state.persona_context.config_commit_hash != ""
         assert test_app.state.promotions_service is not None
+        assert test_app.state.conversation_memory_service is not None
 
 
 @pytest.mark.asyncio

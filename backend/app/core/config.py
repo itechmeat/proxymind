@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     seaweedfs_sources_path: str = Field(default="/sources", min_length=1)
 
     gemini_api_key: str | None = Field(default=None)
+    google_genai_use_vertexai: bool = Field(default=False)
+    google_cloud_project: str | None = Field(default=None)
+    google_cloud_location: str = Field(default="global", min_length=1)
     embedding_model: str = Field(default="gemini-embedding-2-preview", min_length=1)
     embedding_dimensions: int = Field(default=3072, ge=128, le=3072)
     embedding_task_type: str = Field(default="RETRIEVAL_DOCUMENT", min_length=1)
@@ -34,7 +37,7 @@ class Settings(BaseSettings):
     batch_embed_chunk_threshold: int = Field(default=50, ge=1)
     batch_poll_interval_seconds: int = Field(default=30, ge=1, le=60)
     batch_max_items_per_request: int = Field(default=1000, ge=1)
-    gemini_content_model: str = Field(default="gemini-2.5-flash", min_length=1)
+    gemini_content_model: str = Field(default="gemini-3-flash-preview", min_length=1)
     gemini_file_upload_threshold_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
     document_ai_project_id: str | None = Field(default=None)
     document_ai_location: str = Field(default="us", min_length=1)
@@ -68,6 +71,11 @@ class Settings(BaseSettings):
     rewrite_timeout_ms: int = Field(default=3000, ge=1)
     rewrite_token_budget: int = Field(default=2048, ge=1)
     rewrite_history_messages: int = Field(default=10, ge=1)
+    conversation_memory_budget: int = Field(default=4096, ge=1)
+    conversation_summary_ratio: float = Field(default=0.3, ge=0.0, le=1.0)
+    conversation_summary_model: str | None = Field(default=None)
+    conversation_summary_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
+    conversation_summary_timeout_ms: int = Field(default=10000, ge=1)
     persona_dir: str = Field(default=str(REPO_ROOT / "persona"))
     config_dir: str = Field(default=str(REPO_ROOT / "config"))
     promotions_file_path: str = Field(default=str(REPO_ROOT / "config" / "PROMOTIONS.md"))
@@ -95,6 +103,7 @@ class Settings(BaseSettings):
         normalized = dict(data)
         for field_name in (
             "gemini_api_key",
+            "google_cloud_project",
             "document_ai_project_id",
             "document_ai_processor_id",
             "llm_api_key",
@@ -102,6 +111,7 @@ class Settings(BaseSettings):
             "rewrite_llm_model",
             "rewrite_llm_api_key",
             "rewrite_llm_api_base",
+            "conversation_summary_model",
         ):
             if normalized.get(field_name) == "":
                 normalized[field_name] = None
@@ -115,12 +125,22 @@ class Settings(BaseSettings):
         has_document_ai_processor = self.document_ai_processor_id is not None
         if has_document_ai_project != has_document_ai_processor:
             raise ValueError(
-                "DOCUMENT_AI_PROJECT_ID and DOCUMENT_AI_PROCESSOR_ID must either both be set or both be empty"
+                "DOCUMENT_AI_PROJECT_ID and DOCUMENT_AI_PROCESSOR_ID must either "
+                "both be set or both be empty"
             )
         if 60 % self.batch_poll_interval_seconds != 0:
             raise ValueError(
                 "BATCH_POLL_INTERVAL_SECONDS must evenly divide 60 "
                 "for the current arq cron schedule"
+            )
+        if (
+            self.google_genai_use_vertexai
+            and self.google_cloud_project is None
+            and self.gemini_api_key is None
+        ):
+            raise ValueError(
+                "GOOGLE_CLOUD_PROJECT or GEMINI_API_KEY is required "
+                "when GOOGLE_GENAI_USE_VERTEXAI is enabled"
             )
         return self
 

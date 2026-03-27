@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
+from app.services.gemini_client import create_genai_client
 from app.services.gemini_file_transfer import cleanup_uploaded_file, prepare_file_part
 
 if TYPE_CHECKING:
@@ -29,6 +30,9 @@ class EmbeddingService:
         dimensions: int,
         batch_size: int,
         api_key: str | None = None,
+        use_vertexai: bool = False,
+        project: str | None = None,
+        location: str = "global",
         client: Any | None = None,
         file_upload_threshold_bytes: int = 10 * 1024 * 1024,
     ) -> None:
@@ -36,6 +40,9 @@ class EmbeddingService:
         self._dimensions = dimensions
         self._batch_size = batch_size
         self._api_key = api_key
+        self._use_vertexai = use_vertexai
+        self._project = project
+        self._location = location
         self._client = client
         self._client_lock = threading.Lock()
         self._file_upload_threshold_bytes = file_upload_threshold_bytes
@@ -172,9 +179,10 @@ class EmbeddingService:
         if self._client is None:
             with self._client_lock:
                 if self._client is None:
-                    if not self._api_key:
-                        raise ValueError("GEMINI_API_KEY is required for embedding generation")
-                    from google import genai
-
-                    self._client = genai.Client(api_key=self._api_key)
+                    self._client = create_genai_client(
+                        api_key=self._api_key,
+                        use_vertexai=self._use_vertexai,
+                        project=self._project,
+                        location=self._location,
+                    )
         return self._client
