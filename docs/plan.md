@@ -188,7 +188,7 @@ Phase outcome: full commercial layer — catalog, recommendations, citation inte
   - Tasks: catalog API endpoints, source-catalog linking, citation enrichment, promotion-catalog integration, native recommendation prompt, frequency control
   - **Parallel pair:** S7-01 (API security) — commerce domain vs security middleware, minimal overlap
 
-- [ ] **S6-02: Admin UI — product catalog**
+- [x] **S6-02: Admin UI — product catalog**
       Product catalog CRUD, source ↔ catalog item linking. Depends on S6-01 backend.
   - **Outcome:** owner manages products through the interface
   - **Verification:** add product → link to source → citation includes purchase link
