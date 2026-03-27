@@ -41,10 +41,17 @@ class Session(PrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
     visitor_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     external_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     channel_connector: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary_token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    summary_up_to_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     messages: Mapped[list[Message]] = relationship(
         back_populates="session",
         order_by="Message.created_at",
+        foreign_keys="Message.session_id",
     )
 
 
@@ -95,4 +102,7 @@ class Message(PrimaryKeyMixin, TimestampMixin, Base):
     config_content_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     rewritten_query: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    session: Mapped[Session] = relationship(back_populates="messages")
+    session: Mapped[Session] = relationship(
+        back_populates="messages",
+        foreign_keys=[session_id],
+    )

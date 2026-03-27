@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from app.db.models.enums import BatchStatus
+from app.services.gemini_client import create_genai_client
 
 if TYPE_CHECKING:
     pass
@@ -76,12 +77,18 @@ class BatchEmbeddingClient:
         dimensions: int,
         embedding_task_type: str = "RETRIEVAL_DOCUMENT",
         api_key: str | None = None,
+        use_vertexai: bool = False,
+        project: str | None = None,
+        location: str = "global",
         client: Any | None = None,
     ) -> None:
         self._model = model
         self._dimensions = dimensions
         self._embedding_task_type = embedding_task_type
         self._api_key = api_key
+        self._use_vertexai = use_vertexai
+        self._project = project
+        self._location = location
         self._client = client
         self._client_lock = threading.Lock()
 
@@ -236,9 +243,10 @@ class BatchEmbeddingClient:
         if self._client is None:
             with self._client_lock:
                 if self._client is None:
-                    if not self._api_key:
-                        raise ValueError("GEMINI_API_KEY is required for batch embedding")
-                    from google import genai
-
-                    self._client = genai.Client(api_key=self._api_key)
+                    self._client = create_genai_client(
+                        api_key=self._api_key,
+                        use_vertexai=self._use_vertexai,
+                        project=self._project,
+                        location=self._location,
+                    )
         return self._client

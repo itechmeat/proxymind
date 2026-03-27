@@ -8,6 +8,7 @@ import structlog
 
 from app.persona.loader import PersonaContext
 from app.persona.safety import SYSTEM_SAFETY_POLICY
+from app.services.conversation_memory import MemoryBlock
 from app.services.promotions import Promotion, PromotionsService
 from app.services.prompt import format_chunk_header
 from app.services.qdrant import RetrievedChunk
@@ -61,6 +62,7 @@ class ContextAssembler:
         chunks: list[RetrievedChunk],
         query: str,
         source_map: dict[uuid.UUID, SourceInfo],
+        memory_block: MemoryBlock | None = None,
     ) -> AssembledPrompt:
         included_promotions = self._resolve_promotions()
         selected_chunks = self._select_chunks(chunks, source_map)
@@ -78,7 +80,13 @@ class ContextAssembler:
                     self._promotions_text(included_promotions),
                 )
             )
-        # TODO(S4-06): Insert conversation-memory layer here before citation instructions.
+        if memory_block is not None and memory_block.summary_text:
+            layers.append(
+                self._build_layer(
+                    "conversation_summary",
+                    f"Earlier in this conversation:\n{memory_block.summary_text}",
+                )
+            )
         if selected_chunks:
             layers.append(
                 self._build_layer(
@@ -86,12 +94,17 @@ class ContextAssembler:
                     self._citation_instructions(),
                 )
             )
-        layers.append(
-            self._build_layer("content_guidelines", self._content_guidelines())
-        )
+        layers.append(self._build_layer("content_guidelines", self._content_guidelines()))
 
         layer_token_counts = {layer.tag: layer.token_estimate for layer in layers}
+        if memory_block is not None and memory_block.total_tokens > 0:
+            layer_token_counts.pop("conversation_summary", None)
+            layer_token_counts["conversation_memory"] = memory_block.total_tokens
         system_content = "\n\n".join(layer.content for layer in layers)
+        messages = [{"role": "system", "content": system_content}]
+
+        if memory_block is not None and memory_block.messages:
+            messages.extend(memory_block.messages)
 
         user_sections = [self._build_user_query(query)]
         if selected_chunks:
@@ -100,12 +113,10 @@ class ContextAssembler:
             layer_token_counts["knowledge_context"] = estimate_tokens(knowledge_context)
         layer_token_counts["user_query"] = estimate_tokens(user_sections[-1])
         user_content = "\n\n".join(user_sections)
+        messages.append({"role": "user", "content": user_content})
 
         return AssembledPrompt(
-            messages=[
-                {"role": "system", "content": system_content},
-                {"role": "user", "content": user_content},
-            ],
+            messages=messages,
             token_estimate=sum(layer_token_counts.values()),
             included_promotions=included_promotions,
             retrieval_chunks_used=len(selected_chunks),
@@ -137,8 +148,7 @@ class ContextAssembler:
         for chunk in chunks:
             next_index = len(selected_chunks) + 1
             formatted_chunk = (
-                f"{format_chunk_header(next_index, chunk, source_map)}\n"
-                f"{chunk.text_content}"
+                f"{format_chunk_header(next_index, chunk, source_map)}\n{chunk.text_content}"
             )
             chunk_tokens = estimate_tokens(formatted_chunk)
             if used_tokens + chunk_tokens > self._retrieval_context_budget:
@@ -178,11 +188,7 @@ class ContextAssembler:
             "If the promotion is not relevant to the current question, do not mention it at all.",
             "",
             f"Title: {promotion.title}",
-            *(
-                [f"Context hint: {promotion.context}"]
-                if promotion.context
-                else []
-            ),
+            *([f"Context hint: {promotion.context}"] if promotion.context else []),
             f"Details: {promotion.body}",
         ]
         return "\n".join(lines)

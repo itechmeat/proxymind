@@ -39,7 +39,10 @@ def test_settings_allow_zero_minimum_retrieved_chunks() -> None:
 def test_settings_include_path_a_defaults() -> None:
     settings = Settings(**_base_settings())
 
-    assert settings.gemini_content_model == "gemini-2.5-flash"
+    assert settings.gemini_content_model == "gemini-3-flash-preview"
+    assert settings.google_genai_use_vertexai is False
+    assert settings.google_cloud_project is None
+    assert settings.google_cloud_location == "global"
     assert settings.gemini_file_upload_threshold_bytes == 10 * 1024 * 1024
     assert settings.path_a_text_threshold_pdf == 2000
     assert settings.path_a_text_threshold_media == 500
@@ -126,35 +129,119 @@ def test_rewrite_history_messages_rejects_non_positive() -> None:
         Settings(**_base_settings(), rewrite_history_messages=0)
 
 
+def test_conversation_memory_settings_defaults() -> None:
+    settings = Settings(**_base_settings())
+
+    assert settings.conversation_memory_budget == 4096
+    assert settings.conversation_summary_ratio == 0.3
+    assert settings.conversation_summary_model is None
+    assert settings.conversation_summary_temperature == 0.1
+    assert settings.conversation_summary_timeout_ms == 10000
+
+
+def test_conversation_memory_settings_custom_values() -> None:
+    settings = Settings(
+        **_base_settings(),
+        conversation_memory_budget=8192,
+        conversation_summary_ratio=0.5,
+        conversation_summary_model="gemini/gemini-2.0-flash",
+        conversation_summary_temperature=0.2,
+        conversation_summary_timeout_ms=5000,
+    )
+
+    assert settings.conversation_memory_budget == 8192
+    assert settings.conversation_summary_ratio == 0.5
+    assert settings.conversation_summary_model == "gemini/gemini-2.0-flash"
+    assert settings.conversation_summary_temperature == 0.2
+    assert settings.conversation_summary_timeout_ms == 5000
+
+
+def test_conversation_memory_budget_rejects_non_positive() -> None:
+    with pytest.raises(ValidationError):
+        Settings(**_base_settings(), conversation_memory_budget=0)
+
+
+def test_conversation_summary_ratio_rejects_out_of_range_values() -> None:
+    with pytest.raises(ValidationError):
+        Settings(**_base_settings(), conversation_summary_ratio=-0.1)
+
+    with pytest.raises(ValidationError):
+        Settings(**_base_settings(), conversation_summary_ratio=1.1)
+
+
+def test_conversation_summary_temperature_rejects_out_of_range_values() -> None:
+    with pytest.raises(ValidationError):
+        Settings(**_base_settings(), conversation_summary_temperature=-0.1)
+
+    with pytest.raises(ValidationError):
+        Settings(**_base_settings(), conversation_summary_temperature=2.1)
+
+
+def test_conversation_summary_timeout_rejects_non_positive() -> None:
+    with pytest.raises(ValidationError):
+        Settings(**_base_settings(), conversation_summary_timeout_ms=0)
+
+
 def test_empty_optional_provider_strings_are_normalized_to_none() -> None:
     settings = Settings(
         **_base_settings(),
         llm_api_key="",
         llm_api_base="",
+        google_cloud_project="",
         rewrite_llm_model="",
         rewrite_llm_api_key="",
         rewrite_llm_api_base="",
+        conversation_summary_model="",
     )
 
     assert settings.llm_api_key is None
     assert settings.llm_api_base is None
+    assert settings.google_cloud_project is None
     assert settings.rewrite_llm_model is None
     assert settings.rewrite_llm_api_key is None
     assert settings.rewrite_llm_api_base is None
+    assert settings.conversation_summary_model is None
+
+
+def test_vertex_ai_requires_project_or_api_key() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="GOOGLE_CLOUD_PROJECT or GEMINI_API_KEY is required when GOOGLE_GENAI_USE_VERTEXAI is enabled",
+    ):
+        Settings(**_base_settings(), google_genai_use_vertexai=True)
+
+
+def test_vertex_ai_accepts_project_without_api_key() -> None:
+    settings = Settings(
+        **_base_settings(),
+        google_genai_use_vertexai=True,
+        google_cloud_project="test-project",
+    )
+
+    assert settings.google_genai_use_vertexai is True
+    assert settings.google_cloud_project == "test-project"
 
 
 def test_document_ai_partial_configuration_is_rejected() -> None:
+    message = (
+        "DOCUMENT_AI_PROJECT_ID and DOCUMENT_AI_PROCESSOR_ID must either both "
+        "be set or both be empty"
+    )
     with pytest.raises(
         ValidationError,
-        match="DOCUMENT_AI_PROJECT_ID and DOCUMENT_AI_PROCESSOR_ID must either both be set or both be empty",
+        match=message,
     ):
         Settings(**_base_settings(), document_ai_project_id="project")
 
 
 def test_document_ai_processor_without_project_is_rejected() -> None:
+    message = (
+        "DOCUMENT_AI_PROJECT_ID and DOCUMENT_AI_PROCESSOR_ID must either both "
+        "be set or both be empty"
+    )
     with pytest.raises(
         ValidationError,
-        match="DOCUMENT_AI_PROJECT_ID and DOCUMENT_AI_PROCESSOR_ID must either both be set or both be empty",
+        match=message,
     ):
         Settings(**_base_settings(), document_ai_processor_id="processor")
 

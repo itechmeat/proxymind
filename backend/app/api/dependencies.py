@@ -9,6 +9,7 @@ from app.db.session import get_session
 from app.persona.loader import PersonaContext
 from app.services.chat import ChatService
 from app.services.context_assembler import ContextAssembler
+from app.services.conversation_memory import ConversationMemoryService
 from app.services.embedding import EmbeddingService
 from app.services.llm import LLMService
 from app.services.promotions import PromotionsService
@@ -90,6 +91,10 @@ def get_promotions_service(request: Request) -> PromotionsService:
     return request.app.state.promotions_service
 
 
+def get_conversation_memory_service(request: Request) -> ConversationMemoryService | None:
+    return getattr(request.app.state, "conversation_memory_service", None)
+
+
 def get_context_assembler(
     request: Request,
     persona_context: Annotated[PersonaContext, Depends(get_persona_context)],
@@ -120,12 +125,25 @@ def get_chat_service(
     snapshot_service: Annotated[SnapshotService, Depends(get_snapshot_service)],
     retrieval_service: Annotated[RetrievalService, Depends(get_retrieval_service)],
     llm_service: Annotated[LLMService, Depends(get_llm_service)],
-    query_rewrite_service: Annotated[
-        QueryRewriteService, Depends(get_query_rewrite_service)
-    ],
+    query_rewrite_service: Annotated[QueryRewriteService, Depends(get_query_rewrite_service)],
     context_assembler: Annotated[ContextAssembler, Depends(get_context_assembler)],
+    conversation_memory_service: Annotated[
+        ConversationMemoryService | None, Depends(get_conversation_memory_service)
+    ],
 ) -> ChatService:
     from app.services.chat import ChatService
+
+    arq_pool = request.app.state.arq_pool
+
+    async def summary_enqueuer(session_id: str, window_start_message_id: str) -> None:
+        job = await arq_pool.enqueue_job(
+            "generate_session_summary",
+            session_id,
+            window_start_message_id,
+            _job_id=f"summary:{session_id}",
+        )
+        if job is None:
+            raise RuntimeError("arq returned no job handle for summary task")
 
     return ChatService(
         session=session,
@@ -136,4 +154,6 @@ def get_chat_service(
         context_assembler=context_assembler,
         min_retrieved_chunks=request.app.state.settings.min_retrieved_chunks,
         max_citations_per_response=request.app.state.settings.max_citations_per_response,
+        conversation_memory_service=conversation_memory_service,
+        summary_enqueuer=summary_enqueuer,
     )

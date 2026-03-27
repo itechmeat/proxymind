@@ -4,9 +4,18 @@ from types import SimpleNamespace
 
 import pytest
 from google.api_core.exceptions import DeadlineExceeded, InvalidArgument, ServiceUnavailable
+from tenacity import wait_none
 
 from app.db.models.enums import SourceType
 from app.services.document_ai_parser import DocumentAIParser
+
+
+@pytest.fixture(autouse=True)
+def run_document_ai_calls_inline(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _immediate_to_thread(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr("app.services.document_ai_parser.asyncio.to_thread", _immediate_to_thread)
 
 
 def _segment(start: int, end: int) -> SimpleNamespace:
@@ -78,6 +87,7 @@ async def test_document_ai_parser_normalizes_chunks() -> None:
         processor_id="processor",
         chunk_max_tokens=50,
         client=client,
+        retry_wait=wait_none(),
     )
 
     chunks = await parser.parse_and_chunk(b"pdf", "report.pdf", SourceType.PDF)
@@ -99,6 +109,7 @@ async def test_document_ai_parser_returns_empty_when_document_has_no_text() -> N
         processor_id="processor",
         chunk_max_tokens=50,
         client=client,
+        retry_wait=wait_none(),
     )
 
     chunks = await parser.parse_and_chunk(b"pdf", "report.pdf", SourceType.PDF)
@@ -120,6 +131,7 @@ async def test_document_ai_parser_retries_transient_errors() -> None:
         processor_id="processor",
         chunk_max_tokens=50,
         client=client,
+        retry_wait=wait_none(),
     )
 
     chunks = await parser.parse_and_chunk(b"pdf", "report.pdf", SourceType.PDF)
@@ -142,6 +154,7 @@ async def test_document_ai_parser_retries_deadline_exceeded() -> None:
         processor_id="processor",
         chunk_max_tokens=50,
         client=client,
+        retry_wait=wait_none(),
     )
 
     chunks = await parser.parse_and_chunk(b"pdf", "report.pdf", SourceType.PDF)
@@ -165,6 +178,7 @@ async def test_document_ai_parser_propagates_after_retry_exhaustion() -> None:
         processor_id="processor",
         chunk_max_tokens=50,
         client=client,
+        retry_wait=wait_none(),
     )
 
     with pytest.raises(ServiceUnavailable):

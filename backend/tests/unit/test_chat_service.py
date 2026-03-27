@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import structlog.testing
@@ -21,11 +21,12 @@ from app.db.models.knowledge import KnowledgeSnapshot
 from app.persona.loader import PersonaContext
 from app.services.chat import ChatService, NoActiveSnapshotError, SessionNotFoundError
 from app.services.context_assembler import ContextAssembler
+from app.services.conversation_memory import MemoryBlock
 from app.services.llm_types import LLMError, LLMResponse
-from app.services.prompt import NO_CONTEXT_REFUSAL
 from app.services.promotions import PromotionsService
-from app.services.query_rewrite import RewriteResult
+from app.services.prompt import NO_CONTEXT_REFUSAL
 from app.services.qdrant import RetrievedChunk
+from app.services.query_rewrite import RewriteResult
 from app.services.retrieval import RetrievalError
 from app.services.snapshot import SnapshotService
 
@@ -77,6 +78,8 @@ def _make_service(
     min_retrieved_chunks: int = 1,
     rewritten_query: str | None = None,
     rewrite_error: Exception | None = None,
+    conversation_memory_service: object | None = None,
+    summary_enqueuer: object | None = None,
 ) -> tuple[ChatService, SimpleNamespace, SimpleNamespace]:
     retrieval_service = SimpleNamespace(search=AsyncMock())
     if isinstance(retrieval_result, Exception):
@@ -115,6 +118,8 @@ def _make_service(
         query_rewrite_service=rewrite_service,
         context_assembler=context_assembler,
         min_retrieved_chunks=min_retrieved_chunks,
+        conversation_memory_service=conversation_memory_service,
+        summary_enqueuer=summary_enqueuer,
     )
     return service, retrieval_service, llm_service
 
@@ -190,6 +195,8 @@ async def test_answer_saves_assistant_response_with_chunks(
 
     result = await service.answer(session_id=chat_session.id, text="Question?")
 
+    assert result.assistant_message.source_ids == [source_id]
+
     assert result.retrieved_chunks_count == 1
     assert result.assistant_message.content == "Grounded answer"
     assert result.assistant_message.snapshot_id == active_snapshot.id
@@ -214,7 +221,6 @@ async def test_answer_returns_refusal_without_llm_when_no_chunks(
     persona_context: PersonaContext,
 ) -> None:
     active_snapshot = await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
-    active_snapshot_id = active_snapshot.id
     service, retrieval_service, llm_service = _make_service(
         db_session,
         persona_context=persona_context,
@@ -417,9 +423,222 @@ async def test_answer_deduplicates_source_ids(
     )
     chat_session = await service.create_session()
 
+    await service.answer(session_id=chat_session.id, text="Question?")
+
+
+@pytest.mark.asyncio
+async def test_answer_passes_memory_block_to_assembler(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    memory_block = MemoryBlock(
+        summary_text="Earlier context",
+        messages=[
+            {"role": "user", "content": "Earlier question"},
+            {"role": "assistant", "content": "Earlier answer"},
+        ],
+        total_tokens=20,
+        needs_summary_update=False,
+        window_start_message_id=None,
+    )
+    memory_service = SimpleNamespace(build_memory_block=MagicMock(return_value=memory_block))
+    service, _, llm_service = _make_service(
+        db_session,
+        persona_context=persona_context,
+        retrieval_result=[_chunk()],
+        llm_result=LLMResponse(
+            content="Grounded answer",
+            model_name="openai/gpt-4o",
+            token_count_prompt=12,
+            token_count_completion=6,
+        ),
+        conversation_memory_service=memory_service,
+    )
+    chat_session = await service.create_session()
+    original_assemble = service._context_assembler.assemble
+    service._context_assembler.assemble = MagicMock(side_effect=original_assemble)  # type: ignore[method-assign]
+
+    await service.answer(session_id=chat_session.id, text="Question?")
+
+    memory_service.build_memory_block.assert_called_once()
+    assert service._context_assembler.assemble.call_args.kwargs["memory_block"] == memory_block
+    llm_service.complete.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_answer_enqueues_summary_when_needed(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    window_start_id = uuid.uuid7()
+    memory_service = SimpleNamespace(
+        build_memory_block=MagicMock(
+            return_value=MemoryBlock(
+                summary_text=None,
+                messages=[],
+                total_tokens=0,
+                needs_summary_update=True,
+                window_start_message_id=window_start_id,
+            )
+        )
+    )
+    summary_enqueuer = AsyncMock()
+    service, _, _ = _make_service(
+        db_session,
+        persona_context=persona_context,
+        retrieval_result=[_chunk()],
+        llm_result=LLMResponse(
+            content="Grounded answer",
+            model_name="openai/gpt-4o",
+            token_count_prompt=12,
+            token_count_completion=6,
+        ),
+        conversation_memory_service=memory_service,
+        summary_enqueuer=summary_enqueuer,
+    )
+    chat_session = await service.create_session()
+
+    await service.answer(session_id=chat_session.id, text="Question?")
+
+    summary_enqueuer.assert_awaited_once_with(str(chat_session.id), str(window_start_id))
+
+
+@pytest.mark.asyncio
+async def test_answer_skips_summary_enqueue_when_not_needed(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    memory_service = SimpleNamespace(
+        build_memory_block=MagicMock(
+            return_value=MemoryBlock(
+                summary_text=None,
+                messages=[],
+                total_tokens=0,
+                needs_summary_update=False,
+                window_start_message_id=None,
+            )
+        )
+    )
+    summary_enqueuer = AsyncMock()
+    service, _, _ = _make_service(
+        db_session,
+        persona_context=persona_context,
+        retrieval_result=[_chunk()],
+        llm_result=LLMResponse(
+            content="Grounded answer",
+            model_name="openai/gpt-4o",
+            token_count_prompt=12,
+            token_count_completion=6,
+        ),
+        conversation_memory_service=memory_service,
+        summary_enqueuer=summary_enqueuer,
+    )
+    chat_session = await service.create_session()
+
+    await service.answer(session_id=chat_session.id, text="Question?")
+
+    summary_enqueuer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_answer_logs_enqueue_failure_without_failing_response(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    memory_service = SimpleNamespace(
+        build_memory_block=MagicMock(
+            return_value=MemoryBlock(
+                summary_text=None,
+                messages=[],
+                total_tokens=0,
+                needs_summary_update=True,
+                window_start_message_id=uuid.uuid7(),
+            )
+        )
+    )
+    summary_enqueuer = AsyncMock(side_effect=RuntimeError("queue down"))
+    service, _, _ = _make_service(
+        db_session,
+        persona_context=persona_context,
+        retrieval_result=[_chunk()],
+        llm_result=LLMResponse(
+            content="Grounded answer",
+            model_name="openai/gpt-4o",
+            token_count_prompt=12,
+            token_count_completion=6,
+        ),
+        conversation_memory_service=memory_service,
+        summary_enqueuer=summary_enqueuer,
+    )
+    chat_session = await service.create_session()
+
     result = await service.answer(session_id=chat_session.id, text="Question?")
 
-    assert result.assistant_message.source_ids == [shared_source_id]
+    assert result.assistant_message.content == "Grounded answer"
+
+
+@pytest.mark.asyncio
+async def test_answer_without_memory_service_stays_backward_compatible(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    service, _, _ = _make_service(
+        db_session,
+        persona_context=persona_context,
+        retrieval_result=[_chunk()],
+        llm_result=LLMResponse(
+            content="Grounded answer",
+            model_name="openai/gpt-4o",
+            token_count_prompt=12,
+            token_count_completion=6,
+        ),
+    )
+    chat_session = await service.create_session()
+    original_assemble = service._context_assembler.assemble
+    service._context_assembler.assemble = MagicMock(side_effect=original_assemble)  # type: ignore[method-assign]
+
+    await service.answer(session_id=chat_session.id, text="Question?")
+
+    assert service._context_assembler.assemble.call_args.kwargs["memory_block"] is None
+
+
+@pytest.mark.asyncio
+async def test_refusal_path_does_not_enqueue_summary(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    memory_service = SimpleNamespace(
+        build_memory_block=MagicMock(
+            return_value=MemoryBlock(
+                summary_text=None,
+                messages=[],
+                total_tokens=0,
+                needs_summary_update=True,
+                window_start_message_id=uuid.uuid7(),
+            )
+        )
+    )
+    summary_enqueuer = AsyncMock()
+    service, _, llm_service = _make_service(
+        db_session,
+        persona_context=persona_context,
+        retrieval_result=[],
+        conversation_memory_service=memory_service,
+        summary_enqueuer=summary_enqueuer,
+    )
+    chat_session = await service.create_session()
+
+    result = await service.answer(session_id=chat_session.id, text="Question?")
+
+    assert result.assistant_message.content == NO_CONTEXT_REFUSAL
+    summary_enqueuer.assert_not_awaited()
+    llm_service.complete.assert_not_awaited()
 
 
 @pytest.mark.asyncio

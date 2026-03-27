@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from google.genai.errors import ClientError, ServerError
+from tenacity import wait_none
 
 from app.services.embedding import EmbeddingService
 from app.services.gemini_file_transfer import PreparedFilePart
@@ -102,6 +103,7 @@ async def test_embed_texts_retries_transient_errors() -> None:
         batch_size=2,
         client=SimpleNamespace(models=models),  # type: ignore[arg-type]
     )
+    service._embed_batch.retry.wait = wait_none()
 
     embeddings = await service.embed_texts(["retry me"])
 
@@ -123,6 +125,7 @@ async def test_embed_texts_raises_after_retries_exhausted() -> None:
         batch_size=2,
         client=SimpleNamespace(models=models),  # type: ignore[arg-type]
     )
+    service._embed_batch.retry.wait = wait_none()
 
     with pytest.raises(ClientError):
         await service.embed_texts(["retry me"])

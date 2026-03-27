@@ -105,6 +105,7 @@ def rewriting_chat_app(
     session_factory: async_sessionmaker[AsyncSession],
     mock_retrieval_service,
     mock_llm_service,
+    mock_arq_pool,
 ) -> FastAPI:
     from app.api.chat import router as chat_router
     from app.persona.loader import PersonaContext
@@ -139,11 +140,14 @@ def rewriting_chat_app(
         max_promotions_per_response=1,
         sse_heartbeat_interval_seconds=15,
         sse_inter_token_timeout_seconds=30,
+        conversation_memory_budget=4096,
+        conversation_summary_ratio=0.3,
     )
     app.state.session_factory = session_factory
     app.state.retrieval_service = mock_retrieval_service
     app.state.llm_service = mock_llm_service
     app.state.query_rewrite_service = rewrite_service
+    app.state.arq_pool = mock_arq_pool
     app.state.persona_context = PersonaContext(
         identity="Test identity",
         soul="Test soul",
@@ -152,6 +156,12 @@ def rewriting_chat_app(
         config_content_hash="test-content-hash",
     )
     app.state.promotions_service = PromotionsService(promotions_text="")
+    from app.services.conversation_memory import ConversationMemoryService
+
+    app.state.conversation_memory_service = ConversationMemoryService(
+        budget=4096,
+        summary_ratio=0.3,
+    )
     return app
 
 
@@ -813,13 +823,18 @@ async def test_sse_saves_partial_on_early_disconnect(
     sample_retrieved_chunk,
 ) -> None:
     await _create_snapshot(session_factory, status=SnapshotStatus.ACTIVE)
+    chat_app.state.settings.sse_heartbeat_interval_seconds = 1
+    chat_app.state.settings.sse_inter_token_timeout_seconds = 1
     mock_retrieval_service.search.return_value = [sample_retrieved_chunk]
     disconnect_event = asyncio.Event()
 
     async def slow_stream(*args, **kwargs):
         yield LLMToken(content="partial")
         disconnect_event.set()
-        await asyncio.sleep(60)
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            return
         yield LLMToken(content=" content")
         yield LLMStreamEnd(
             model_name="openai/gpt-4o",
@@ -843,7 +858,7 @@ async def test_sse_saves_partial_on_early_disconnect(
                 if disconnect_event.is_set():
                     break
 
-    deadline = time.monotonic() + 2.0
+    deadline = time.monotonic() + 1.25
     while True:
         async with session_factory() as session:
             messages = list(
@@ -866,4 +881,4 @@ async def test_sse_saves_partial_on_early_disconnect(
                 assert messages[0].content == "partial"
             break
 
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.05)

@@ -145,7 +145,7 @@ Phase outcome: full-featured dialog with persona, citations, memory, promotions.
   - **Verification:** Docling and local ML stacks are absent from runtime dependencies; supported text-centric formats still ingest successfully through the lightweight path; complex documents route through the external fallback; Qdrant payloads and citations remain compatible
   - Tasks: provider-agnostic document processing interface, Document AI adapter, routing rules, normalized chunk contract validation, dependency cleanup, regression coverage for local path and external fallback
 
-- [-] **S4-07: Conversation memory**
+- [x] **S4-07: Conversation memory**
   Dialog history + summary for long conversations. Trimming when token budget exceeded. Session management.
   - **Outcome:** long conversations retain context
   - **Verification:** 20+ messages → context preserved; summary generated when limit reached
@@ -164,7 +164,7 @@ Phase outcome: full-featured web interface for visitors and the owner.
   - **Parallel pair:** S4-04 (Query rewriting) — pure frontend vs pure backend, zero file overlap
 
 - [x] **S5-02: Chat polish — citations display + twin profile**
-      Inline references in text, collapsible sources block under the message (Perplexity-style). Clickable for online, text-only for offline. Twin avatar (upload → SeaweedFS) and name in chat header. Note: "public links" require a backend schema extension — defer to a future story.
+      Inline references in text, collapsible sources block under the message (Perplexity-style). Clickable for online, text-only for offline. Twin avatar (upload → 977SeaweedFS) and name in chat header. Note: "public links" require a backend schema extension — defer to a future story.
   - **Outcome:** sources visible and clickable; twin profile displayed in chat
   - **Verification:** citation → clickable link; collapse/expand block; avatar visible in chat header
   - Tasks: citation parser, collapsible block component, link rendering, avatar upload, profile metadata form, display in chat header

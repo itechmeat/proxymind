@@ -28,6 +28,9 @@ def _create_embedding_service(settings):
         dimensions=settings.embedding_dimensions,
         batch_size=settings.embedding_batch_size,
         api_key=settings.gemini_api_key,
+        use_vertexai=settings.google_genai_use_vertexai,
+        project=settings.google_cloud_project,
+        location=settings.google_cloud_location,
     )
 
 
@@ -93,6 +96,15 @@ def _create_promotions_service(settings):
     from app.services.promotions import PromotionsService
 
     return PromotionsService.from_file(Path(settings.promotions_file_path))
+
+
+def _create_conversation_memory_service(settings):
+    from app.services.conversation_memory import ConversationMemoryService
+
+    return ConversationMemoryService(
+        budget=settings.conversation_memory_budget,
+        summary_ratio=settings.conversation_summary_ratio,
+    )
 
 
 def _create_storage_service(settings, storage_http_client):
@@ -166,6 +178,7 @@ async def lifespan(app: FastAPI):
         )
         app.state.persona_context = persona_loader.load()
         app.state.promotions_service = _create_promotions_service(settings)
+        app.state.conversation_memory_service = _create_conversation_memory_service(settings)
     except Exception as error:
         logger.error("app.startup_failed", error=str(error))
         await _close_app_resources(app, logger)

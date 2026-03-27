@@ -126,6 +126,38 @@ services:
       redis:
         condition: service_healthy
 
+  backend-test:
+    build:
+      context: ./backend
+      target: test-runtime
+    entrypoint:
+      - sleep
+      - infinity
+    working_dir: /workspace/backend
+    env_file:
+      - .env
+      - ./backend/.env
+    environment:
+      PERSONA_DIR: /workspace/persona
+      CONFIG_DIR: /workspace/config
+      PYTEST_USE_EXISTING_POSTGRES: "1"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: test_proxymind
+      PYTEST_USE_EXISTING_QDRANT: "1"
+      QDRANT_URL: http://qdrant:6333
+    volumes:
+      - ./:/workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres-data:
   qdrant-data:

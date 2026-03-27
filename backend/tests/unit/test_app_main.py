@@ -18,6 +18,9 @@ def _settings() -> SimpleNamespace:
         embedding_dimensions=3,
         embedding_batch_size=16,
         gemini_api_key=None,
+        google_genai_use_vertexai=False,
+        google_cloud_project=None,
+        google_cloud_location="global",
         qdrant_url="http://localhost:6333",
         qdrant_collection="proxymind_chunks",
         bm25_language="english",
@@ -44,6 +47,8 @@ def _settings() -> SimpleNamespace:
         persona_dir="/persona",
         config_dir="/config",
         promotions_file_path="/config/PROMOTIONS.md",
+        conversation_memory_budget=4096,
+        conversation_summary_ratio=0.3,
     )
 
 

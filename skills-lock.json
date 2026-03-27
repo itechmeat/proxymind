@@ -39,17 +39,17 @@
     "gemini-api-dev": {
       "source": "google-gemini/gemini-skills",
       "sourceType": "github",
-      "computedHash": "a1bc395530ba9116a4509e27321eaf7cc81c5f93aa80a4778ad6f915180b4f2c"
+      "computedHash": "d521744b97bfe7847e7abc7b80e447fb1a5edc30d49f94b390db41318e1bdc4b"
     },
     "gemini-interactions-api": {
       "source": "google-gemini/gemini-skills",
       "sourceType": "github",
-      "computedHash": "f0d51f45c0075be383a0891d239865223cab6cad63d88fde8f859e70c161ed34"
+      "computedHash": "dd9eb2f0595ea631b87932026ee8c4556d63b13fcb97fb564b78bd59f2b1eee6"
     },
     "gemini-live-api-dev": {
       "source": "google-gemini/gemini-skills",
       "sourceType": "github",
-      "computedHash": "ed5a34f05d0f162dd0a8b3609ed501f23576a91ab37440a46e5778f383ab79af"
+      "computedHash": "af955c0c727432243a34d5586e3555303d04a8f5a850e48d07dd12a3d9f59409"
     },
     "minio": {
       "source": "vm0-ai/vm0-skills",
@@ -134,7 +134,7 @@
     "vertex-ai-api-dev": {
       "source": "google-gemini/gemini-skills",
       "sourceType": "github",
-      "computedHash": "050cf4e9a14ebc86120007c59ea5dd0cf3924037b8a78871d960e0d05a4bac17"
+      "computedHash": "d4d8a0a44f34da580097747b8dedf1c60d95697a145d4501b67f41d2a44ceec8"
     },
     "vite": {
       "source": "itechmeat/llm-code",

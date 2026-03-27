@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import urlparse
 
 import httpx
@@ -15,7 +16,7 @@ from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from testcontainers.core.container import DockerContainer
 from testcontainers.postgres import PostgresContainer
 
@@ -23,6 +24,7 @@ from app.core.config import get_settings
 from app.core.constants import DEFAULT_AGENT_ID
 from app.db.engine import create_database_engine, create_session_factory
 from app.db.models import Agent
+from app.services.conversation_memory import ConversationMemoryService
 from app.services.promotions import PromotionsService
 from app.services.storage import StorageService
 
@@ -71,6 +73,31 @@ def _existing_postgres_env() -> dict[str, str]:
     }
 
 
+def _database_url(env: dict[str, str], database_name: str | None = None) -> str:
+    database = database_name or env["POSTGRES_DB"]
+    return (
+        f"postgresql+asyncpg://{env['POSTGRES_USER']}:{env['POSTGRES_PASSWORD']}"
+        f"@{env['POSTGRES_HOST']}:{env['POSTGRES_PORT']}/{database}"
+    )
+
+
+async def _ensure_database_exists(env: dict[str, str]) -> None:
+    admin_engine = create_async_engine(
+        _database_url(env, "postgres"),
+        isolation_level="AUTOCOMMIT",
+    )
+    try:
+        async with admin_engine.connect() as connection:
+            exists = await connection.scalar(
+                text("SELECT 1 FROM pg_database WHERE datname = :database_name"),
+                {"database_name": env["POSTGRES_DB"]},
+            )
+            if exists is None:
+                await connection.execute(text(f'CREATE DATABASE "{env["POSTGRES_DB"]}"'))
+    finally:
+        await admin_engine.dispose()
+
+
 def _wait_for_qdrant(url: str) -> str:
     deadline = time.time() + 30
     last_error: Exception | None = None
@@ -97,6 +124,7 @@ def postgres_env() -> dict[str, str]:
                 "POSTGRES_DB must start with 'test_' or end with '_test' when "
                 "using PYTEST_USE_EXISTING_POSTGRES=1."
             )
+        asyncio.run(_ensure_database_exists(env))
         previous_values = {key: os.environ.get(key) for key in env}
         os.environ.update(env)
         get_settings.cache_clear()
@@ -278,6 +306,13 @@ def mock_rewrite_service() -> SimpleNamespace:
 
 
 @pytest.fixture
+def mock_memory_service() -> ConversationMemoryService:
+    service = SimpleNamespace()
+    service.build_memory_block = MagicMock(side_effect=AssertionError("override in test"))
+    return service  # type: ignore[return-value]
+
+
+@pytest.fixture
 def sample_retrieved_chunk() -> object:
     from app.services.qdrant import RetrievedChunk
 
@@ -301,6 +336,7 @@ def chat_app(
     mock_retrieval_service: SimpleNamespace,
     mock_llm_service: SimpleNamespace,
     mock_rewrite_service: SimpleNamespace,
+    mock_arq_pool: SimpleNamespace,
 ) -> FastAPI:
     from app.api.chat import router as chat_router
     from app.persona.loader import PersonaContext
@@ -314,11 +350,14 @@ def chat_app(
         max_promotions_per_response=1,
         sse_heartbeat_interval_seconds=15,
         sse_inter_token_timeout_seconds=30,
+        conversation_memory_budget=4096,
+        conversation_summary_ratio=0.3,
     )
     app.state.session_factory = session_factory
     app.state.retrieval_service = mock_retrieval_service
     app.state.llm_service = mock_llm_service
     app.state.query_rewrite_service = mock_rewrite_service
+    app.state.arq_pool = mock_arq_pool
     app.state.persona_context = PersonaContext(
         identity="Test twin identity",
         soul="Test twin soul",
@@ -327,6 +366,10 @@ def chat_app(
         config_content_hash="test-content-hash",
     )
     app.state.promotions_service = PromotionsService(promotions_text="")
+    app.state.conversation_memory_service = ConversationMemoryService(
+        budget=4096,
+        summary_ratio=0.3,
+    )
     return app
 
 
@@ -390,7 +433,8 @@ async def committed_data_cleanup(
 @pytest.fixture(scope="session")
 def qdrant_url() -> str:
     if os.environ.get("PYTEST_USE_EXISTING_QDRANT") == "1":
-        return _wait_for_qdrant(os.environ["QDRANT_URL"])
+        yield _wait_for_qdrant(os.environ["QDRANT_URL"])
+        return
 
     with DockerContainer("qdrant/qdrant:v1.17.0").with_exposed_ports(6333) as container:
         host = container.get_container_host_ip()

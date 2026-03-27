@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import sys
-from types import ModuleType
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
@@ -17,6 +16,7 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
 ) -> None:
     tokenizer = object()
     gemini_content_service = object()
+    summary_llm_service = object()
     settings = SimpleNamespace(
         seaweedfs_filer_url="http://localhost:8888",
         seaweedfs_sources_path="/sources",
@@ -26,9 +26,17 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
         bm25_language="english",
         embedding_model="gemini-embedding-2-preview",
         embedding_batch_size=16,
-        gemini_content_model="gemini-2.5-flash",
+        gemini_content_model="gemini-3-flash-preview",
         gemini_file_upload_threshold_bytes=10 * 1024 * 1024,
         gemini_api_key=None,
+        google_genai_use_vertexai=False,
+        google_cloud_project=None,
+        google_cloud_location="global",
+        llm_model="openai/gpt-4o",
+        llm_api_key=None,
+        llm_api_base=None,
+        conversation_summary_model=None,
+        conversation_summary_temperature=0.1,
         document_ai_project_id=None,
         document_ai_location="us",
         document_ai_processor_id=None,
@@ -88,6 +96,7 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
         LightweightParser=lambda **_kwargs: object(),
     )
     install_stub("app.services.embedding", EmbeddingService=lambda **_kwargs: object())
+    install_stub("app.services.llm", LLMService=lambda **_kwargs: summary_llm_service)
     install_stub("app.services.document_ai_parser", DocumentAIParser=lambda **_kwargs: object())
     install_stub(
         "app.services.gemini_content",
@@ -109,6 +118,7 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
     qdrant_service.ensure_collection.assert_awaited_once()
     storage_service.ensure_storage_root.assert_awaited_once()
     assert ctx["gemini_content_service"] is gemini_content_service
+    assert ctx["summary_llm_service"] is summary_llm_service
     assert ctx["tokenizer"] is tokenizer
     assert ctx["path_a_text_threshold_pdf"] == 2000
     assert ctx["path_a_text_threshold_media"] == 500

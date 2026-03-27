@@ -4,7 +4,7 @@ import inspect
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import structlog
 from sqlalchemy import select
@@ -18,6 +18,7 @@ from app.persona.loader import PersonaContext
 from app.services.citation import Citation, CitationService, SourceInfo
 from app.services.content_type import compute_content_type_spans
 from app.services.context_assembler import ContextAssembler
+from app.services.conversation_memory import ConversationMemoryService, MemoryBlock
 from app.services.llm_types import LLMToken
 from app.services.prompt import NO_CONTEXT_REFUSAL
 from app.services.qdrant import RetrievedChunk
@@ -29,6 +30,10 @@ if TYPE_CHECKING:
     from app.services.snapshot import SnapshotService
 
 FAILED_ASSISTANT_CONTENT = "Failed to generate assistant response."
+
+
+class SummaryEnqueuer(Protocol):
+    async def __call__(self, session_id: str, window_start_message_id: str) -> None: ...
 
 
 class SessionNotFoundError(RuntimeError):
@@ -106,6 +111,8 @@ class ChatService:
         context_assembler: ContextAssembler,
         min_retrieved_chunks: int,
         max_citations_per_response: int = 5,
+        conversation_memory_service: ConversationMemoryService | None = None,
+        summary_enqueuer: SummaryEnqueuer | None = None,
     ) -> None:
         self._session = session
         self._snapshot_service = snapshot_service
@@ -115,6 +122,8 @@ class ChatService:
         self._context_assembler = context_assembler
         self._min_retrieved_chunks = min_retrieved_chunks
         self._max_citations_per_response = max_citations_per_response
+        self._conversation_memory_service = conversation_memory_service
+        self._summary_enqueuer = summary_enqueuer
         self._logger = structlog.get_logger(__name__)
 
     @property
@@ -173,7 +182,9 @@ class ChatService:
 
         retrieved_chunks: list[RetrievedChunk] = []
         try:
-            search_query = await self._do_rewrite(text, chat_session, user_message)
+            history = await self._load_history(chat_session.id, exclude_message_id=user_message.id)
+            search_query = await self._do_rewrite(text, chat_session, user_message, history)
+            memory_block = self._build_memory(chat_session, history)
             retrieved_chunks = await self._retrieval_service.search(
                 search_query,
                 snapshot_id=snapshot_id,
@@ -222,6 +233,7 @@ class ChatService:
                 chunks=retrieved_chunks,
                 query=text,
                 source_map=source_map,
+                memory_block=memory_block,
             )
             selected_chunks = retrieved_chunks[: assembled.retrieval_chunks_used]
             source_ids = self._deduplicate_source_ids(selected_chunks)
@@ -264,6 +276,7 @@ class ChatService:
                 config_commit_hash=self._persona_context.config_commit_hash,
                 config_content_hash=self._persona_context.config_content_hash,
             )
+            await self._maybe_enqueue_summary(memory_block, chat_session.id)
             return ChatAnswerResult(
                 assistant_message=assistant_message,
                 retrieved_chunks_count=len(selected_chunks),
@@ -335,7 +348,9 @@ class ChatService:
 
         retrieved_chunks: list[RetrievedChunk] = []
         try:
-            search_query = await self._do_rewrite(text, chat_session, user_message)
+            history = await self._load_history(chat_session.id, exclude_message_id=user_message.id)
+            search_query = await self._do_rewrite(text, chat_session, user_message, history)
+            memory_block = self._build_memory(chat_session, history)
             retrieved_chunks = await self._retrieval_service.search(
                 search_query,
                 snapshot_id=snapshot_id,
@@ -402,6 +417,7 @@ class ChatService:
             chunks=retrieved_chunks,
             query=text,
             source_map=source_map,
+            memory_block=memory_block,
         )
         selected_chunks = retrieved_chunks[: assembled.retrieval_chunks_used]
         source_ids = self._deduplicate_source_ids(selected_chunks)
@@ -464,6 +480,7 @@ class ChatService:
                     config_commit_hash=self._persona_context.config_commit_hash,
                     config_content_hash=self._persona_context.config_content_hash,
                 )
+                await self._maybe_enqueue_summary(memory_block, chat_session.id)
                 yield ChatStreamCitations(citations=citations)
                 yield ChatStreamDone(
                     token_count_prompt=event.token_count_prompt,
@@ -618,8 +635,8 @@ class ChatService:
         text: str,
         chat_session: Session,
         user_message: Message,
+        history: list[Message],
     ) -> str:
-        history = await self._load_history(chat_session.id, exclude_message_id=user_message.id)
         rewrite_result = await self._query_rewrite_service.rewrite(
             text,
             history,
@@ -642,6 +659,43 @@ class ChatService:
                     user_message_id=user_message_id,
                 )
         return rewrite_result.query
+
+    def _build_memory(
+        self,
+        chat_session: Session,
+        history: list[Message],
+    ) -> MemoryBlock | None:
+        if self._conversation_memory_service is None:
+            return None
+        return self._conversation_memory_service.build_memory_block(
+            session=chat_session,
+            messages=history,
+        )
+
+    async def _maybe_enqueue_summary(
+        self,
+        memory_block: MemoryBlock | None,
+        session_id: uuid.UUID,
+    ) -> None:
+        if (
+            memory_block is None
+            or not memory_block.needs_summary_update
+            or memory_block.window_start_message_id is None
+            or self._summary_enqueuer is None
+        ):
+            return
+
+        try:
+            await self._summary_enqueuer(
+                str(session_id),
+                str(memory_block.window_start_message_id),
+            )
+        except Exception as error:
+            self._logger.warning(
+                "chat.summary_enqueue_failed",
+                session_id=str(session_id),
+                error=str(error),
+            )
 
     async def _check_idempotency(
         self,
