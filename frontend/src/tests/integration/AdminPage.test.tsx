@@ -57,6 +57,10 @@ describe("Admin routes integration", () => {
         return jsonResponse([]);
       }
 
+      if (url === "/api/admin/catalog?limit=100" && init?.method === "GET") {
+        return jsonResponse({ items: [], total: 0 });
+      }
+
       throw new Error(`Unhandled request: ${url}`);
     });
 
@@ -86,6 +90,10 @@ describe("Admin routes integration", () => {
         return jsonResponse([]);
       }
 
+      if (url === "/api/admin/catalog?limit=100" && init?.method === "GET") {
+        return jsonResponse({ items: [], total: 0 });
+      }
+
       if (url === "/api/admin/snapshots" && init?.method === "GET") {
         return jsonResponse([]);
       }
@@ -101,6 +109,12 @@ describe("Admin routes integration", () => {
       await screen.findByText(
         /manage drafts, publications, activation and rollback/i,
       ),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("link", { name: "Catalog" }));
+
+    expect(
+      await screen.findByRole("button", { name: /add product/i }),
     ).toBeInTheDocument();
   });
 

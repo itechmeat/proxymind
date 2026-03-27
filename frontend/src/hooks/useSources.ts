@@ -1,10 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "@/hooks/useToast";
-import { deleteSource, getSources, uploadSource } from "@/lib/admin-api";
+import {
+  deleteSource,
+  getCatalogItems,
+  getSources,
+  updateSource,
+  uploadSource,
+} from "@/lib/admin-api";
 import { translate } from "@/lib/i18n";
-import type { SourceListItem } from "@/types/admin";
+import type { CatalogItem, SourceListItem } from "@/types/admin";
 
-const POLL_INTERVAL_MS = 3000;
+const SOURCE_STATUS_POLL_INTERVAL_MS = 3000;
+const DEFAULT_CATALOG_REFRESH_INTERVAL_MS = 60000;
+const CATALOG_FOCUS_REFRESH_DEBOUNCE_MS = 1000;
+
+interface UseSourcesOptions {
+  catalogRefreshIntervalMs?: number;
+}
+
+function resolveCatalogLoadErrorMessage(error: unknown) {
+  return error instanceof Error
+    ? error.message
+    : translate("admin.sourceLink.loadFailed");
+}
 
 export const ALLOWED_SOURCE_EXTENSIONS = new Set([
   ".md",
@@ -54,18 +72,42 @@ function hasProcessingSources(sources: SourceListItem[]) {
   );
 }
 
-export function useSources() {
+export function useSources({
+  catalogRefreshIntervalMs = DEFAULT_CATALOG_REFRESH_INTERVAL_MS,
+}: UseSourcesOptions = {}) {
   const { pushToast } = useToast();
+  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
+  const [catalogLoadError, setCatalogLoadError] = useState<string | null>(null);
   const [sources, setSources] = useState<SourceListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshingCatalog, setIsRefreshingCatalog] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [deletingSourceId, setDeletingSourceId] = useState<string | null>(null);
-  const intervalRef = useRef<number | null>(null);
+  const [linkingSourceId, setLinkingSourceId] = useState<string | null>(null);
+  const sourcePollingIntervalRef = useRef<number | null>(null);
+  const catalogPollingIntervalRef = useRef<number | null>(null);
+  const lastCatalogFocusRefreshRef = useRef(0);
 
   const refreshSources = useCallback(async () => {
     const nextSources = await getSources();
     setSources(nextSources);
     return nextSources;
+  }, []);
+
+  const refreshCatalogItems = useCallback(async () => {
+    setIsRefreshingCatalog(true);
+
+    try {
+      const response = await getCatalogItems();
+      setCatalogItems(response.items);
+      setCatalogLoadError(null);
+      return response.items;
+    } catch (error) {
+      setCatalogLoadError(resolveCatalogLoadErrorMessage(error));
+      throw error;
+    } finally {
+      setIsRefreshingCatalog(false);
+    }
   }, []);
   const shouldPoll = hasProcessingSources(sources);
 
@@ -73,25 +115,38 @@ export function useSources() {
     let active = true;
 
     void (async () => {
-      try {
-        const nextSources = await getSources();
+      const [sourcesResult, catalogResult] = await Promise.allSettled([
+        getSources(),
+        getCatalogItems(),
+      ]);
+
+      if (sourcesResult.status === "fulfilled") {
         if (active) {
-          setSources(nextSources);
+          setSources(sourcesResult.value);
         }
-      } catch (error) {
+      } else if (active) {
+        pushToast({
+          message:
+            sourcesResult.reason instanceof Error
+              ? sourcesResult.reason.message
+              : translate("admin.source.loadFailed"),
+          tone: "error",
+        });
+      }
+
+      if (catalogResult.status === "fulfilled") {
         if (active) {
-          pushToast({
-            message:
-              error instanceof Error
-                ? error.message
-                : translate("admin.source.loadFailed"),
-            tone: "error",
-          });
+          setCatalogItems(catalogResult.value.items);
+          setCatalogLoadError(null);
         }
-      } finally {
-        if (active) {
-          setIsLoading(false);
-        }
+      } else if (active) {
+        setCatalogLoadError(
+          resolveCatalogLoadErrorMessage(catalogResult.reason),
+        );
+      }
+
+      if (active) {
+        setIsLoading(false);
       }
     })();
 
@@ -102,42 +157,104 @@ export function useSources() {
 
   useEffect(() => {
     if (!shouldPoll) {
-      if (intervalRef.current !== null) {
-        window.clearInterval(intervalRef.current);
-        intervalRef.current = null;
+      if (sourcePollingIntervalRef.current !== null) {
+        window.clearInterval(sourcePollingIntervalRef.current);
+        sourcePollingIntervalRef.current = null;
       }
       return undefined;
     }
 
-    if (intervalRef.current !== null) {
+    if (sourcePollingIntervalRef.current !== null) {
       return undefined;
     }
 
-    intervalRef.current = window.setInterval(() => {
+    sourcePollingIntervalRef.current = window.setInterval(() => {
       void refreshSources().catch(() => {
         pushToast({
           message: translate("admin.source.statusRefreshFailed"),
           tone: "error",
         });
       });
-    }, POLL_INTERVAL_MS);
+    }, SOURCE_STATUS_POLL_INTERVAL_MS);
 
     return () => {
-      if (intervalRef.current !== null) {
-        window.clearInterval(intervalRef.current);
-        intervalRef.current = null;
+      if (sourcePollingIntervalRef.current !== null) {
+        window.clearInterval(sourcePollingIntervalRef.current);
+        sourcePollingIntervalRef.current = null;
       }
     };
   }, [pushToast, refreshSources, shouldPoll]);
 
+  useEffect(() => {
+    if (catalogRefreshIntervalMs <= 0) {
+      if (catalogPollingIntervalRef.current !== null) {
+        window.clearInterval(catalogPollingIntervalRef.current);
+        catalogPollingIntervalRef.current = null;
+      }
+      return undefined;
+    }
+
+    catalogPollingIntervalRef.current = window.setInterval(() => {
+      void refreshCatalogItems().catch((error) => {
+        pushToast({
+          message: resolveCatalogLoadErrorMessage(error),
+          tone: "warning",
+        });
+      });
+    }, catalogRefreshIntervalMs);
+
+    return () => {
+      if (catalogPollingIntervalRef.current !== null) {
+        window.clearInterval(catalogPollingIntervalRef.current);
+        catalogPollingIntervalRef.current = null;
+      }
+    };
+  }, [catalogRefreshIntervalMs, pushToast, refreshCatalogItems]);
+
+  useEffect(() => {
+    const refreshCatalogOnFocus = () => {
+      if (document.visibilityState === "hidden") {
+        return;
+      }
+
+      const now = Date.now();
+      if (
+        now - lastCatalogFocusRefreshRef.current <
+        CATALOG_FOCUS_REFRESH_DEBOUNCE_MS
+      ) {
+        return;
+      }
+
+      lastCatalogFocusRefreshRef.current = now;
+
+      void refreshCatalogItems().catch((error) => {
+        pushToast({
+          message: resolveCatalogLoadErrorMessage(error),
+          tone: "warning",
+        });
+      });
+    };
+
+    window.addEventListener("focus", refreshCatalogOnFocus);
+    document.addEventListener("visibilitychange", refreshCatalogOnFocus);
+
+    return () => {
+      window.removeEventListener("focus", refreshCatalogOnFocus);
+      document.removeEventListener("visibilitychange", refreshCatalogOnFocus);
+    };
+  }, [pushToast, refreshCatalogItems]);
+
   const uploadFiles = useCallback(
-    async (files: File[]) => {
+    async (files: File[], catalogItemId?: string | null) => {
       const validFiles: File[] = [];
 
       for (const file of files) {
         const validationError = validateSourceFile(file);
         if (validationError) {
-          pushToast({ message: validationError, tone: "error" });
+          pushToast({
+            message: validationError,
+            tone: "error",
+          });
           continue;
         }
 
@@ -154,6 +271,7 @@ export function useSources() {
           validFiles.map((file) =>
             uploadSource(file, {
               title: deriveSourceTitle(file.name),
+              ...(catalogItemId ? { catalog_item_id: catalogItemId } : {}),
             }),
           ),
         );
@@ -184,7 +302,7 @@ export function useSources() {
         }
 
         try {
-          await refreshSources();
+          await Promise.all([refreshSources(), refreshCatalogItems()]);
         } catch (error) {
           pushToast({
             message:
@@ -198,6 +316,45 @@ export function useSources() {
         setIsUploading(false);
       }
     },
+    [pushToast, refreshCatalogItems, refreshSources],
+  );
+
+  const linkSourceToCatalog = useCallback(
+    async (sourceId: string, catalogItemId: string | null) => {
+      setLinkingSourceId(sourceId);
+      try {
+        const updatedSource = await updateSource(sourceId, {
+          catalog_item_id: catalogItemId,
+        });
+        setSources((current) =>
+          current.map((source) =>
+            source.id === sourceId ? updatedSource : source,
+          ),
+        );
+
+        try {
+          await refreshSources();
+        } catch (error) {
+          pushToast({
+            message:
+              error instanceof Error
+                ? error.message
+                : translate("admin.source.refreshFailed"),
+            tone: "warning",
+          });
+        }
+      } catch (error) {
+        pushToast({
+          message:
+            error instanceof Error
+              ? error.message
+              : translate("admin.sourceLink.updateFailed"),
+          tone: "error",
+        });
+      } finally {
+        setLinkingSourceId(null);
+      }
+    },
     [pushToast, refreshSources],
   );
 
@@ -206,6 +363,10 @@ export function useSources() {
       setDeletingSourceId(source.id);
       try {
         const response = await deleteSource(source.id);
+        setSources((current) =>
+          current.filter((item) => item.id !== source.id),
+        );
+
         if (response.warnings.length > 0) {
           for (const warning of response.warnings) {
             pushToast({ message: warning, tone: "warning" });
@@ -244,9 +405,15 @@ export function useSources() {
   );
 
   return {
+    catalogItems,
+    catalogLoadError,
     deletingSourceId,
     isLoading,
+    isRefreshingCatalog,
     isUploading,
+    linkingSourceId,
+    linkSourceToCatalog,
+    refreshCatalogItems,
     refreshSources,
     removeSource,
     sources,

@@ -1,11 +1,18 @@
 import { buildApiUrl, parseJsonResponse } from "@/lib/api";
 import type {
+  CatalogItem,
+  CatalogItemCreate,
+  CatalogItemDetail,
+  CatalogItemListResponse,
+  CatalogItemType,
+  CatalogItemUpdate,
   DraftTestResponse,
   RetrievalMode,
   RollbackResponse,
   SnapshotResponse,
   SourceDeleteResponse,
   SourceListItem,
+  SourceUpdateRequest,
   SourceUploadMetadata,
   SourceUploadResponse,
 } from "@/types/admin";
@@ -159,4 +166,109 @@ export async function testDraftSnapshot(
   );
 
   return parseJsonResponse<DraftTestResponse>(response);
+}
+
+export async function getCatalogItems(
+  itemType?: CatalogItemType,
+): Promise<CatalogItemListResponse> {
+  const params = new URLSearchParams();
+  if (itemType) {
+    params.set("item_type", itemType);
+  }
+  params.set("limit", "100");
+
+  const query = params.toString();
+  const response = await fetch(buildApiUrl(`/api/admin/catalog?${query}`), {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  return parseJsonResponse<CatalogItemListResponse>(response);
+}
+
+export async function getCatalogItem(
+  catalogItemId: string,
+): Promise<CatalogItemDetail> {
+  const response = await fetch(
+    buildApiUrl(`/api/admin/catalog/${encodeURIComponent(catalogItemId)}`),
+    {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+      },
+    },
+  );
+
+  return parseJsonResponse<CatalogItemDetail>(response);
+}
+
+export async function createCatalogItem(
+  data: CatalogItemCreate,
+): Promise<CatalogItem> {
+  const response = await fetch(buildApiUrl("/api/admin/catalog"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  return parseJsonResponse<CatalogItem>(response);
+}
+
+export async function updateCatalogItem(
+  catalogItemId: string,
+  data: CatalogItemUpdate,
+): Promise<CatalogItem> {
+  const response = await fetch(
+    buildApiUrl(`/api/admin/catalog/${encodeURIComponent(catalogItemId)}`),
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(data),
+    },
+  );
+
+  return parseJsonResponse<CatalogItem>(response);
+}
+
+export async function deleteCatalogItem(
+  catalogItemId: string,
+): Promise<CatalogItem> {
+  const response = await fetch(
+    buildApiUrl(`/api/admin/catalog/${encodeURIComponent(catalogItemId)}`),
+    {
+      method: "DELETE",
+      headers: {
+        Accept: "application/json",
+      },
+    },
+  );
+
+  return parseJsonResponse<CatalogItem>(response);
+}
+
+export async function updateSource(
+  sourceId: string,
+  data: SourceUpdateRequest,
+): Promise<SourceListItem> {
+  const response = await fetch(
+    buildApiUrl(`/api/admin/sources/${encodeURIComponent(sourceId)}`),
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(data),
+    },
+  );
+
+  return parseJsonResponse<SourceListItem>(response);
 }
