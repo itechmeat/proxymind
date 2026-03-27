@@ -26,6 +26,7 @@ from app.api.batch_schemas import (
     BatchJobListResponse,
     BatchJobResponse,
 )
+from app.api.auth import verify_admin_key
 from app.api.catalog_schemas import (
     CatalogItemCreate,
     CatalogItemDetail,
@@ -103,16 +104,24 @@ from app.services.storage import (
     validate_file_extension,
 )
 
-router = APIRouter(prefix="/api/admin", tags=["admin"])
+router = APIRouter(
+    prefix="/api/admin",
+    tags=["admin"],
+    dependencies=[Depends(verify_admin_key)],
+)
 UPLOAD_READ_CHUNK_SIZE = 64 * 1024
 
 
-def get_admin_agent_id() -> uuid.UUID:
-    return DEFAULT_AGENT_ID
+def get_admin_agent_id(
+    agent_id: uuid.UUID | None = Query(default=None),
+) -> uuid.UUID:
+    return agent_id or DEFAULT_AGENT_ID
 
 
-def get_admin_knowledge_base_id() -> uuid.UUID:
-    return DEFAULT_KNOWLEDGE_BASE_ID
+def get_admin_knowledge_base_id(
+    knowledge_base_id: uuid.UUID | None = Query(default=None),
+) -> uuid.UUID:
+    return knowledge_base_id or DEFAULT_KNOWLEDGE_BASE_ID
 
 
 AdminAgentId = Annotated[uuid.UUID, Depends(get_admin_agent_id)]
@@ -159,7 +168,6 @@ async def upload_source(
     source_service: Annotated[SourceService, Depends(get_source_service)],
     skip_embedding: Annotated[bool, Query()] = False,
 ) -> SourceUploadResponse:
-    # TODO(S7-01): Protect /api/admin/* with Bearer auth before any non-local deployment.
     try:
         try:
             upload_metadata = SourceUploadMetadata.model_validate_json(metadata)
@@ -510,7 +518,6 @@ async def list_sources(
     agent_id: AdminAgentId = DEFAULT_AGENT_ID,
     knowledge_base_id: AdminKnowledgeBaseId = DEFAULT_KNOWLEDGE_BASE_ID,
 ) -> list[SourceListItem]:
-    # TODO(S7-01): Protect /api/admin/* with Bearer auth before any non-local deployment.
     sources = (
         await session.scalars(
             select(Source)
@@ -631,7 +638,6 @@ async def create_snapshot(
     agent_id: AdminAgentId = DEFAULT_AGENT_ID,
     knowledge_base_id: AdminKnowledgeBaseId = DEFAULT_KNOWLEDGE_BASE_ID,
 ) -> SnapshotResponse:
-    # TODO(S7-01): Protect /api/admin/* with Bearer auth before any non-local deployment.
     snapshot = await snapshot_service.get_or_create_draft(
         session=session,
         agent_id=agent_id,

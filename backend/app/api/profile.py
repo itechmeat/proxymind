@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFil
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth import verify_admin_key
 from app.api.dependencies import get_storage_service
 from app.api.profile_schemas import (
     AvatarUploadResponse,
@@ -22,7 +23,11 @@ from app.db.session import get_session
 from app.services.storage import StorageService
 
 chat_router = APIRouter(prefix="/api/chat", tags=["chat"])
-admin_router = APIRouter(prefix="/api/admin", tags=["admin"])
+admin_router = APIRouter(
+    prefix="/api/admin",
+    tags=["admin"],
+    dependencies=[Depends(verify_admin_key)],
+)
 
 ALLOWED_AVATAR_CONTENT_TYPES = {
     "image/gif": ".gif",

@@ -185,6 +185,7 @@ def test_conversation_summary_timeout_rejects_non_positive() -> None:
 def test_empty_optional_provider_strings_are_normalized_to_none() -> None:
     settings = Settings(
         **_base_settings(),
+        admin_api_key="",
         llm_api_key="",
         llm_api_base="",
         google_cloud_project="",
@@ -194,6 +195,7 @@ def test_empty_optional_provider_strings_are_normalized_to_none() -> None:
         conversation_summary_model="",
     )
 
+    assert settings.admin_api_key is None
     assert settings.llm_api_key is None
     assert settings.llm_api_base is None
     assert settings.google_cloud_project is None
@@ -274,3 +276,28 @@ def test_max_citations_per_response_custom() -> None:
 def test_max_citations_per_response_rejects_non_positive_value() -> None:
     with pytest.raises(ValidationError):
         Settings(**_base_settings(), max_citations_per_response=0)
+
+
+def test_security_settings_defaults() -> None:
+    settings = Settings(**_base_settings())
+
+    assert settings.admin_api_key is None
+    assert settings.chat_rate_limit == 60
+    assert settings.chat_rate_window_seconds == 60
+    assert settings.trusted_proxy_depth == 1
+
+
+def test_security_settings_custom_values() -> None:
+    settings = Settings(
+        **_base_settings(),
+        admin_api_key="test-secret-key-123",
+        chat_rate_limit=120,
+        chat_rate_window_seconds=30,
+        trusted_proxy_depth=2,
+    )
+
+    assert settings.admin_api_key is not None
+    assert settings.admin_api_key.get_secret_value() == "test-secret-key-123"
+    assert settings.chat_rate_limit == 120
+    assert settings.chat_rate_window_seconds == 30
+    assert settings.trusted_proxy_depth == 2

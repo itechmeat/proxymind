@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus
 
-from pydantic import Field, computed_field, model_validator
+from pydantic import Field, SecretStr, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     log_level: str = "info"
+    admin_api_key: SecretStr | None = Field(default=None)
+    chat_rate_limit: int = Field(default=60, ge=1)
+    chat_rate_window_seconds: int = Field(default=60, ge=1)
+    trusted_proxy_depth: int = Field(default=1, ge=1)
     upload_max_file_size_mb: int = Field(default=100, ge=1)
 
     model_config = SettingsConfigDict(
@@ -113,6 +117,7 @@ class Settings(BaseSettings):
             "rewrite_llm_api_key",
             "rewrite_llm_api_base",
             "conversation_summary_model",
+            "admin_api_key",
         ):
             if normalized.get(field_name) == "":
                 normalized[field_name] = None

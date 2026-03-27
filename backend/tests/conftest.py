@@ -55,6 +55,7 @@ TRUNCATE_TEST_DATA_SQL = text(
     """
 )
 DELETE_KNOWLEDGE_SNAPSHOTS_SQL = text("DELETE FROM knowledge_snapshots")
+TEST_ADMIN_API_KEY = "conftest-test-key-for-admin"
 
 
 def _connection_url_to_env(url: str) -> dict[str, str]:
@@ -245,6 +246,7 @@ def admin_app(
     app = FastAPI()
     app.include_router(admin_router)
     app.state.settings = SimpleNamespace(
+        admin_api_key=TEST_ADMIN_API_KEY,
         upload_max_file_size_mb=100,
         seaweedfs_sources_path="/sources",
         bm25_language="english",
@@ -388,7 +390,11 @@ async def chat_client(chat_app: FastAPI) -> httpx.AsyncClient:
 @pytest_asyncio.fixture
 async def api_client(admin_app: FastAPI) -> httpx.AsyncClient:
     transport = httpx.ASGITransport(app=admin_app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+        headers={"Authorization": f"Bearer {TEST_ADMIN_API_KEY}"},
+    ) as client:
         yield client
 
 
@@ -403,6 +409,7 @@ def profile_app(
     app = FastAPI()
     app.include_router(profile_chat_router)
     app.include_router(profile_admin_router)
+    app.state.settings = SimpleNamespace(admin_api_key=TEST_ADMIN_API_KEY)
     app.state.session_factory = session_factory
     app.state.storage_service = mock_storage_service
     return app
@@ -411,7 +418,11 @@ def profile_app(
 @pytest_asyncio.fixture
 async def profile_client(profile_app: FastAPI) -> httpx.AsyncClient:
     transport = httpx.ASGITransport(app=profile_app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+        headers={"Authorization": f"Bearer {TEST_ADMIN_API_KEY}"},
+    ) as client:
         yield client
 
 

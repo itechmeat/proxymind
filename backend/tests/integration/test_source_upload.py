@@ -234,7 +234,11 @@ async def test_upload_endpoint_rejects_oversized_file(admin_app) -> None:
 
     try:
         transport = httpx.ASGITransport(app=admin_app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+            headers={"Authorization": f"Bearer {admin_app.state.settings.admin_api_key}"},
+        ) as client:
             response = await client.post(
                 "/api/admin/sources",
                 data={"metadata": '{"title":"Big document"}'},
@@ -305,7 +309,11 @@ async def test_upload_endpoint_deletes_uploaded_object_when_persistence_fails(
 
     try:
         transport = httpx.ASGITransport(app=admin_app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+            headers={"Authorization": f"Bearer {admin_app.state.settings.admin_api_key}"},
+        ) as client:
             response = await client.post(
                 "/api/admin/sources",
                 data={"metadata": '{"title":"Persistence failure"}'},

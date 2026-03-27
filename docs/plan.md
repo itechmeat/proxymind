@@ -199,7 +199,7 @@ Phase outcome: full commercial layer — catalog, recommendations, citation inte
 
 Phase outcome: the product is secured, observable, and auditable.
 
-- [ ] **S7-01: API security — auth + rate limiting**
+- [x] **S7-01: API security — auth + rate limiting**
       Admin API: API key (`Authorization: Bearer`), key from `.env`. Chat API: Redis-based rate limiting, configurable limits. Chat API remains public.
   - **Outcome:** admin endpoints protected; chat protected from abuse
   - **Verification:** admin without key → 401; with key → 200; exceed rate limit → 429; after cooldown → ok
