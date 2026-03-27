@@ -3,6 +3,8 @@
     reverse_proxy @api localhost:8000 {
         # S7-01: overwrite X-Forwarded-For so chat rate limiting keys on the
         # direct client IP observed by Caddy, not a spoofable incoming header.
+        # If additional trusted proxies are added in front of Caddy, increase
+        # TRUSTED_PROXY_DEPTH to match the resulting trusted hop count.
         header_up X-Forwarded-For {remote_host}
     }
 

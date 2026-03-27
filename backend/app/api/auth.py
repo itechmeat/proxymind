@@ -5,17 +5,26 @@ import secrets
 import structlog
 from fastapi import HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import SecretStr
 
 logger = structlog.get_logger(__name__)
 
 _bearer_scheme = HTTPBearer(auto_error=False)
 
 
+def _extract_admin_key(value: str | SecretStr | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, SecretStr):
+        return value.get_secret_value()
+    return value
+
+
 async def verify_admin_key(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Security(_bearer_scheme),
 ) -> None:
-    configured_key: str | None = request.app.state.settings.admin_api_key
+    configured_key = _extract_admin_key(request.app.state.settings.admin_api_key)
 
     if not configured_key:
         logger.warning(

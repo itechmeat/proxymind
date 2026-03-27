@@ -54,7 +54,7 @@
 
 **Chosen:** Sliding window counter using two adjacent Redis windows with weighted interpolation.
 
-**Rationale:** Balances simplicity (two Redis commands per request, pipelined) and correctness (no burst-at-boundary problem). Weighted count = `previous_count * (1 - elapsed_fraction) + current_count`. Redis keys: `ratelimit:{ip}:{window_start}` with auto-expiry.
+**Rationale:** Balances simplicity (3 Redis commands per request, pipelined into a single round-trip) and correctness (no burst-at-boundary problem). Weighted count = `previous_count * (1 - elapsed_fraction) + current_count`. Redis keys: `ratelimit:{ip}:{window_start}` with auto-expiry.
 
 **Alternatives considered:**
 

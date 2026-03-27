@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus
 
-from pydantic import Field, computed_field, model_validator
+from pydantic import Field, SecretStr, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     log_level: str = "info"
-    admin_api_key: str | None = Field(default=None)
+    admin_api_key: SecretStr | None = Field(default=None)
     chat_rate_limit: int = Field(default=60, ge=1)
     chat_rate_window_seconds: int = Field(default=60, ge=1)
     trusted_proxy_depth: int = Field(default=1, ge=1)

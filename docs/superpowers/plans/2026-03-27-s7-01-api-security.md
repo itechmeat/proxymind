@@ -17,6 +17,7 @@
 ### Task 1: Add security settings to config
 
 **Files:**
+
 - Modify: `backend/app/core/config.py`
 - Test: `backend/tests/unit/test_config.py`
 
@@ -96,6 +97,7 @@ git commit -m "feat(security): add auth and rate limit settings to config"
 ### Task 2: Implement admin auth dependency
 
 **Files:**
+
 - Create: `backend/app/api/auth.py`
 - Test: `backend/tests/unit/test_auth.py`
 
@@ -285,6 +287,7 @@ git commit -m "feat(security): implement admin API key auth dependency"
 ### Task 3: Wire auth dependency to admin routers
 
 **Files:**
+
 - Modify: `backend/app/api/admin.py` (line 106 — router declaration, lines 162/513/634 — remove TODOs)
 - Modify: `backend/app/api/profile.py` (line 25 — admin_router declaration)
 - Test: `backend/tests/unit/test_admin_auth_wiring.py`
@@ -366,7 +369,7 @@ async def test_admin_profile_without_key_returns_401(authed_client):
     # Real profile admin routes live under /api/admin/agent/*
     response = await authed_client.put(
         "/api/admin/agent/profile",
-        json={"display_name": "Test"},
+        json={"name": "Test"},
     )
     assert response.status_code == 401
 ```
@@ -381,15 +384,19 @@ Expected: FAIL — admin routes return 200/other without auth check
 In `backend/app/api/admin.py`:
 
 1. Add import at the top:
+
 ```python
 from app.api.auth import verify_admin_key
 ```
 
 2. Change the router declaration (line 106) from:
+
 ```python
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 ```
+
 to:
+
 ```python
 router = APIRouter(
     prefix="/api/admin",
@@ -405,15 +412,19 @@ router = APIRouter(
 In `backend/app/api/profile.py`:
 
 1. Add import at the top:
+
 ```python
 from app.api.auth import verify_admin_key
 ```
 
 2. Change the admin_router declaration (line 25) from:
+
 ```python
 admin_router = APIRouter(prefix="/api/admin", tags=["admin"])
 ```
+
 to:
+
 ```python
 admin_router = APIRouter(
     prefix="/api/admin",
@@ -429,16 +440,19 @@ The `admin_app` fixture in `backend/tests/conftest.py` mounts the real `admin_ro
 In `backend/tests/conftest.py`:
 
 1. Add a module-level constant at the top:
+
 ```python
 TEST_ADMIN_API_KEY = "conftest-test-key-for-admin"
 ```
 
 2. In the `admin_app` fixture, add to `app.state.settings` SimpleNamespace:
+
 ```python
 admin_api_key=TEST_ADMIN_API_KEY,
 ```
 
 3. Update the `api_client` fixture to always send the auth header:
+
 ```python
 @pytest_asyncio.fixture
 async def api_client(admin_app: FastAPI) -> httpx.AsyncClient:
@@ -452,11 +466,13 @@ async def api_client(admin_app: FastAPI) -> httpx.AsyncClient:
 ```
 
 4. Update `profile_app` fixture similarly:
+
 ```python
 app.state.settings = SimpleNamespace(admin_api_key=TEST_ADMIN_API_KEY)
 ```
 
 5. Update `profile_client` fixture to include the auth header:
+
 ```python
 @pytest_asyncio.fixture
 async def profile_client(profile_app: FastAPI) -> httpx.AsyncClient:
@@ -486,6 +502,7 @@ git commit -m "feat(security): wire admin auth dependency to admin and profile r
 ### Task 4: Implement rate limit middleware
 
 **Files:**
+
 - Create: `backend/app/middleware/__init__.py`
 - Create: `backend/app/middleware/rate_limit.py`
 - Test: `backend/tests/unit/test_rate_limit.py`
@@ -661,6 +678,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'app.middleware'`
 Create `backend/app/middleware/__init__.py`:
 
 ```python
+
 ```
 
 (Empty `__init__.py` — just makes it a package.)
@@ -881,6 +899,7 @@ git commit -m "feat(security): implement Redis-based rate limit middleware for C
 ### Task 5: Mount middleware in main.py
 
 **Files:**
+
 - Modify: `backend/app/main.py`
 - Test: `backend/tests/unit/test_app_main.py`
 
@@ -934,6 +953,7 @@ git commit -m "feat(security): mount rate limit middleware in main app"
 ### Task 6: Update .env.example and documentation
 
 **Files:**
+
 - Modify: `backend/.env.example` (or `.env` template)
 
 - [ ] **Step 1: Add security variables to .env.example**
@@ -965,6 +985,7 @@ git commit -m "docs(security): add auth and rate limit env variables to .env.exa
 ### Task 7: Full integration test
 
 **Files:**
+
 - Create: `backend/tests/integration/test_api_security.py`
 
 - [ ] **Step 1: Write integration tests**

@@ -296,7 +296,8 @@ def test_security_settings_custom_values() -> None:
         trusted_proxy_depth=2,
     )
 
-    assert settings.admin_api_key == "test-secret-key-123"
+    assert settings.admin_api_key is not None
+    assert settings.admin_api_key.get_secret_value() == "test-secret-key-123"
     assert settings.chat_rate_limit == 120
     assert settings.chat_rate_window_seconds == 30
     assert settings.trusted_proxy_depth == 2

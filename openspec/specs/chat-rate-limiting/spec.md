@@ -59,7 +59,7 @@ The default deployment model is a single trusted proxy (Caddy). The rate limiter
 
 ### Requirement: Configurable rate limits
 
-Rate limiting parameters SHALL be configurable via environment variables.
+Rate-limiting parameters SHALL be configurable via environment variables.
 
 #### Scenario: Default configuration
 

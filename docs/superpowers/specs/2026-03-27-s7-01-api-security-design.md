@@ -112,7 +112,7 @@ Two adjacent fixed windows with weighted interpolation:
 1. Current window key: `ratelimit:{ip}:{current_window_start}`
 2. Previous window key: `ratelimit:{ip}:{previous_window_start}`
 3. Weighted count = `previous_count * (1 - elapsed_fraction) + current_count`
-4. If weighted count ≥ limit → reject with 429.
+4. If weighted count > limit → reject with 429.
 
 Redis operations per request: `GET` (previous window) + `INCR` + `EXPIRE` (current window) — pipelined into a single round-trip.
 
