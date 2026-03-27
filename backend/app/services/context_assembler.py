@@ -8,6 +8,7 @@ import structlog
 
 from app.persona.loader import PersonaContext
 from app.persona.safety import SYSTEM_SAFETY_POLICY
+from app.services.catalog import CatalogItemInfo
 from app.services.conversation_memory import MemoryBlock
 from app.services.promotions import Promotion, PromotionsService
 from app.services.prompt import format_chunk_header
@@ -30,6 +31,7 @@ class AssembledPrompt:
     messages: list[dict[str, str]]
     token_estimate: int
     included_promotions: list[Promotion]
+    catalog_items_used: list[CatalogItemInfo]
     retrieval_chunks_used: int
     retrieval_chunks_total: int
     layer_token_counts: dict[str, int]
@@ -45,11 +47,13 @@ class ContextAssembler:
         min_retrieved_chunks: int,
         promotions_service: PromotionsService | None = None,
         active_promotions: list[Promotion] | None = None,
+        catalog_items: list[CatalogItemInfo] | None = None,
         max_promotions_per_response: int = 1,
     ) -> None:
         self.persona_context = persona_context
         self.promotions_service = promotions_service
         self._active_promotions = list(active_promotions or [])
+        self._catalog_items = list(catalog_items or [])
         self._retrieval_context_budget = retrieval_context_budget
         self._max_citations = max_citations
         self._min_retrieved_chunks = min_retrieved_chunks
@@ -80,6 +84,13 @@ class ContextAssembler:
                     self._promotions_text(included_promotions),
                 )
             )
+        if self._catalog_items:
+            layers.append(
+                self._build_layer(
+                    "available_products",
+                    self._build_available_products_layer(self._catalog_items),
+                )
+            )
         if memory_block is not None and memory_block.summary_text:
             layers.append(
                 self._build_layer(
@@ -92,6 +103,13 @@ class ContextAssembler:
                 self._build_layer(
                     "citation_instructions",
                     self._citation_instructions(),
+                )
+            )
+        if self._catalog_items:
+            layers.append(
+                self._build_layer(
+                    "product_instructions",
+                    self._build_product_instructions_layer(),
                 )
             )
         layers.append(self._build_layer("content_guidelines", self._content_guidelines()))
@@ -119,6 +137,7 @@ class ContextAssembler:
             messages=messages,
             token_estimate=sum(layer_token_counts.values()),
             included_promotions=included_promotions,
+            catalog_items_used=list(self._catalog_items),
             retrieval_chunks_used=len(selected_chunks),
             retrieval_chunks_total=len(chunks),
             layer_token_counts=layer_token_counts,
@@ -202,7 +221,32 @@ class ContextAssembler:
                 "- Cite only chunks you actually use.",
                 "- Place citations inline, immediately after the relevant statement.",
                 "- Never generate URLs - only use [source:N] markers.",
-                f"- Maximum {self._max_citations} citations per response.",
+            ]
+        )
+
+    def _build_available_products_layer(self, catalog_items: list[CatalogItemInfo]) -> str:
+        lines = [
+            "You may recommend only products from this list when it is naturally relevant.",
+            "When you mention a product, append its marker exactly as [product:N].",
+            "Do not generate your own product markers or URLs.",
+            "",
+        ]
+        for index, item in enumerate(catalog_items, start=1):
+            lines.append(
+                f'[product:{index}] "{item.name}" ({item.item_type.value}) - SKU: {item.sku}'
+            )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _build_product_instructions_layer() -> str:
+        return "\n".join(
+            [
+                "If you recommend a product, place [product:N] immediately after mentioning it.",
+                "Maximum one product recommendation per response.",
+                "Recommend only products listed in available_products.",
+                "Do not generate URLs or invent product metadata.",
+                "Recommend products only when they are naturally appropriate to the user's request.",
+                "Product mentions must feel like genuine suggestions, not advertisements.",
             ]
         )
 

@@ -54,7 +54,7 @@ class Source(
     mime_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
     language: Mapped[str | None] = mapped_column(String(32), nullable=True)
     catalog_item_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("catalog_items.id"),
+        ForeignKey("catalog_items.id", ondelete="SET NULL"),
         nullable=True,
     )
     status: Mapped[SourceStatus] = mapped_column(

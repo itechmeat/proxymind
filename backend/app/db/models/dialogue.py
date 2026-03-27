@@ -91,6 +91,7 @@ class Message(PrimaryKeyMixin, TimestampMixin, Base):
         nullable=True,
     )
     citations: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
+    products: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
     content_type_spans: Mapped[list[dict[str, Any]] | None] = mapped_column(
         JSONB,
         nullable=True,

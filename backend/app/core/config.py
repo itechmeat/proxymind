@@ -108,6 +108,7 @@ class Settings(BaseSettings):
             "document_ai_processor_id",
             "llm_api_key",
             "llm_api_base",
+            "min_dense_similarity",
             "rewrite_llm_model",
             "rewrite_llm_api_key",
             "rewrite_llm_api_base",

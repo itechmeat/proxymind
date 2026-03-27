@@ -18,8 +18,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
-from app.db.models import Message, Source
+from app.db.models import CatalogItem, Message, Source
 from app.db.models.enums import (
+    CatalogItemType,
     MessageRole,
     MessageStatus,
     SnapshotStatus,
@@ -75,6 +76,27 @@ async def _create_source(
         await session.commit()
         await session.refresh(source)
         return source
+
+
+async def _create_catalog_item(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    sku: str,
+    name: str,
+) -> CatalogItem:
+    async with session_factory() as session:
+        item = CatalogItem(
+            id=uuid.uuid7(),
+            agent_id=DEFAULT_AGENT_ID,
+            sku=sku,
+            name=name,
+            item_type=CatalogItemType.BOOK,
+            url="https://store.example.com/book",
+        )
+        session.add(item)
+        await session.commit()
+        await session.refresh(item)
+        return item
 
 
 def _retrieved_chunk(
@@ -305,6 +327,73 @@ async def test_sse_stream_includes_citations_event(
                     "timecode": None,
                 },
                 "text_citation": '"Clean Architecture", Chapter 5, p. 42',
+                "purchase_url": None,
+                "purchase_title": None,
+                "catalog_item_type": None,
+            }
+        ]
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_sse_stream_includes_products_event(
+    chat_client: httpx.AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    mock_retrieval_service,
+    mock_llm_service,
+) -> None:
+    await _create_snapshot(session_factory, status=SnapshotStatus.ACTIVE)
+    catalog_item = await _create_catalog_item(
+        session_factory,
+        sku="AI-PRACTICE-2026",
+        name="AI in Practice",
+    )
+    source_id = uuid.uuid4()
+    await _create_source(
+        session_factory,
+        source_id=source_id,
+        title="AI in Practice Source",
+        public_url="https://example.com/source",
+    )
+    mock_retrieval_service.search.return_value = [_retrieved_chunk(source_id=source_id)]
+
+    async def stream_with_product(*args, **kwargs):
+        yield LLMToken(content="Based on [source:1], try this [product:1].")
+        yield LLMStreamEnd(
+            model_name="openai/gpt-4o",
+            token_count_prompt=10,
+            token_count_completion=1,
+        )
+
+    mock_llm_service.stream = AsyncMock(side_effect=stream_with_product)
+
+    session_id = (await chat_client.post("/api/chat/sessions", json={})).json()["id"]
+
+    async with aconnect_sse(
+        chat_client,
+        "POST",
+        "/api/chat/messages",
+        json={"session_id": session_id, "text": "Question?"},
+    ) as event_source:
+        events = [sse async for sse in event_source.aiter_sse()]
+
+    event_names = [event.event for event in events]
+    assert event_names.index("citations") < event_names.index("products")
+    assert event_names.index("products") < event_names.index("done")
+
+    products_payload = json.loads(next(event.data for event in events if event.event == "products"))
+    assert products_payload == {
+        "products": [
+            {
+                "index": 1,
+                "catalog_item_id": str(catalog_item.id),
+                "name": "AI in Practice",
+                "sku": "AI-PRACTICE-2026",
+                "item_type": "book",
+                "url": "https://store.example.com/book",
+                "image_url": None,
+                "text_recommendation": "AI in Practice (book)",
             }
         ]
     }
@@ -611,6 +700,9 @@ async def test_session_history_includes_citations(
                 "timecode": None,
             },
             "text_citation": '"Clean Architecture", Chapter 5, p. 42',
+            "purchase_url": None,
+            "purchase_title": None,
+            "catalog_item_type": None,
         }
     ]
 

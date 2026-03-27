@@ -47,6 +47,7 @@ def test_parse_extracts_all_sections() -> None:
     assert promotions[0].title == "Book Launch"
     assert promotions[0].priority == "high"
     assert promotions[0].body == "Check out my new book about AI."
+    assert promotions[0].catalog_item_sku is None
 
 
 def test_parse_extracts_dates() -> None:
@@ -163,3 +164,31 @@ def test_file_loading_from_path(tmp_path) -> None:
 def test_file_not_found_returns_empty(tmp_path) -> None:
     service = PromotionsService.from_file(tmp_path / "missing.md")
     assert service.get_active() == []
+
+
+def test_parse_catalog_item_metadata() -> None:
+    service = PromotionsService(
+        promotions_text="## Promo\n\n- **Catalog item:** BOOK-001\n\nBody."
+    )
+
+    promotions = service.parse()
+
+    assert promotions[0].catalog_item_sku == "BOOK-001"
+
+
+def test_parse_missing_catalog_item_returns_none() -> None:
+    service = PromotionsService(promotions_text="## Promo\n\nBody.")
+
+    promotions = service.parse()
+
+    assert promotions[0].catalog_item_sku is None
+
+
+def test_parse_catalog_item_strips_whitespace() -> None:
+    service = PromotionsService(
+        promotions_text="## Promo\n\n- **Catalog item:**   BOOK-002  \n\nBody."
+    )
+
+    promotions = service.parse()
+
+    assert promotions[0].catalog_item_sku == "BOOK-002"

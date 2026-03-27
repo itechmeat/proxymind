@@ -181,7 +181,7 @@ Phase outcome: full-featured web interface for visitors and the owner.
 
 Phase outcome: full commercial layer — catalog, recommendations, citation integration.
 
-- [ ] **S6-01: Commerce backend — catalog + recommendations**
+- [x] **S6-01: Commerce backend — catalog + recommendations**
       Admin API: CRUD catalog_items. Source ↔ catalog_item linking. Citation enrichment with purchase links. PROMOTIONS.md + catalog integration for native delivery. Citation takes priority over commercial link. No more than one recommendation per response.
   - **Outcome:** products linked to sources, appear in citations; twin recommends products naturally in context
   - **Verification:** citation of linked product → store link; conversation about topic → relevant recommendation; not every response has recommendation

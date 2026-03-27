@@ -16,6 +16,10 @@ class SourceInfo:
     title: str
     public_url: str | None
     source_type: str
+    catalog_item_url: str | None = None
+    catalog_item_name: str | None = None
+    catalog_item_type: str | None = None
+    catalog_item_active: bool = False
 
 
 @dataclass(slots=True, frozen=True)
@@ -27,6 +31,9 @@ class Citation:
     url: str | None
     anchor: dict[str, int | str | None]
     text_citation: str
+    purchase_url: str | None = None
+    purchase_title: str | None = None
+    catalog_item_type: str | None = None
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> Citation:
@@ -38,6 +45,9 @@ class Citation:
             url=value.get("url"),
             anchor=dict(value.get("anchor") or {}),
             text_citation=value["text_citation"],
+            purchase_url=value.get("purchase_url"),
+            purchase_title=value.get("purchase_title"),
+            catalog_item_type=value.get("catalog_item_type"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -49,6 +59,9 @@ class Citation:
             "url": self.url,
             "anchor": self.anchor,
             "text_citation": self.text_citation,
+            "purchase_url": self.purchase_url,
+            "purchase_title": self.purchase_title,
+            "catalog_item_type": self.catalog_item_type,
         }
 
 
@@ -115,6 +128,15 @@ class CitationService:
                     url=source_info.public_url,
                     anchor=anchor,
                     text_citation=_build_text_citation(source_info.title, anchor),
+                    purchase_url=(
+                        source_info.catalog_item_url if source_info.catalog_item_active else None
+                    ),
+                    purchase_title=(
+                        source_info.catalog_item_name if source_info.catalog_item_active else None
+                    ),
+                    catalog_item_type=(
+                        source_info.catalog_item_type if source_info.catalog_item_active else None
+                    ),
                 )
             )
             if len(citations) >= max_citations:

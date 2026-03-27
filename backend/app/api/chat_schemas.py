@@ -64,6 +64,9 @@ class CitationResponse(BaseModel):
     url: str | None = None
     anchor: AnchorResponse
     text_citation: str
+    purchase_url: str | None = None
+    purchase_title: str | None = None
+    catalog_item_type: str | None = None
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> CitationResponse:
@@ -75,6 +78,33 @@ class CitationResponse(BaseModel):
             url=value.get("url"),
             anchor=AnchorResponse.from_dict(value.get("anchor")),
             text_citation=value["text_citation"],
+            purchase_url=value.get("purchase_url"),
+            purchase_title=value.get("purchase_title"),
+            catalog_item_type=value.get("catalog_item_type"),
+        )
+
+
+class ProductRecommendationResponse(BaseModel):
+    index: int
+    catalog_item_id: uuid.UUID
+    name: str
+    sku: str
+    item_type: str
+    url: str | None = None
+    image_url: str | None = None
+    text_recommendation: str
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> ProductRecommendationResponse:
+        return cls(
+            index=value["index"],
+            catalog_item_id=uuid.UUID(str(value["catalog_item_id"])),
+            name=value["name"],
+            sku=value["sku"],
+            item_type=value["item_type"],
+            url=value.get("url"),
+            image_url=value.get("image_url"),
+            text_recommendation=value["text_recommendation"],
         )
 
 
@@ -103,6 +133,34 @@ def _parse_citations(value: list[dict[str, Any]] | None) -> list[CitationRespons
     return citations
 
 
+_REQUIRED_PRODUCT_FIELDS = {
+    "index",
+    "catalog_item_id",
+    "name",
+    "sku",
+    "item_type",
+    "text_recommendation",
+}
+
+
+def _parse_products(
+    value: list[dict[str, Any]] | None,
+) -> list[ProductRecommendationResponse] | None:
+    if value is None:
+        return None
+
+    products: list[ProductRecommendationResponse] = []
+    for item in value:
+        if not isinstance(item, dict) or not _REQUIRED_PRODUCT_FIELDS.issubset(item):
+            continue
+        try:
+            products.append(ProductRecommendationResponse.from_dict(item))
+        except (TypeError, ValueError):
+            continue
+
+    return products
+
+
 class MessageResponse(BaseModel):
     message_id: uuid.UUID
     session_id: uuid.UUID
@@ -110,6 +168,7 @@ class MessageResponse(BaseModel):
     content: str
     status: MessageStatus
     citations: list[CitationResponse] | None = None
+    products: list[ProductRecommendationResponse] | None = None
     model_name: str | None
     retrieved_chunks_count: int
     token_count_prompt: int | None
@@ -130,6 +189,7 @@ class MessageResponse(BaseModel):
             content=message.content,
             status=message.status,
             citations=_parse_citations(message.citations),
+            products=_parse_products(message.products),
             model_name=message.model_name,
             retrieved_chunks_count=retrieved_chunks_count,
             token_count_prompt=message.token_count_prompt,
@@ -144,6 +204,7 @@ class MessageInHistory(BaseModel):
     content: str
     status: MessageStatus
     citations: list[CitationResponse] | None = None
+    products: list[ProductRecommendationResponse] | None = None
     model_name: str | None
     created_at: datetime
 
@@ -155,6 +216,7 @@ class MessageInHistory(BaseModel):
             content=message.content,
             status=message.status,
             citations=_parse_citations(message.citations),
+            products=_parse_products(message.products),
             model_name=message.model_name,
             created_at=message.created_at,
         )

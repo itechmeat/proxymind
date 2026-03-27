@@ -4,6 +4,7 @@ import inspect
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
 import structlog
@@ -12,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
-from app.db.models import Message, Session, Source
+from app.db.models import CatalogItem, Message, Session, Source
 from app.db.models.enums import MessageRole, MessageStatus, SessionChannel, SessionStatus
 from app.persona.loader import PersonaContext
 from app.services.citation import Citation, CitationService, SourceInfo
@@ -20,6 +21,7 @@ from app.services.content_type import compute_content_type_spans
 from app.services.context_assembler import ContextAssembler
 from app.services.conversation_memory import ConversationMemoryService, MemoryBlock
 from app.services.llm_types import LLMToken
+from app.services.product_recommendation import ProductRecommendation, ProductRecommendationService
 from app.services.prompt import NO_CONTEXT_REFUSAL
 from app.services.qdrant import RetrievedChunk
 
@@ -92,8 +94,18 @@ class ChatStreamCitations:
     citations: list[Citation]
 
 
+@dataclass(slots=True, frozen=True)
+class ChatStreamProducts:
+    products: list[ProductRecommendation]
+
+
 ChatStreamEvent = (
-    ChatStreamMeta | ChatStreamToken | ChatStreamDone | ChatStreamError | ChatStreamCitations
+    ChatStreamMeta
+    | ChatStreamToken
+    | ChatStreamDone
+    | ChatStreamError
+    | ChatStreamCitations
+    | ChatStreamProducts
 )
 
 
@@ -248,21 +260,27 @@ class ChatService:
                 source_map,
                 self._max_citations_per_response,
             )
+            products = ProductRecommendationService.extract(
+                llm_response.content,
+                assembled.catalog_items_used,
+            )
+            cleaned_content = ProductRecommendationService.strip_markers(llm_response.content)
             content_type_spans = [
                 {"start": span.start, "end": span.end, "type": span.type}
                 for span in compute_content_type_spans(
-                    llm_response.content,
+                    cleaned_content,
                     promotions=assembled.included_promotions,
                 )
             ]
             assistant_message = await self._persist_message(
                 chat_session,
                 role=MessageRole.ASSISTANT,
-                content=llm_response.content,
+                content=cleaned_content,
                 status=MessageStatus.COMPLETE,
                 snapshot_id=snapshot_id,
                 source_ids=source_ids,
                 citations=[citation.to_dict() for citation in citations],
+                products=[product.to_dict() for product in products] or None,
                 model_name=llm_response.model_name,
                 token_count_prompt=llm_response.token_count_prompt,
                 token_count_completion=llm_response.token_count_completion,
@@ -454,21 +472,30 @@ class ChatService:
                     continue
 
                 assistant_message.content = "".join(content_buffer)
+                products = ProductRecommendationService.extract(
+                    assistant_message.content,
+                    assembled.catalog_items_used,
+                )
                 citations = CitationService.extract(
                     assistant_message.content,
                     selected_chunks,
                     source_map,
                     self._max_citations_per_response,
                 )
+                cleaned_content = ProductRecommendationService.strip_markers(
+                    assistant_message.content
+                )
+                assistant_message.content = cleaned_content
                 assistant_message.status = MessageStatus.COMPLETE
                 assistant_message.model_name = event.model_name
                 assistant_message.token_count_prompt = event.token_count_prompt
                 assistant_message.token_count_completion = event.token_count_completion
                 assistant_message.citations = [citation.to_dict() for citation in citations]
+                assistant_message.products = [product.to_dict() for product in products] or None
                 assistant_message.content_type_spans = [
                     {"start": span.start, "end": span.end, "type": span.type}
                     for span in compute_content_type_spans(
-                        assistant_message.content,
+                        cleaned_content,
                         promotions=assembled.included_promotions,
                     )
                 ]
@@ -486,6 +513,8 @@ class ChatService:
                 )
                 await self._maybe_enqueue_summary(memory_block, chat_session.id)
                 yield ChatStreamCitations(citations=citations)
+                if products:
+                    yield ChatStreamProducts(products=products)
                 yield ChatStreamDone(
                     token_count_prompt=event.token_count_prompt,
                     token_count_completion=event.token_count_completion,
@@ -590,6 +619,7 @@ class ChatService:
         idempotency_key: str | None = None,
         parent_message_id: uuid.UUID | None = None,
         citations: list[dict[str, object]] | None = None,
+        products: list[dict[str, object]] | None = None,
         content_type_spans: list[dict[str, object]] | None = None,
         config_commit_hash: str | None = None,
         config_content_hash: str | None = None,
@@ -605,6 +635,7 @@ class ChatService:
             snapshot_id=snapshot_id,
             source_ids=source_ids,
             citations=citations,
+            products=products,
             content_type_spans=content_type_spans,
             model_name=model_name,
             token_count_prompt=token_count_prompt,
@@ -767,6 +798,21 @@ class ChatService:
                 if required_citation_fields.issubset(citation)
             ]
             yield ChatStreamCitations(citations=replay_citations)
+            required_product_fields = {
+                "index",
+                "catalog_item_id",
+                "name",
+                "sku",
+                "item_type",
+                "text_recommendation",
+            }
+            replay_products = [
+                ProductRecommendation.from_dict(product)
+                for product in (assistant_message.products or [])
+                if required_product_fields.issubset(product)
+            ]
+            if replay_products:
+                yield ChatStreamProducts(products=replay_products)
             yield ChatStreamDone(
                 token_count_prompt=assistant_message.token_count_prompt,
                 token_count_completion=assistant_message.token_count_completion,
@@ -812,7 +858,17 @@ class ChatService:
                 Source.title,
                 Source.public_url,
                 Source.source_type,
-            ).where(
+                CatalogItem.id.label("catalog_item_id"),
+                CatalogItem.url.label("catalog_item_url"),
+                CatalogItem.name.label("catalog_item_name"),
+                CatalogItem.item_type.label("catalog_item_type"),
+                CatalogItem.is_active.label("catalog_item_is_active"),
+                CatalogItem.valid_from.label("catalog_item_valid_from"),
+                CatalogItem.valid_until.label("catalog_item_valid_until"),
+                CatalogItem.deleted_at.label("catalog_item_deleted_at"),
+            )
+            .outerjoin(CatalogItem, Source.catalog_item_id == CatalogItem.id)
+            .where(
                 Source.id.in_(source_ids),
                 Source.deleted_at.is_(None),
             )
@@ -823,6 +879,37 @@ class ChatService:
                 title=row.title,
                 public_url=row.public_url,
                 source_type=row.source_type.value,
+                catalog_item_url=row.catalog_item_url,
+                catalog_item_name=row.catalog_item_name,
+                catalog_item_type=(
+                    row.catalog_item_type.value if row.catalog_item_type is not None else None
+                ),
+                catalog_item_active=self._is_catalog_item_active(
+                    is_active=row.catalog_item_is_active,
+                    valid_from=row.catalog_item_valid_from,
+                    valid_until=row.catalog_item_valid_until,
+                    deleted_at=row.catalog_item_deleted_at,
+                ),
             )
             for row in rows
         }
+
+    @staticmethod
+    def _is_catalog_item_active(
+        *,
+        is_active: bool | None,
+        valid_from: datetime | None,
+        valid_until: datetime | None,
+        deleted_at: datetime | None,
+    ) -> bool:
+        if not is_active or deleted_at is not None:
+            return False
+
+        today = datetime.now(UTC).date()
+        valid_from_date = valid_from.date() if valid_from is not None else None
+        valid_until_date = valid_until.date() if valid_until is not None else None
+        if valid_from_date is not None and valid_from_date > today:
+            return False
+        if valid_until_date is not None and valid_until_date < today:
+            return False
+        return True

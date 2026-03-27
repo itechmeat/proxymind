@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 
 from app.persona.loader import PersonaContext
+from app.services.catalog import CatalogItemInfo
 from app.services.citation import SourceInfo
 from app.services.context_assembler import ContextAssembler
 from app.services.conversation_memory import MemoryBlock
@@ -61,6 +62,19 @@ def _promo(
     )
 
 
+def _catalog_item(*, sku: str, name: str) -> CatalogItemInfo:
+    from app.db.models.enums import CatalogItemType
+
+    return CatalogItemInfo(
+        id=uuid.uuid4(),
+        sku=sku,
+        name=name,
+        item_type=CatalogItemType.BOOK,
+        url="https://example.com/item",
+        image_url="https://example.com/item.png",
+    )
+
+
 def _assembler(
     *,
     persona: PersonaContext | None = None,
@@ -68,10 +82,12 @@ def _assembler(
     retrieval_context_budget: int = 4096,
     max_citations: int = 5,
     min_retrieved_chunks: int = 1,
+    catalog_items: list[CatalogItemInfo] | None = None,
 ) -> ContextAssembler:
     return ContextAssembler(
         persona_context=persona or _persona(),
         active_promotions=promotions or [],
+        catalog_items=catalog_items,
         retrieval_context_budget=retrieval_context_budget,
         max_citations=max_citations,
         min_retrieved_chunks=min_retrieved_chunks,
@@ -96,7 +112,10 @@ def _memory_block(
 def test_system_message_has_xml_tags_in_order() -> None:
     chunk = _chunk("Some knowledge")
     source_map = {chunk.source_id: _source_info(chunk.source_id)}
-    result = _assembler(promotions=[_promo()]).assemble(
+    result = _assembler(
+        promotions=[_promo()],
+        catalog_items=[_catalog_item(sku="AI-PRACTICE-2026", name="AI in Practice")],
+    ).assemble(
         chunks=[chunk],
         query="What?",
         source_map=source_map,
@@ -106,14 +125,19 @@ def test_system_message_has_xml_tags_in_order() -> None:
     assert system.index("<identity>") < system.index("<soul>")
     assert system.index("<soul>") < system.index("<behavior>")
     assert system.index("<behavior>") < system.index("<promotions>")
-    assert system.index("<promotions>") < system.index("<citation_instructions>")
-    assert system.index("<citation_instructions>") < system.index("<content_guidelines>")
+    assert system.index("<promotions>") < system.index("<available_products>")
+    assert system.index("<available_products>") < system.index("<citation_instructions>")
+    assert system.index("<citation_instructions>") < system.index("<product_instructions>")
+    assert system.index("<product_instructions>") < system.index("<content_guidelines>")
 
 
 def test_each_tag_has_closing_tag() -> None:
     chunk = _chunk("Knowledge")
     source_map = {chunk.source_id: _source_info(chunk.source_id)}
-    result = _assembler(promotions=[_promo()]).assemble(
+    result = _assembler(
+        promotions=[_promo()],
+        catalog_items=[_catalog_item(sku="AI-PRACTICE-2026", name="AI in Practice")],
+    ).assemble(
         chunks=[chunk],
         query="Q?",
         source_map=source_map,
@@ -125,7 +149,9 @@ def test_each_tag_has_closing_tag() -> None:
         "soul",
         "behavior",
         "promotions",
+        "available_products",
         "citation_instructions",
+        "product_instructions",
         "content_guidelines",
     ]:
         assert f"<{tag}>" in system
@@ -168,6 +194,7 @@ def test_citation_instructions_present_when_chunks_exist() -> None:
     result = _assembler().assemble(chunks=[chunk], query="Q?", source_map=source_map)
     assert "<citation_instructions>" in result.messages[0]["content"]
     assert "[source:N]" in result.messages[0]["content"]
+    assert "Maximum 5 citations per response." not in result.messages[0]["content"]
 
 
 def test_all_chunks_fit_in_budget() -> None:
@@ -249,12 +276,17 @@ def test_token_estimate_is_positive() -> None:
 
 
 def test_layer_token_counts_populated() -> None:
-    result = _assembler(promotions=[_promo()]).assemble(
+    result = _assembler(
+        promotions=[_promo()],
+        catalog_items=[_catalog_item(sku="AI-PRACTICE-2026", name="AI in Practice")],
+    ).assemble(
         chunks=[_chunk("Knowledge")],
         query="Q?",
         source_map={},
     )
     assert result.layer_token_counts["system_safety"] > 0
+    assert result.layer_token_counts["available_products"] > 0
+    assert result.layer_token_counts["product_instructions"] > 0
     assert result.layer_token_counts["content_guidelines"] > 0
     assert result.layer_token_counts["user_query"] > 0
 
@@ -401,3 +433,31 @@ def test_summary_only_memory_keeps_two_message_output() -> None:
     assert len(result.messages) == 2
     assert result.layer_token_counts["conversation_memory"] == 12
     assert "<conversation_summary>" in result.messages[0]["content"]
+
+
+def test_available_products_layer_present_with_catalog_items() -> None:
+    result = _assembler(
+        catalog_items=[
+            _catalog_item(sku="AI-PRACTICE-2026", name="AI in Practice"),
+            _catalog_item(sku="TECHSUMMIT-2026", name="Tech Summit 2026 Ticket"),
+        ]
+    ).assemble(chunks=[], query="Q?", source_map={})
+
+    system = result.messages[0]["content"]
+    assert "<available_products>" in system
+    assert '[product:1] "AI in Practice" (book) - SKU: AI-PRACTICE-2026' in system
+    assert '[product:2] "Tech Summit 2026 Ticket" (book) - SKU: TECHSUMMIT-2026' in system
+    assert "<product_instructions>" in system
+    assert [item.sku for item in result.catalog_items_used] == [
+        "AI-PRACTICE-2026",
+        "TECHSUMMIT-2026",
+    ]
+
+
+def test_available_products_layer_omitted_without_catalog_items() -> None:
+    result = _assembler(catalog_items=[]).assemble(chunks=[], query="Q?", source_map={})
+
+    system = result.messages[0]["content"]
+    assert "<available_products>" not in system
+    assert "<product_instructions>" not in system
+    assert result.catalog_items_used == []
