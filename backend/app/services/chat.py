@@ -604,7 +604,7 @@ class ChatService:
         message.content = accumulated_content
         message.status = MessageStatus.PARTIAL
         await self._session.commit()
-        latency_ms = 0
+        latency_ms = self._message_latency_ms(message)
         self._record_response_metrics(status=MessageStatus.PARTIAL, latency_ms=latency_ms)
         await self._log_audit(
             message=message,
@@ -624,7 +624,7 @@ class ChatService:
         message.content = accumulated_content
         message.status = MessageStatus.FAILED
         await self._session.commit()
-        latency_ms = 0
+        latency_ms = self._message_latency_ms(message)
         self._record_response_metrics(status=MessageStatus.FAILED, latency_ms=latency_ms)
         await self._log_audit(
             message=message,
@@ -838,6 +838,15 @@ class ChatService:
         CHAT_RESPONSES_TOTAL.labels(status=status.value).inc()
         if latency_ms is not None:
             CHAT_RESPONSE_LATENCY_SECONDS.observe(latency_ms / 1000)
+
+    @staticmethod
+    def _message_latency_ms(message: Message) -> int | None:
+        created_at = message.created_at
+        if created_at is None:
+            return None
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        return max(0, int((datetime.now(UTC) - created_at).total_seconds() * 1000))
 
     @staticmethod
     def _latency_ms(started_at: float) -> int:

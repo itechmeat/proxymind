@@ -131,6 +131,21 @@ async def test_rate_limit_exceeded_is_logged(rl_client: httpx.AsyncClient) -> No
 
 
 @pytest.mark.asyncio
+async def test_rate_limit_still_rejects_when_metrics_counter_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(rate_limit_module, "RATE_LIMIT_HITS_TOTAL", None)
+
+    transport = httpx.ASGITransport(app=_make_app(rate_limit=1))
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        first_response = await client.post("/api/chat/messages")
+        second_response = await client.post("/api/chat/messages")
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 429
+
+
+@pytest.mark.asyncio
 async def test_admin_routes_not_rate_limited(rl_client: httpx.AsyncClient) -> None:
     for _ in range(10):
         response = await rl_client.get("/api/admin/sources")

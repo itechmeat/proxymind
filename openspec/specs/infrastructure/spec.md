@@ -4,7 +4,7 @@
 
 **[Modified by S7-02]** Docker Compose SHALL define nine runtime services: `postgres`, `qdrant`, `seaweedfs`, `redis`, `api`, `worker`, `prometheus`, `grafana`, and `tempo` (excluding `backend-test` which is a test-only container). Each service SHALL use image versions at or above the minimums specified in `docs/spec.md`. The `api` service SHALL build from `./backend` and expose port 8000. The `worker` service SHALL build from `./backend` with the command `python -m app.workers.run`. The `worker` service SHALL use the same Docker image as `api` but with a different startup command. The `worker` service SHALL set `SKIP_MIGRATIONS=1` so the worker does not race the API container during Alembic startup. The `worker` service SHALL NOT expose any ports and SHALL NOT require a healthcheck.
 
-The `prometheus` service SHALL define a healthcheck using `wget --spider -q http://127.0.0.1:9090/-/healthy`. The `grafana` service SHALL define a healthcheck using `wget --spider -q http://127.0.0.1:3000/api/health`. The `tempo` service SHALL define a healthcheck using `wget --spider -q http://127.0.0.1:3200/ready`.
+The `prometheus` service SHALL define a healthcheck using `wget --spider -q http://127.0.0.1:9090/-/healthy`. The `grafana` service SHALL define a healthcheck using `wget --spider -q http://127.0.0.1:3000/api/health`. The `tempo` service SHALL define a healthcheck using `test: ["CMD", "/tempo", "-health"]` so the distroless Tempo image is checked via its native readiness command.
 
 The `seaweedfs` service SHALL use the `chrislusf/seaweedfs:latest` image and run `weed server -filer -dir=/data -master.port=9333 -filer.port=8888 -volume.port=9340` as the command. It SHALL expose port `8888` (Filer HTTP API) and port `9333` (Master). Port `9340` (volume server) SHALL NOT be exposed -- the Filer communicates with it internally. The service SHALL use the `seaweedfs-data` named volume mounted at `/data`.
 
@@ -100,13 +100,13 @@ The `prometheus` service SHALL use image `prom/prometheus:v3.10.0`, expose port 
 #### Scenario: Tempo health check is configured
 
 - **WHEN** the `tempo` service healthcheck is inspected in `docker-compose.yml`
-- **THEN** it SHALL define a healthcheck with test `wget --spider -q http://127.0.0.1:3200/ready`
+- **THEN** it SHALL define a healthcheck with test `test: ["CMD", "/tempo", "-health"]`
 
 ---
 
 ### Requirement: Service healthchecks
 
-Each service in Docker Compose SHALL define a `healthcheck` configuration that verifies the service is operational.
+Each long-running Docker Compose service except `worker` SHALL define a `healthcheck` configuration that verifies the service is operational.
 
 #### Scenario: PostgreSQL healthcheck
 
@@ -192,12 +192,12 @@ monitoring/
 #### Scenario: Configuration directory structure exists
 
 - **WHEN** the repository is inspected
-- **THEN** all six configuration files SHALL exist at the specified paths under `monitoring/`
+- **THEN** all five configuration files SHALL exist at the specified paths under `monitoring/`
 
 #### Scenario: Configuration files are valid
 
 - **WHEN** the YAML configuration files are parsed
-- **THEN** `prometheus.yml`, `tempo.yaml`, `datasources.yaml`, and `dashboards.yaml` SHALL be valid YAML
+- **THEN** `prometheus.yml`, `tempo.yml`, `datasources.yml`, and `dashboards.yml` SHALL be valid YAML
 - **AND** `proxymind-overview.json` SHALL be valid JSON
 
 ---

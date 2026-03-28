@@ -262,15 +262,15 @@ On every response -- both the LLM-generated response path (`chat.assistant_compl
 
 - **WHEN** `save_partial_on_disconnect()` saves a message with `status=partial`
 - **THEN** the method SHALL load the chat session from DB via `self._session.get(Session, message.session_id)`
-- **AND** `_log_audit()` SHALL be called with `latency_ms=0` (unknown at disconnect time)
-- **AND** `latency_ms=0` SHALL be treated as a sentinel for "latency unknown because the stream terminated before a measurable completion point"
+- **AND** `_log_audit()` SHALL be called with `latency_ms` derived from `message.created_at` when that timestamp is available
+- **AND** `latency_ms` MAY be `null` only when the message timestamp is unavailable
 - **AND** `retrieved_chunks_count` SHALL be derived from `len(message.source_ids or [])`
 
 #### Scenario: Audit logged on failed timeout
 
 - **WHEN** `save_failed_on_timeout()` saves a message with `status=failed`
 - **THEN** the method SHALL load the chat session from DB via `self._session.get(Session, message.session_id)`
-- **AND** `_log_audit()` SHALL be called with `latency_ms=0`
+- **AND** `_log_audit()` SHALL be called with `latency_ms` derived from `message.created_at` when that timestamp is available
 
 #### Scenario: save_partial_on_disconnect method signature unchanged
 
@@ -326,7 +326,8 @@ On every response -- both the LLM-generated response path (`chat.assistant_compl
 #### Scenario: Latency histogram observed on partial response (disconnect)
 
 - **WHEN** an assistant message reaches `status=partial` (client disconnect)
-- **THEN** `CHAT_RESPONSE_LATENCY_SECONDS.observe(0.0)` SHALL be called (latency unknown at disconnect time)
+- **THEN** `CHAT_RESPONSE_LATENCY_SECONDS.observe(latency_ms / 1000)` SHALL be called when `latency_ms` is available
+- **AND** the histogram observation MAY be skipped when `latency_ms` is `null`
 - **AND** the observation SHALL happen at the same code point where `CHAT_RESPONSES_TOTAL.labels(status="partial").inc()` is called
 
 #### Scenario: \_log_audit suppresses audit persistence failures

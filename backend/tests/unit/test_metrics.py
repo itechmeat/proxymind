@@ -66,3 +66,32 @@ async def test_metrics_endpoint_rejects_public_client_without_auth() -> None:
         response = await client.get("/metrics")
 
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_metrics_endpoint_rejects_private_client_without_auth_when_key_is_configured() -> None:
+    app = FastAPI()
+    app.state.settings = SimpleNamespace(admin_api_key="secret-key")
+    app.include_router(metrics_router)
+
+    transport = httpx.ASGITransport(app=app, client=("127.0.0.1", 12345))
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/metrics")
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_metrics_endpoint_allows_authenticated_private_client_when_key_is_configured() -> None:
+    app = FastAPI()
+    app.state.settings = SimpleNamespace(admin_api_key="secret-key")
+    app.include_router(metrics_router)
+
+    transport = httpx.ASGITransport(app=app, client=("127.0.0.1", 12345))
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get(
+            "/metrics",
+            headers={"Authorization": "Bearer secret-key"},
+        )
+
+    assert response.status_code == 200

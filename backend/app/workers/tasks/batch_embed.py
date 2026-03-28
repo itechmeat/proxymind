@@ -38,7 +38,11 @@ async def process_batch_embed(
             return
 
         async with session_factory() as session:
-            task = await session.get(BackgroundTask, task_uuid)
+            task = await session.scalar(
+                select(BackgroundTask)
+                .where(BackgroundTask.id == task_uuid)
+                .with_for_update()
+            )
             if task is None:
                 logger.warning("worker.batch_embed.task_missing", task_id=task_id)
                 return
@@ -109,6 +113,7 @@ async def process_batch_embed(
             task.status = BackgroundTaskStatus.PROCESSING
             task.started_at = datetime.now(UTC)
             await session.commit()
+
             try:
                 await batch_orchestrator.submit_to_gemini(
                     session,

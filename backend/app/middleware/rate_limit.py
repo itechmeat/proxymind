@@ -7,7 +7,10 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.services.metrics import RATE_LIMIT_HITS_TOTAL
+try:
+    from app.services.metrics import RATE_LIMIT_HITS_TOTAL
+except ImportError:
+    RATE_LIMIT_HITS_TOTAL = None
 
 logger = structlog.get_logger(__name__)
 
@@ -51,7 +54,6 @@ class RateLimitMiddleware:
 
         if weighted_count > limit:
             retry_after = max(1, reset_at - int(now))
-            RATE_LIMIT_HITS_TOTAL.inc()
             response = JSONResponse(
                 status_code=429,
                 content={"detail": "Rate limit exceeded"},
@@ -69,6 +71,8 @@ class RateLimitMiddleware:
                 weighted_count=round(weighted_count, 1),
                 limit=limit,
             )
+            if RATE_LIMIT_HITS_TOTAL is not None:
+                RATE_LIMIT_HITS_TOTAL.inc()
             await response(scope, receive, send)
             return
 

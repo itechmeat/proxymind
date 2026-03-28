@@ -28,7 +28,7 @@ def upgrade() -> None:
         ),
     )
     op.execute("UPDATE audit_logs SET status = 'complete' WHERE status IS NULL")
-    op.alter_column("audit_logs", "status", nullable=False, server_default=False)
+    op.alter_column("audit_logs", "status", nullable=False, server_default=None)
 
 
 def downgrade() -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -710,12 +711,13 @@ async def test_save_partial_on_disconnect_logs_partial_audit(
         snapshot_id=chat_session.snapshot_id,
         source_ids=[uuid.uuid4()],
     )
+    message.created_at = datetime.now(UTC) - timedelta(seconds=2)
 
     await service.save_partial_on_disconnect(message.id, "partial")
 
     service._audit_service.log_response.assert_awaited_once()
     assert service._audit_service.log_response.await_args.kwargs["status"] == "partial"
-    assert service._audit_service.log_response.await_args.kwargs["latency_ms"] == 0
+    assert service._audit_service.log_response.await_args.kwargs["latency_ms"] >= 2000
 
 
 @pytest.mark.asyncio
@@ -735,12 +737,13 @@ async def test_save_failed_on_timeout_logs_failed_audit(
         snapshot_id=chat_session.snapshot_id,
         source_ids=[uuid.uuid4()],
     )
+    message.created_at = datetime.now(UTC) - timedelta(seconds=3)
 
     await service.save_failed_on_timeout(message.id, "timed out")
 
     service._audit_service.log_response.assert_awaited_once()
     assert service._audit_service.log_response.await_args.kwargs["status"] == "failed"
-    assert service._audit_service.log_response.await_args.kwargs["latency_ms"] == 0
+    assert service._audit_service.log_response.await_args.kwargs["latency_ms"] >= 3000
 
 
 @pytest.mark.asyncio

@@ -25,14 +25,19 @@ The system SHALL provide an `init_telemetry()` function in `backend/app/services
 
 ### Requirement: OTel TracerProvider shutdown
 
-The system SHALL provide a `shutdown_telemetry()` function that gracefully shuts down the `TracerProvider` by calling `provider.shutdown()`. Before shutdown, the function SHALL uninstrument FastAPI, SQLAlchemy, httpx, and Redis so repeated initialization does not leave stale hooks behind. After shutdown, the internal provider reference SHALL be set to `None`. If no provider was initialized (telemetry was disabled), `shutdown_telemetry()` SHALL be a no-op.
+The system SHALL provide a `shutdown_telemetry()` function that gracefully shuts down the `TracerProvider` by calling `provider.shutdown()`. Before shutdown, the function SHALL uninstrument FastAPI, SQLAlchemy, httpx, and Redis so repeated initialization does not leave stale hooks behind. Because the OpenTelemetry global tracer provider is write-once, the process SHALL treat telemetry initialization as single-use: after shutdown, the existing provider reference MAY be retained internally and subsequent re-initialization attempts in the same process SHALL be ignored with a warning instead of attempting to replace the global provider. If no provider was initialized (telemetry was disabled), `shutdown_telemetry()` SHALL be a no-op.
 
 #### Scenario: Shutdown flushes and cleans up
 
 - **WHEN** `shutdown_telemetry()` is called after a successful `init_telemetry(enabled=True, ...)`
 - **THEN** the provider's `shutdown()` method SHALL be called
-- **AND** the internal provider reference SHALL be set to `None`
+- **AND** the process SHALL mark telemetry as shut down so a second `init_telemetry()` call in the same process does not attempt to replace the global tracer provider
 - **AND** a structlog info event `telemetry.shutdown` SHALL be emitted
+
+#### Scenario: Re-initialization after shutdown is ignored
+
+- **WHEN** `init_telemetry()` is called after `shutdown_telemetry()` in the same process
+- **THEN** the function SHALL log a warning and return without calling `trace.set_tracer_provider()` again
 
 #### Scenario: Shutdown is no-op when not initialized
 

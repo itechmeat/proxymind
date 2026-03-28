@@ -12,38 +12,39 @@
 
 ## File Map
 
-| Action | Path | Responsibility |
-|--------|------|----------------|
-| Create | `backend/app/services/audit.py` | AuditService — writes audit_logs records |
-| Create | `backend/app/services/metrics.py` | Prometheus metric registry definitions |
-| Create | `backend/app/api/metrics.py` | GET /metrics endpoint |
-| Create | `backend/app/middleware/observability.py` | Correlation IDs, OTel spans, Prometheus request metrics |
-| Create | `backend/app/core/telemetry.py` | OTel TracerProvider initialization |
-| Create | `backend/tests/unit/test_audit_service.py` | AuditService unit tests |
-| Create | `backend/tests/unit/test_observability_middleware.py` | Middleware unit tests |
-| Create | `backend/tests/unit/test_metrics_endpoint.py` | Metrics endpoint unit tests |
-| Create | `backend/tests/unit/test_telemetry.py` | Telemetry initialization tests |
-| Create | `backend/tests/integration/test_audit_integration.py` | Full chat flow → audit record test |
-| Create | `config/prometheus/prometheus.yml` | Prometheus scrape config |
-| Create | `config/tempo/tempo.yaml` | Tempo monolithic mode config |
-| Create | `config/grafana/provisioning/datasources.yaml` | Prometheus + Tempo data sources |
-| Create | `config/grafana/provisioning/dashboards.yaml` | Dashboard provider config |
-| Create | `config/grafana/dashboards/proxymind-overview.json` | Main dashboard |
-| Modify | `backend/app/core/config.py` | Add OTEL_* settings |
-| Modify | `backend/app/core/logging.py` | Add request_id + trace_id + span_id structlog processors |
-| Modify | `backend/app/main.py` | Add ObservabilityMiddleware, telemetry init, metrics router |
-| Modify | `backend/app/services/chat.py` | Call AuditService after message finalization (complete, partial, failed) |
-| Modify | `backend/app/api/dependencies.py` | Wire AuditService into ChatService; pass correlation_id on arq enqueue |
-| Modify | `backend/app/middleware/rate_limit.py` | Increment rate_limit_hits_total counter |
-| Modify | `backend/app/workers/main.py` | Init/shutdown telemetry; bind correlation_id per task |
-| Modify | `backend/pyproject.toml` | Add observability dependencies |
-| Modify | `docker-compose.yml` | Add prometheus, grafana, tempo services |
+| Action | Path                                                  | Responsibility                                                           |
+| ------ | ----------------------------------------------------- | ------------------------------------------------------------------------ |
+| Create | `backend/app/services/audit.py`                       | AuditService — writes audit_logs records                                 |
+| Create | `backend/app/services/metrics.py`                     | Prometheus metric registry definitions                                   |
+| Create | `backend/app/api/metrics.py`                          | GET /metrics endpoint                                                    |
+| Create | `backend/app/middleware/observability.py`             | Correlation IDs, OTel spans, Prometheus request metrics                  |
+| Create | `backend/app/services/telemetry.py`                   | OTel TracerProvider initialization                                       |
+| Create | `backend/tests/unit/test_audit_service.py`            | AuditService unit tests                                                  |
+| Create | `backend/tests/unit/test_observability_middleware.py` | Middleware unit tests                                                    |
+| Create | `backend/tests/unit/test_metrics_endpoint.py`         | Metrics endpoint unit tests                                              |
+| Create | `backend/tests/unit/test_telemetry.py`                | Telemetry initialization tests                                           |
+| Create | `backend/tests/integration/test_audit_integration.py` | Full chat flow → audit record test                                       |
+| Create | `config/prometheus/prometheus.yml`                    | Prometheus scrape config                                                 |
+| Create | `config/tempo/tempo.yaml`                             | Tempo monolithic mode config                                             |
+| Create | `config/grafana/provisioning/datasources.yaml`        | Prometheus + Tempo data sources                                          |
+| Create | `config/grafana/provisioning/dashboards.yaml`         | Dashboard provider config                                                |
+| Create | `config/grafana/dashboards/proxymind-overview.json`   | Main dashboard                                                           |
+| Modify | `backend/app/core/config.py`                          | Add OTEL\_\* settings                                                    |
+| Modify | `backend/app/core/logging.py`                         | Add request_id + trace_id + span_id structlog processors                 |
+| Modify | `backend/app/main.py`                                 | Add ObservabilityMiddleware, telemetry init, metrics router              |
+| Modify | `backend/app/services/chat.py`                        | Call AuditService after message finalization (complete, partial, failed) |
+| Modify | `backend/app/api/dependencies.py`                     | Wire AuditService into ChatService; pass correlation_id on arq enqueue   |
+| Modify | `backend/app/middleware/rate_limit.py`                | Increment rate_limit_hits_total counter                                  |
+| Modify | `backend/app/workers/main.py`                         | Init/shutdown telemetry; bind correlation_id per task                    |
+| Modify | `backend/pyproject.toml`                              | Add observability dependencies                                           |
+| Modify | `docker-compose.yml`                                  | Add prometheus, grafana, tempo services                                  |
 
 ---
 
 ### Task 1: Add observability dependencies to pyproject.toml
 
 **Files:**
+
 - Modify: `backend/pyproject.toml`
 
 - [ ] **Step 1: Add dependencies**
@@ -64,9 +65,11 @@ Add to the `[project.dependencies]` list in `backend/pyproject.toml`:
 - [ ] **Step 2: Rebuild the backend container to verify deps resolve**
 
 Run inside docker:
+
 ```bash
 docker compose build api
 ```
+
 Expected: build succeeds, no dependency conflicts.
 
 - [ ] **Step 3: Commit**
@@ -81,6 +84,7 @@ git commit -m "chore(deps): add observability dependencies (prometheus, opentele
 ### Task 2: Add OTel settings to config
 
 **Files:**
+
 - Modify: `backend/app/core/config.py`
 - Create: `backend/tests/unit/test_config_otel.py`
 
@@ -163,6 +167,7 @@ git commit -m "feat(config): add OTel settings (otel_enabled, endpoint, service_
 ### Task 3: Correlation ID middleware + structlog integration
 
 **Files:**
+
 - Create: `backend/app/middleware/observability.py`
 - Modify: `backend/app/core/logging.py`
 - Create: `backend/tests/unit/test_observability_middleware.py`
@@ -423,6 +428,7 @@ git commit -m "feat(observability): add ObservabilityMiddleware with correlation
 ### Task 4: Prometheus metrics definitions and /metrics endpoint
 
 **Files:**
+
 - Create: `backend/app/services/metrics.py`
 - Create: `backend/app/api/metrics.py`
 - Create: `backend/tests/unit/test_metrics_endpoint.py`
@@ -588,6 +594,7 @@ git commit -m "feat(metrics): add Prometheus metric definitions and /metrics end
 ### Task 5: AuditService
 
 **Files:**
+
 - Create: `backend/app/services/audit.py`
 - Create: `backend/tests/unit/test_audit_service.py`
 
@@ -774,10 +781,11 @@ git commit -m "feat(audit): add AuditService for recording chat response audit l
 ### Task 6: Integrate AuditService into ChatService (complete, partial, failed)
 
 **Files:**
+
 - Modify: `backend/app/services/chat.py`
 - Create: `backend/tests/unit/test_chat_audit_wiring.py`
 
-- [ ] **Step 1: Write a test that verifies ChatService calls _log_audit**
+- [ ] **Step 1: Write a test that verifies ChatService calls \_log_audit**
 
 Create `backend/tests/unit/test_chat_audit_wiring.py`. This test constructs a real ChatService with a mock AuditService and verifies the audit call happens during `answer()`:
 
@@ -871,6 +879,7 @@ async def test_log_audit_noop_when_no_audit_service():
 In `backend/app/services/chat.py`:
 
 Add imports at top:
+
 ```python
 import time
 from app.services.audit import AuditService
@@ -878,16 +887,19 @@ from app.services.metrics import CHAT_RESPONSES_TOTAL
 ```
 
 Add `audit_service` parameter to `ChatService.__init__` (after `summary_enqueuer`):
+
 ```python
         audit_service: AuditService | None = None,
 ```
 
 Store it:
+
 ```python
         self._audit_service = audit_service
 ```
 
 Add a private method to ChatService:
+
 ```python
     async def _log_audit(
         self,
@@ -930,6 +942,7 @@ Add a private method to ChatService:
 1. Add `start_time = time.perf_counter()` at the start of both `answer()` and `stream_answer()`.
 
 2. **Complete (streaming path):** Call `_log_audit` right before `yield ChatStreamCitations(...)` after `await self._session.commit()` at line ~504:
+
 ```python
                 latency_ms = int((time.perf_counter() - start_time) * 1000)
                 await self._log_audit(
@@ -944,6 +957,7 @@ Add a private method to ChatService:
 3. **Complete (sync `answer()`):** Call `_log_audit` before `return ChatAnswerResult(...)` for both the successful and refusal paths.
 
 4. **Failed (streaming path):** In the `except` block of `stream_answer` (~line 524-536), after `await self._session.commit()`, add:
+
 ```python
             latency_ms = int((time.perf_counter() - start_time) * 1000)
             await self._log_audit(
@@ -1011,18 +1025,25 @@ git commit -m "feat(audit): integrate AuditService into ChatService for all term
 ### Task 7: Rate limit metrics integration
 
 **Files:**
+
 - Modify: `backend/app/middleware/rate_limit.py`
 
 - [ ] **Step 1: Add metric increment on rate limit rejection**
 
-In `backend/app/middleware/rate_limit.py`, add import:
+In `backend/app/middleware/rate_limit.py`, add a resilient import:
+
 ```python
-from app.services.metrics import RATE_LIMIT_HITS_TOTAL
+try:
+  from app.services.metrics import RATE_LIMIT_HITS_TOTAL
+except ImportError:
+  RATE_LIMIT_HITS_TOTAL = None
 ```
 
 After the `logger.warning("rate_limit.exceeded", ...)` line (line ~68), add:
+
 ```python
-            RATE_LIMIT_HITS_TOTAL.inc()
+      if RATE_LIMIT_HITS_TOTAL is not None:
+        RATE_LIMIT_HITS_TOTAL.inc()
 ```
 
 - [ ] **Step 2: Run existing rate limit tests**
@@ -1042,7 +1063,8 @@ git commit -m "feat(metrics): increment rate_limit_hits_total counter on rate li
 ### Task 8: OpenTelemetry tracing initialization
 
 **Files:**
-- Create: `backend/app/core/telemetry.py`
+
+- Create: `backend/app/services/telemetry.py`
 - Create: `backend/tests/unit/test_telemetry.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1057,12 +1079,12 @@ from unittest.mock import patch, MagicMock
 
 def test_init_telemetry_when_enabled():
     """init_telemetry sets up TracerProvider when otel_enabled is True."""
-    from app.core.telemetry import init_telemetry
+    from app.services.telemetry import init_telemetry
 
-    with patch("app.core.telemetry.TracerProvider") as mock_provider_cls, \
-         patch("app.core.telemetry.trace") as mock_trace, \
-         patch("app.core.telemetry.BatchSpanProcessor") as mock_bsp, \
-         patch("app.core.telemetry.OTLPSpanExporter") as mock_exporter:
+        with patch("app.services.telemetry.TracerProvider") as mock_provider_cls, \
+          patch("app.services.telemetry.trace") as mock_trace, \
+          patch("app.services.telemetry.BatchSpanProcessor") as mock_bsp, \
+          patch("app.services.telemetry.OTLPSpanExporter") as mock_exporter:
         init_telemetry(
             enabled=True,
             endpoint="http://localhost:4317",
@@ -1074,9 +1096,9 @@ def test_init_telemetry_when_enabled():
 
 def test_init_telemetry_when_disabled():
     """init_telemetry is a no-op when otel_enabled is False."""
-    from app.core.telemetry import init_telemetry
+    from app.services.telemetry import init_telemetry
 
-    with patch("app.core.telemetry.trace") as mock_trace:
+    with patch("app.services.telemetry.trace") as mock_trace:
         init_telemetry(
             enabled=False,
             endpoint="http://localhost:4317",
@@ -1087,12 +1109,12 @@ def test_init_telemetry_when_disabled():
 
 def test_shutdown_telemetry():
     """shutdown_telemetry calls provider.shutdown()."""
-    from app.core.telemetry import init_telemetry, shutdown_telemetry
+    from app.services.telemetry import init_telemetry, shutdown_telemetry
 
-    with patch("app.core.telemetry.TracerProvider") as mock_provider_cls, \
-         patch("app.core.telemetry.trace"), \
-         patch("app.core.telemetry.BatchSpanProcessor"), \
-         patch("app.core.telemetry.OTLPSpanExporter"):
+        with patch("app.services.telemetry.TracerProvider") as mock_provider_cls, \
+          patch("app.services.telemetry.trace"), \
+          patch("app.services.telemetry.BatchSpanProcessor"), \
+          patch("app.services.telemetry.OTLPSpanExporter"):
         mock_provider = MagicMock()
         mock_provider_cls.return_value = mock_provider
         init_telemetry(enabled=True, endpoint="http://localhost:4317", service_name="test")
@@ -1107,7 +1129,7 @@ Expected: FAIL — module does not exist.
 
 - [ ] **Step 3: Implement telemetry module**
 
-Create `backend/app/core/telemetry.py`:
+Create `backend/app/services/telemetry.py`:
 
 ```python
 """OpenTelemetry tracing initialization."""
@@ -1163,7 +1185,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/app/core/telemetry.py backend/tests/unit/test_telemetry.py
+git add backend/app/services/telemetry.py backend/tests/unit/test_telemetry.py
 git commit -m "feat(telemetry): add OTel TracerProvider with OTLP/gRPC exporter for Tempo"
 ```
 
@@ -1172,6 +1194,7 @@ git commit -m "feat(telemetry): add OTel TracerProvider with OTLP/gRPC exporter 
 ### Task 9: Wire everything into main.py
 
 **Files:**
+
 - Modify: `backend/app/main.py`
 
 - [ ] **Step 1: Add imports and middleware**
@@ -1179,13 +1202,15 @@ git commit -m "feat(telemetry): add OTel TracerProvider with OTLP/gRPC exporter 
 In `backend/app/main.py`:
 
 Add imports:
+
 ```python
 from app.api.metrics import router as metrics_router
-from app.core.telemetry import init_telemetry, shutdown_telemetry
+from app.services.telemetry import init_telemetry, shutdown_telemetry
 from app.middleware.observability import ObservabilityMiddleware
 ```
 
 In the `lifespan` function, after `configure_logging(settings.log_level)` and before the `try:` block, add:
+
 ```python
     init_telemetry(
         enabled=settings.otel_enabled,
@@ -1195,11 +1220,13 @@ In the `lifespan` function, after `configure_logging(settings.log_level)` and be
 ```
 
 In the `finally` block of lifespan, before `_close_app_resources`:
+
 ```python
         shutdown_telemetry()
 ```
 
 At the bottom of the file, change the middleware registration and add metrics router:
+
 ```python
 app = FastAPI(title="ProxyMind API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(RateLimitMiddleware)
@@ -1231,6 +1258,7 @@ git commit -m "feat(observability): wire ObservabilityMiddleware, telemetry, and
 ### Task 10: Docker Compose — Prometheus, Grafana, Tempo
 
 **Files:**
+
 - Modify: `docker-compose.yml`
 - Create: `config/prometheus/prometheus.yml`
 - Create: `config/tempo/tempo.yaml`
@@ -1498,77 +1526,80 @@ Create `config/grafana/dashboards/proxymind-overview.json`:
 Add before the `volumes:` section at the bottom of `docker-compose.yml`:
 
 ```yaml
-  prometheus:
-    image: prom/prometheus:v3.10.0
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
-    depends_on:
-      api:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/-/healthy"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+prometheus:
+  image: prom/prometheus:v3.10.0
+  ports:
+    - "9090:9090"
+  volumes:
+    - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    - prometheus-data:/prometheus
+  depends_on:
+    api:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/-/healthy"]
+    interval: 15s
+    timeout: 5s
+    retries: 5
+    start_period: 10s
 
-  tempo:
-    image: grafana/tempo:2.10.3
-    ports:
-      - "4317:4317"
-      - "3200:3200"
-    volumes:
-      - ./config/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
-      - tempo-data:/var/tempo
-    command: ["-config.file=/etc/tempo/tempo.yaml"]
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3200/ready"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+tempo:
+  image: grafana/tempo:2.10.3
+  ports:
+    - "4317:4317"
+    - "3200:3200"
+  volumes:
+    - ./config/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+    - tempo-data:/var/tempo
+  command: ["-config.file=/etc/tempo/tempo.yaml"]
+  healthcheck:
+    test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3200/ready"]
+    interval: 15s
+    timeout: 5s
+    retries: 5
+    start_period: 10s
 
-  grafana:
-    image: grafana/grafana:12.4.1
-    ports:
-      - "3000:3000"
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: admin
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
-    volumes:
-      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - grafana-data:/var/lib/grafana
-    depends_on:
-      prometheus:
-        condition: service_healthy
-      tempo:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
+grafana:
+  image: grafana/grafana:12.4.1
+  ports:
+    - "3000:3000"
+  environment:
+    GF_SECURITY_ADMIN_PASSWORD: admin
+    GF_AUTH_ANONYMOUS_ENABLED: "true"
+    GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+  volumes:
+    - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+    - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    - grafana-data:/var/lib/grafana
+  depends_on:
+    prometheus:
+      condition: service_healthy
+    tempo:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+    interval: 15s
+    timeout: 5s
+    retries: 5
+    start_period: 20s
 ```
 
 Add to the `volumes:` section:
+
 ```yaml
-  prometheus-data:
-  tempo-data:
-  grafana-data:
+prometheus-data:
+tempo-data:
+grafana-data:
 ```
 
 - [ ] **Step 6: Verify docker-compose config is valid**
 
 Run:
+
 ```bash
 docker compose config --quiet
 ```
+
 Expected: no errors
 
 - [ ] **Step 7: Commit**
@@ -1583,6 +1614,7 @@ git commit -m "feat(infra): add Prometheus, Grafana, and Tempo to Docker Compose
 ### Task 11: Wire AuditService into chat API dependencies
 
 **Files:**
+
 - Modify: `backend/app/api/dependencies.py:160-171`
 
 ChatService is constructed in `backend/app/api/dependencies.py`, NOT in `chat.py`.
@@ -1590,11 +1622,13 @@ ChatService is constructed in `backend/app/api/dependencies.py`, NOT in `chat.py
 - [ ] **Step 1: Add AuditService to ChatService construction**
 
 In `backend/app/api/dependencies.py`, add import:
+
 ```python
 from app.services.audit import AuditService
 ```
 
 At line ~160, where `ChatService(...)` is constructed, add the `audit_service` parameter:
+
 ```python
     return ChatService(
         session=session,
@@ -1628,6 +1662,7 @@ git commit -m "feat(audit): wire AuditService into ChatService via dependencies.
 ### Task 12: OTel auto-instrumentation for FastAPI, httpx, SQLAlchemy, Redis
 
 **Files:**
+
 - Modify: `backend/app/core/telemetry.py`
 
 **Instrumentation binding model:**
@@ -1697,6 +1732,7 @@ git commit -m "feat(telemetry): add OTel auto-instrumentation for FastAPI, httpx
 ### Task 13: Worker telemetry + correlation ID propagation
 
 **Files:**
+
 - Modify: `backend/app/workers/main.py`
 - Modify: `backend/app/workers/run.py`
 - Modify: `backend/app/api/dependencies.py` (enqueue points)
@@ -1727,6 +1763,7 @@ async def on_shutdown(ctx: dict[str, Any]) -> None:
 ```
 
 Wire `on_shutdown` in `WorkerSettings`:
+
 ```python
 class WorkerSettings:
     on_startup = on_startup
@@ -1794,6 +1831,7 @@ git commit -m "feat(telemetry): add OTel tracing and correlation ID propagation 
 ### Task 14: Integration test — full chat flow produces audit record
 
 **Files:**
+
 - Create: `backend/tests/integration/test_audit_integration.py`
 
 - [ ] **Step 1: Write integration test**
@@ -1862,30 +1900,37 @@ git commit -m "test(audit): add integration test for chat flow audit record crea
 - [ ] **Step 1: Start the full stack**
 
 Run:
+
 ```bash
 docker compose up -d
 ```
 
 Wait for all services to be healthy:
+
 ```bash
 docker compose ps
 ```
+
 Expected: all services show "healthy" or "running".
 
 - [ ] **Step 2: Verify /metrics endpoint**
 
 Run:
+
 ```bash
 curl -s http://localhost:8000/metrics | head -20
 ```
+
 Expected: Prometheus text format output with `http_requests_total`, `http_request_duration_seconds`, etc.
 
 - [ ] **Step 3: Verify Prometheus is scraping**
 
 Run:
+
 ```bash
 curl -s http://localhost:9090/api/v1/targets | python -m json.tool | grep proxymind
 ```
+
 Expected: target with `"health": "up"`.
 
 - [ ] **Step 4: Verify Grafana is running with dashboard**
@@ -1896,14 +1941,17 @@ Expected: dashboard loads (may show "No data" if no traffic yet).
 - [ ] **Step 5: Verify Tempo is accepting traces**
 
 Run:
+
 ```bash
 curl -s http://localhost:3200/ready
 ```
+
 Expected: "ready" response.
 
 - [ ] **Step 6: Send a test chat message and verify end-to-end**
 
 Send a chat message, then verify:
+
 - `/metrics` shows incremented counters
 - Grafana dashboard shows data points
 - Grafana Explore → Tempo shows traces for the request

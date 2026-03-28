@@ -114,7 +114,7 @@ def get_conversation_memory_service(request: Request) -> ConversationMemoryServi
 
 
 def get_audit_service(
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_session, use_cache=False)],
 ) -> AuditService:
     return AuditService(session=session)
 

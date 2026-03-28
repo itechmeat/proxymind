@@ -49,8 +49,7 @@ async def test_process_batch_embed_uses_stored_chunk_order() -> None:
         status=ChunkStatus.PENDING,
     )
     session = SimpleNamespace(
-        get=AsyncMock(return_value=task),
-        scalar=AsyncMock(return_value=batch_job),
+        scalar=AsyncMock(side_effect=[task, batch_job]),
         scalars=AsyncMock(return_value=SimpleNamespace(all=lambda: [first_chunk, second_chunk])),
         commit=AsyncMock(),
     )
@@ -92,8 +91,7 @@ async def test_process_batch_embed_fails_on_malformed_chunk_ids() -> None:
         completed_at=None,
     )
     session = SimpleNamespace(
-        get=AsyncMock(return_value=task),
-        scalar=AsyncMock(return_value=batch_job),
+        scalar=AsyncMock(side_effect=[task, batch_job]),
         commit=AsyncMock(),
     )
     batch_orchestrator = SimpleNamespace(submit_to_gemini=AsyncMock())
@@ -127,7 +125,7 @@ async def test_process_batch_embed_skips_non_pending_task() -> None:
         status=BackgroundTaskStatus.COMPLETE,
     )
     session = SimpleNamespace(
-        get=AsyncMock(return_value=task),
+        scalar=AsyncMock(return_value=task),
     )
     batch_orchestrator = SimpleNamespace(submit_to_gemini=AsyncMock())
 
@@ -171,8 +169,8 @@ async def test_process_batch_embed_marks_task_failed_when_submit_raises() -> Non
         status=ChunkStatus.PENDING,
     )
     session = SimpleNamespace(
-        get=AsyncMock(side_effect=[task, task, batch_job]),
-        scalar=AsyncMock(return_value=batch_job),
+        get=AsyncMock(side_effect=[task, batch_job]),
+        scalar=AsyncMock(side_effect=[task, batch_job]),
         scalars=AsyncMock(return_value=SimpleNamespace(all=lambda: [chunk])),
         commit=AsyncMock(),
         rollback=AsyncMock(),

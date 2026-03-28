@@ -7,7 +7,7 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from prometheus_client.parser import text_string_to_metric_families
-from starlette.types import Receive, Scope, Send
+from starlette.types import Message, Receive, Scope, Send
 
 from app.middleware.observability import ObservabilityMiddleware
 from app.services.metrics import render_metrics

@@ -71,16 +71,12 @@ async def verify_metrics_access(
     configured_key = _extract_admin_key(request.app.state.settings.admin_api_key)
     client_ip = request.client.host if request.client else None
 
-    if configured_key and credentials is not None and secrets.compare_digest(
-        credentials.credentials.encode(),
-        configured_key.encode(),
-    ):
-        return
-
-    if _is_private_client(client_ip):
-        return
-
     if configured_key:
+        if credentials is not None and secrets.compare_digest(
+            credentials.credentials.encode(),
+            configured_key.encode(),
+        ):
+            return
         logger.warning(
             "metrics.auth.failed",
             path=request.url.path,
@@ -91,6 +87,9 @@ async def verify_metrics_access(
             detail="Invalid or missing API key",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    if _is_private_client(client_ip):
+        return
 
     logger.warning(
         "metrics.access.denied",

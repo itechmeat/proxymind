@@ -9,6 +9,7 @@ def test_init_telemetry_disabled_is_noop() -> None:
     telemetry._provider = None
     telemetry._httpx_instrumented = False
     telemetry._redis_instrumented = False
+    telemetry._telemetry_shutdown = False
     telemetry._fastapi_apps.clear()
     telemetry._sqlalchemy_engines.clear()
 
@@ -19,6 +20,7 @@ def test_init_telemetry_disabled_is_noop() -> None:
 
 def test_instrument_helpers_are_noop_without_provider() -> None:
     telemetry._provider = None
+    telemetry._telemetry_shutdown = False
     app = object()
     engine = SimpleNamespace(sync_engine=object())
 
@@ -33,6 +35,7 @@ def test_init_and_shutdown_telemetry(monkeypatch) -> None:
     telemetry._provider = None
     telemetry._httpx_instrumented = False
     telemetry._redis_instrumented = False
+    telemetry._telemetry_shutdown = False
     telemetry._fastapi_apps.clear()
     telemetry._sqlalchemy_engines.clear()
 
@@ -91,9 +94,37 @@ def test_init_and_shutdown_telemetry(monkeypatch) -> None:
 
     telemetry.shutdown_telemetry()
 
-    assert telemetry._provider is None
+    assert telemetry._provider is provider
     assert telemetry._httpx_instrumented is False
     assert telemetry._redis_instrumented is False
+    assert telemetry._telemetry_shutdown is True
+
+
+def test_init_telemetry_after_shutdown_is_ignored(monkeypatch) -> None:
+    telemetry._provider = SimpleNamespace(force_flush=lambda: None, shutdown=lambda: None)
+    telemetry._httpx_instrumented = False
+    telemetry._redis_instrumented = False
+    telemetry._telemetry_shutdown = True
+    telemetry._fastapi_apps.clear()
+    telemetry._sqlalchemy_engines.clear()
+
+    set_provider = SimpleNamespace(call_count=0)
+
+    def _set_tracer_provider(_provider) -> None:
+        set_provider.call_count += 1
+
+    monkeypatch.setattr(telemetry.trace, "set_tracer_provider", _set_tracer_provider)
+
+    telemetry.init_telemetry(
+        SimpleNamespace(
+            otel_enabled=True,
+            otel_service_name="proxymind-api",
+            otel_environment="test",
+            otel_exporter_otlp_endpoint="http://tempo:4317",
+        )
+    )
+
+    assert set_provider.call_count == 0
 
 
 def test_normalize_otlp_grpc_endpoint_strips_scheme() -> None:

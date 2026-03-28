@@ -80,7 +80,7 @@ The `record_request()` function SHALL normalize URL paths before using them as m
 
 ### Requirement: GET /metrics endpoint
 
-The system SHALL provide a `GET /metrics` endpoint in `backend/app/api/metrics.py` that returns Prometheus metrics in text exposition format. The endpoint SHALL return `Content-Type: text/plain; version=0.0.4; charset=utf-8`. The endpoint SHALL NOT be included in the OpenAPI schema (`include_in_schema=False`). Access SHALL be limited to private-network clients by default, and deployments MAY also allow bearer-authenticated access using the same admin API key.
+The system SHALL provide a `GET /metrics` endpoint in `backend/app/api/metrics.py` that returns Prometheus metrics in text exposition format. The endpoint SHALL return `Content-Type: text/plain; version=0.0.4; charset=utf-8`. The endpoint SHALL NOT be included in the OpenAPI schema (`include_in_schema=False`). When `admin_api_key` is not configured, access SHALL be limited to private-network clients. When `admin_api_key` is configured, the endpoint SHALL require bearer authentication using that same admin API key and SHALL NOT allow a private-network bypass.
 
 #### Scenario: Metrics endpoint returns Prometheus format
 
@@ -94,15 +94,29 @@ The system SHALL provide a `GET /metrics` endpoint in `backend/app/api/metrics.p
 - **WHEN** `GET /metrics` is called after some requests have been processed
 - **THEN** the response body SHALL contain metric names: `http_requests_total`, `http_request_duration_seconds`, `chat_responses_total`, `chat_response_latency_seconds`, `rate_limit_hits_total`, `arq_queue_depth`, `audit_logs_total`
 
-#### Scenario: Metrics endpoint allows private-network scraping without authentication
+#### Scenario: Metrics endpoint allows private-network scraping without authentication when no admin key is configured
 
 - **WHEN** `GET /metrics` is called from a private-network client without any authentication headers
+- **AND** `admin_api_key` is not configured
 - **THEN** the response SHALL be 200 (not 401 or 403)
 
-#### Scenario: Metrics endpoint rejects public unauthenticated access
+#### Scenario: Metrics endpoint rejects public unauthenticated access when no admin key is configured
 
 - **WHEN** `GET /metrics` is called from a non-private client without authentication headers
+- **AND** `admin_api_key` is not configured
 - **THEN** the response SHALL be 401 or 403
+
+#### Scenario: Metrics endpoint rejects private unauthenticated access when admin key is configured
+
+- **WHEN** `GET /metrics` is called from a private-network client without authentication headers
+- **AND** `admin_api_key` is configured
+- **THEN** the response SHALL be 401
+
+#### Scenario: Metrics endpoint allows authenticated access when admin key is configured
+
+- **WHEN** `GET /metrics` is called with `Authorization: Bearer <admin_api_key>`
+- **AND** `admin_api_key` is configured
+- **THEN** the response SHALL be 200
 
 #### Scenario: Metrics endpoint excluded from OpenAPI
 

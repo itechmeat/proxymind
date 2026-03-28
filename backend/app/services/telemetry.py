@@ -23,6 +23,7 @@ logger = structlog.get_logger(__name__)
 _provider: TracerProvider | None = None
 _httpx_instrumented = False
 _redis_instrumented = False
+_telemetry_shutdown = False
 _fastapi_apps: dict[int, FastAPI] = {}
 _sqlalchemy_engines: dict[int, AsyncEngine] = {}
 
@@ -38,7 +39,11 @@ def init_telemetry(settings: Settings, *, service_name: str | None = None) -> No
     if not settings.otel_enabled:
         return
 
-    global _provider, _httpx_instrumented, _redis_instrumented
+    global _provider, _httpx_instrumented, _redis_instrumented, _telemetry_shutdown
+    if _telemetry_shutdown:
+        logger.warning("telemetry.reinit_not_supported")
+        return
+
     if _provider is None:
         resource_attributes: Mapping[str, str] = {
             "service.name": service_name or settings.otel_service_name,
@@ -52,6 +57,7 @@ def init_telemetry(settings: Settings, *, service_name: str | None = None) -> No
         provider.add_span_processor(BatchSpanProcessor(exporter))
         trace.set_tracer_provider(provider)
         _provider = provider
+        _telemetry_shutdown = False
 
     if not _httpx_instrumented:
         HTTPXClientInstrumentor().instrument()
@@ -87,7 +93,7 @@ def instrument_sqlalchemy(engine: AsyncEngine) -> None:
 
 
 def shutdown_telemetry() -> None:
-    global _provider, _httpx_instrumented, _redis_instrumented
+    global _provider, _httpx_instrumented, _redis_instrumented, _telemetry_shutdown
     if _provider is None:
         return
 
@@ -119,7 +125,7 @@ def shutdown_telemetry() -> None:
         _provider.force_flush()
         _provider.shutdown()
     finally:
-        _provider = None
+        _telemetry_shutdown = True
         _httpx_instrumented = False
         _redis_instrumented = False
         _fastapi_apps.clear()
