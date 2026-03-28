@@ -12,13 +12,21 @@ from redis.asyncio import Redis
 from app.api.admin import router as admin_router
 from app.api.chat import router as chat_router
 from app.api.health import router as health_router
+from app.api.metrics import router as metrics_router
 from app.api.profile import admin_router as profile_admin_router
 from app.api.profile import chat_router as profile_chat_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db import create_database_engine, create_session_factory
+from app.middleware.observability import ObservabilityMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.persona import PersonaLoader
+from app.services.telemetry import (
+    init_telemetry,
+    instrument_fastapi,
+    instrument_sqlalchemy,
+    shutdown_telemetry,
+)
 
 
 def _create_embedding_service(settings):
@@ -142,7 +150,10 @@ async def lifespan(app: FastAPI):
     logger = structlog.get_logger(__name__)
     configure_logging(settings.log_level)
     try:
+        init_telemetry(settings)
+        instrument_fastapi(app)
         db_engine = create_database_engine(settings)
+        instrument_sqlalchemy(db_engine)
         app.state.settings = settings
         app.state.db_engine = db_engine
         app.state.session_factory = create_session_factory(db_engine)
@@ -183,6 +194,7 @@ async def lifespan(app: FastAPI):
     except Exception as error:
         logger.error("app.startup_failed", error=str(error))
         await _close_app_resources(app, logger)
+        shutdown_telemetry()
         raise
 
     logger.info("app.startup", log_level=settings.log_level)
@@ -191,12 +203,15 @@ async def lifespan(app: FastAPI):
     finally:
         await _close_app_resources(app, logger)
         logger.info("app.shutdown")
+        shutdown_telemetry()
 
 
 app = FastAPI(title="ProxyMind API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(ObservabilityMiddleware)
 app.include_router(admin_router)
 app.include_router(profile_admin_router)
 app.include_router(chat_router)
 app.include_router(profile_chat_router)
 app.include_router(health_router)
+app.include_router(metrics_router)

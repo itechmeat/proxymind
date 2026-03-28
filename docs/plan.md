@@ -206,7 +206,7 @@ Phase outcome: the product is secured, observable, and auditable.
   - Tasks: auth middleware, key config, error responses, rate limit middleware, Redis counters, keep admin auth isolated from future visitor identity for channel connectors
   - **Parallel pair:** S6-01 (Commerce backend) — security middleware vs commerce domain, minimal overlap
 
-- [ ] **S7-02: Observability — audit logging + monitoring**
+- [x] **S7-02: Observability — audit logging + monitoring**
       Audit: every response → audit_logs with `snapshot_id`, `source_ids`, `config_commit_hash`, `config_content_hash`, timestamp, session_id. Monitoring: Prometheus `/metrics`, Grafana dashboard, OpenTelemetry tracing, correlation ids.
   - **Outcome:** every response reproducible; system observable
   - **Verification:** conversation → audit records with full data; dashboard with metrics; end-to-end request trace

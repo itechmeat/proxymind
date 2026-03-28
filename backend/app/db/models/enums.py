@@ -110,6 +110,12 @@ class MessageStatus(StrEnum):
     FAILED = "failed"
 
 
+class AuditLogStatus(StrEnum):
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+    FAILED = "failed"
+
+
 class BatchOperationType(StrEnum):
     EMBEDDING = "embedding"
     TEXT_EXTRACTION = "text_extraction"

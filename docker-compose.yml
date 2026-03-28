@@ -66,6 +66,69 @@ services:
       retries: 5
       start_period: 10s
 
+  tempo:
+    image: grafana/tempo:2.10.3
+    command:
+      - -config.file=/etc/tempo/tempo.yml
+    ports:
+      - "3200:3200"
+    volumes:
+      - ./monitoring/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+      - tempo-data:/var/tempo
+    healthcheck:
+      test: ["CMD", "/tempo", "-version"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  prometheus:
+    image: prom/prometheus:v3.10.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      api:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9090/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  grafana:
+    image: grafana/grafana:12.4.1
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/proxymind-overview.json
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:3000/api/health | grep -q ok || exit 1",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
   api:
     build:
       context: ./backend
@@ -80,6 +143,10 @@ services:
     environment:
       PERSONA_DIR: /app/persona
       CONFIG_DIR: /app/config
+      OTEL_ENABLED: ${OTEL_ENABLED:-true}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-proxymind-api}
+      OTEL_ENVIRONMENT: ${OTEL_ENVIRONMENT:-docker-compose}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
     ports:
       - "8000:8000"
     volumes:
@@ -120,6 +187,10 @@ services:
       - ./backend/.env
     environment:
       SKIP_MIGRATIONS: "1"
+      OTEL_ENABLED: ${OTEL_ENABLED:-true}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-proxymind-worker}
+      OTEL_ENVIRONMENT: ${OTEL_ENVIRONMENT:-docker-compose}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
     depends_on:
       postgres:
         condition: service_healthy
@@ -161,7 +232,10 @@ services:
         condition: service_healthy
 
 volumes:
+  grafana-data:
   postgres-data:
+  prometheus-data:
   qdrant-data:
   seaweedfs-data:
+  tempo-data:
   redis-data:

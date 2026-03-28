@@ -7,6 +7,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app.services.metrics import RATE_LIMIT_HITS_TOTAL
+
 logger = structlog.get_logger(__name__)
 
 _CHAT_PREFIX = "/api/chat"
@@ -49,6 +51,7 @@ class RateLimitMiddleware:
 
         if weighted_count > limit:
             retry_after = max(1, reset_at - int(now))
+            RATE_LIMIT_HITS_TOTAL.inc()
             response = JSONResponse(
                 status_code=429,
                 content={"detail": "Rate limit exceeded"},

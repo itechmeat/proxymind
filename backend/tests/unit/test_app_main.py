@@ -53,6 +53,10 @@ def _settings() -> SimpleNamespace:
         chat_rate_limit=60,
         chat_rate_window_seconds=60,
         trusted_proxy_depth=1,
+        otel_enabled=False,
+        otel_service_name="proxymind-api",
+        otel_environment="test",
+        otel_exporter_otlp_endpoint="http://tempo:4317",
     )
 
 
@@ -258,11 +262,13 @@ async def test_lifespan_loads_persona_context(
 
 
 def test_rate_limit_middleware_is_mounted() -> None:
+    from app.middleware.observability import ObservabilityMiddleware
     from app.middleware.rate_limit import RateLimitMiddleware
 
     middleware_classes = [middleware.cls for middleware in app_main.app.user_middleware]
 
     assert RateLimitMiddleware in middleware_classes
+    assert ObservabilityMiddleware in middleware_classes
 
 
 @pytest.mark.asyncio

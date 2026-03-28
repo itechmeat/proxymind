@@ -70,6 +70,7 @@ This separation ensures resilience: chat does not depend on heavy indexing, and 
 | Caddy         | 2.11.2+                          | Reverse proxy, auto-HTTPS            |
 | Prometheus    | 3.10.0+                          | Metrics                              |
 | Grafana       | 12.4.1+                          | Dashboards                           |
+| Grafana Tempo | 2.10.3+                          | Trace storage (OTLP receiver)        |
 | OpenTelemetry | Collector 1.53.0+ / spec 1.55.0+ | Distributed tracing, correlation ids |
 
 ## Knowledge architecture

@@ -33,6 +33,7 @@ async def test_process_batch_embed_uses_stored_chunk_order() -> None:
         result_metadata={"source_ids": []},
     )
     batch_job = SimpleNamespace(
+        id=uuid.uuid7(),
         result_metadata={"chunk_ids": [str(second_chunk_id), str(first_chunk_id)]},
         status=BatchStatus.PENDING,
         error_message=None,
@@ -84,6 +85,7 @@ async def test_process_batch_embed_fails_on_malformed_chunk_ids() -> None:
         result_metadata={"source_ids": []},
     )
     batch_job = SimpleNamespace(
+        id=uuid.uuid7(),
         result_metadata={"chunk_ids": ["not-a-uuid"]},
         status=BatchStatus.PENDING,
         error_message=None,
@@ -157,6 +159,7 @@ async def test_process_batch_embed_marks_task_failed_when_submit_raises() -> Non
         result_metadata={"source_ids": []},
     )
     batch_job = SimpleNamespace(
+        id=uuid.uuid7(),
         result_metadata={"chunk_ids": [str(chunk_id)]},
         status=BatchStatus.PENDING,
         error_message=None,
@@ -168,7 +171,7 @@ async def test_process_batch_embed_marks_task_failed_when_submit_raises() -> Non
         status=ChunkStatus.PENDING,
     )
     session = SimpleNamespace(
-        get=AsyncMock(side_effect=[task, task]),
+        get=AsyncMock(side_effect=[task, task, batch_job]),
         scalar=AsyncMock(return_value=batch_job),
         scalars=AsyncMock(return_value=SimpleNamespace(all=lambda: [chunk])),
         commit=AsyncMock(),
@@ -194,5 +197,7 @@ async def test_process_batch_embed_marks_task_failed_when_submit_raises() -> Non
 
     assert task.status is BackgroundTaskStatus.FAILED
     assert task.error_message == "submit failed"
+    assert batch_job.status is BatchStatus.FAILED
+    assert batch_job.error_message == "submit failed"
     session.rollback.assert_awaited_once()
     assert session.commit.await_count == 2

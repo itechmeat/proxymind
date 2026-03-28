@@ -27,6 +27,7 @@ from app.db.models.enums import (
     TaskType,
 )
 from app.services.path_router import determine_path, inspect_file
+from app.workers.observability import observe_background_job
 from app.workers.tasks.pipeline import (
     BatchSubmittedResult,
     PipelineServices,
@@ -110,19 +111,30 @@ def _load_pipeline_services(ctx: dict[str, Any]) -> PipelineServices:
     )
 
 
-async def process_ingestion(ctx: dict[str, Any], task_id: str) -> None:
+async def process_ingestion(
+    ctx: dict[str, Any],
+    task_id: str,
+    *,
+    correlation_id: str | None = None,
+) -> None:
     session_factory = ctx["session_factory"]
+    worker_redis_client = ctx.get("worker_redis_client")
     if not isinstance(session_factory, async_sessionmaker):
         raise RuntimeError("Worker context is missing a valid session factory")
 
-    try:
-        task_uuid = uuid.UUID(task_id)
-    except ValueError:
-        logger.warning("worker.ingestion.invalid_task_id", task_id=task_id)
-        return
+    async with observe_background_job(
+        task_name="process_ingestion",
+        correlation_id=correlation_id,
+        redis_client=worker_redis_client,
+    ):
+        try:
+            task_uuid = uuid.UUID(task_id)
+        except ValueError:
+            logger.warning("worker.ingestion.invalid_task_id", task_id=task_id)
+            return
 
-    async with session_factory() as session:
-        await _process_task(ctx, session, task_uuid)
+        async with session_factory() as session:
+            await _process_task(ctx, session, task_uuid)
 
 
 async def _process_task(

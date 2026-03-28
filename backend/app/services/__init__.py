@@ -1,6 +1,7 @@
 from importlib import import_module
 
 _EXPORTS = {
+    "AuditService": ("app.services.audit", "AuditService"),
     "CatalogItemConflictError": ("app.services.catalog", "CatalogItemConflictError"),
     "CatalogItemInfo": ("app.services.catalog", "CatalogItemInfo"),
     "CatalogItemNotFoundError": ("app.services.catalog", "CatalogItemNotFoundError"),
@@ -67,6 +68,7 @@ def __dir__() -> list[str]:
     return sorted(list(globals()) + list(_EXPORTS))
 
 __all__ = [
+    "AuditService",
     "CatalogItemConflictError",
     "CatalogItemInfo",
     "CatalogItemNotFoundError",

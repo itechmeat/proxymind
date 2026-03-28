@@ -32,6 +32,7 @@ class AuditLog(PrimaryKeyMixin, Base):
     token_count_completion: Mapped[int | None] = mapped_column(Integer, nullable=True)
     retrieval_chunks_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
 class BatchJob(PrimaryKeyMixin, TimestampMixin, Base):
