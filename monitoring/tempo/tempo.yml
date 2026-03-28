@@ -1,0 +1,22 @@
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          # The receiver stays on the internal Compose network; docker-compose.yml does not
+          # publish port 4317 to the host, so API and worker can reach Tempo without exposing
+          # the ingest endpoint outside the stack.
+          endpoint: 0.0.0.0:4317
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/traces
+
+compactor:
+  compaction:
+    block_retention: 24h

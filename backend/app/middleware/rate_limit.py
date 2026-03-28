@@ -7,6 +7,11 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+try:
+    from app.services.metrics import RATE_LIMIT_HITS_TOTAL
+except ImportError:
+    RATE_LIMIT_HITS_TOTAL = None
+
 logger = structlog.get_logger(__name__)
 
 _CHAT_PREFIX = "/api/chat"
@@ -66,6 +71,8 @@ class RateLimitMiddleware:
                 weighted_count=round(weighted_count, 1),
                 limit=limit,
             )
+            if RATE_LIMIT_HITS_TOTAL is not None:
+                RATE_LIMIT_HITS_TOTAL.inc()
             await response(scope, receive, send)
             return
 

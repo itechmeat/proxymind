@@ -123,6 +123,7 @@ def _make_service(
         return RewriteResult(query=rewritten_query, is_rewritten=True, original_query=query)
 
     rewrite_service = SimpleNamespace(rewrite=AsyncMock(side_effect=_rewrite))
+    audit_service = SimpleNamespace(log_response=AsyncMock())
     context_assembler = ContextAssembler(
         persona_context=persona_context,
         promotions_service=PromotionsService(promotions_text=""),
@@ -144,6 +145,7 @@ def _make_service(
         max_citations_per_response=max_citations_per_response,
         conversation_memory_service=conversation_memory_service,
         summary_enqueuer=summary_enqueuer,
+        audit_service=audit_service,
     )
     return service, retrieval_service, llm_service
 

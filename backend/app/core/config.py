@@ -88,6 +88,13 @@ class Settings(BaseSettings):
     chat_rate_window_seconds: int = Field(default=60, ge=1)
     trusted_proxy_depth: int = Field(default=1, ge=1)
     upload_max_file_size_mb: int = Field(default=100, ge=1)
+    otel_enabled: bool = Field(default=False)
+    otel_service_name: str = Field(default="proxymind-api", min_length=1)
+    otel_environment: str = Field(default="development", min_length=1)
+    otel_exporter_otlp_endpoint: str = Field(
+        default="http://tempo:4317",
+        min_length=1,
+    )
 
     model_config = SettingsConfigDict(
         env_file=(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import secrets
 
 import structlog
@@ -51,3 +52,51 @@ async def verify_admin_key(
             detail="Invalid or missing API key",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+def _is_private_client(host: str | None) -> bool:
+    if not host:
+        return False
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return address.is_private or address.is_loopback
+
+
+async def verify_metrics_access(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Security(_bearer_scheme),
+) -> None:
+    configured_key = _extract_admin_key(request.app.state.settings.admin_api_key)
+    client_ip = request.client.host if request.client else None
+
+    if configured_key:
+        if credentials is not None and secrets.compare_digest(
+            credentials.credentials.encode(),
+            configured_key.encode(),
+        ):
+            return
+        logger.warning(
+            "metrics.auth.failed",
+            path=request.url.path,
+            client_ip=client_ip or "unknown",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if _is_private_client(client_ip):
+        return
+
+    logger.warning(
+        "metrics.access.denied",
+        path=request.url.path,
+        client_ip=client_ip or "unknown",
+    )
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Metrics endpoint is restricted to private network clients",
+    )

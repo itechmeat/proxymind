@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from types import ModuleType, SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -20,6 +20,7 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
     settings = SimpleNamespace(
         seaweedfs_filer_url="http://localhost:8888",
         seaweedfs_sources_path="/sources",
+        redis_url="redis://localhost:6379/0",
         qdrant_url="http://localhost:6333",
         qdrant_collection="proxymind_chunks",
         embedding_dimensions=3,
@@ -35,6 +36,7 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
         llm_model="openai/gpt-4o",
         llm_api_key=None,
         llm_api_base=None,
+        log_level="info",
         conversation_summary_model=None,
         conversation_summary_temperature=0.1,
         document_ai_project_id=None,
@@ -42,6 +44,10 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
         document_ai_processor_id=None,
         document_ai_enabled=False,
         chunk_max_tokens=1024,
+        otel_enabled=False,
+        otel_service_name="proxymind-api",
+        otel_environment="test",
+        otel_exporter_otlp_endpoint="http://tempo:4317",
         path_c_min_chars_per_page=50,
         path_a_text_threshold_pdf=2000,
         path_a_text_threshold_media=500,
@@ -50,6 +56,7 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
         path_a_max_video_duration_sec=120,
     )
     storage_http_client = SimpleNamespace(aclose=AsyncMock())
+    worker_redis_client = SimpleNamespace(aclose=AsyncMock())
     qdrant_client = object()
     qdrant_service = SimpleNamespace(ensure_collection=AsyncMock())
     storage_service = SimpleNamespace(ensure_storage_root=AsyncMock())
@@ -57,8 +64,17 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
     ctx: dict[str, object] = {}
 
     monkeypatch.setattr(main, "settings", settings)
+    monkeypatch.setattr(main, "configure_logging", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(main, "init_telemetry", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(main, "instrument_sqlalchemy", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(main, "update_queue_depth", AsyncMock())
     monkeypatch.setattr(main, "create_database_engine", lambda _settings: object())
     monkeypatch.setattr(main, "create_session_factory", lambda _engine: object())
+    monkeypatch.setattr(
+        main,
+        "Redis",
+        SimpleNamespace(from_url=lambda _url: worker_redis_client),
+    )
     monkeypatch.setattr(
         main.httpx,
         "AsyncClient",
@@ -120,6 +136,7 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
     assert ctx["gemini_content_service"] is gemini_content_service
     assert ctx["summary_llm_service"] is summary_llm_service
     assert ctx["tokenizer"] is tokenizer
+    assert ctx["worker_redis_client"] is worker_redis_client
     assert ctx["path_a_text_threshold_pdf"] == 2000
     assert ctx["path_a_text_threshold_media"] == 500
     assert ctx["path_a_max_pdf_pages"] == 6
@@ -132,15 +149,51 @@ async def test_on_shutdown_disposes_engine_even_if_qdrant_close_fails() -> None:
     engine = SimpleNamespace(dispose=AsyncMock())
     qdrant_service = SimpleNamespace(close=AsyncMock(side_effect=RuntimeError("boom")))
     storage_http_client = SimpleNamespace(aclose=AsyncMock())
+    worker_redis_client = SimpleNamespace(aclose=AsyncMock())
 
-    await main.on_shutdown(
-        {
-            "db_engine": engine,
-            "qdrant_service": qdrant_service,
-            "storage_http_client": storage_http_client,
-        }
-    )
+    original_shutdown = main.shutdown_telemetry
+    shutdown_telemetry = MagicMock()
+    main.shutdown_telemetry = shutdown_telemetry  # type: ignore[assignment]
+    try:
+        await main.on_shutdown(
+            {
+                "db_engine": engine,
+                "qdrant_service": qdrant_service,
+                "storage_http_client": storage_http_client,
+                "worker_redis_client": worker_redis_client,
+            }
+        )
+    finally:
+        main.shutdown_telemetry = original_shutdown  # type: ignore[assignment]
 
     qdrant_service.close.assert_awaited_once()
     storage_http_client.aclose.assert_awaited_once()
+    worker_redis_client.aclose.assert_awaited_once()
     engine.dispose.assert_awaited_once()
+    shutdown_telemetry.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_on_shutdown_stops_telemetry_before_engine_dispose() -> None:
+    call_order: list[str] = []
+
+    async def dispose() -> None:
+        call_order.append("dispose")
+
+    engine = SimpleNamespace(dispose=AsyncMock(side_effect=dispose))
+    original_shutdown = main.shutdown_telemetry
+
+    def shutdown() -> None:
+        call_order.append("telemetry")
+
+    main.shutdown_telemetry = shutdown  # type: ignore[assignment]
+    try:
+        await main.on_shutdown({"db_engine": engine})
+    finally:
+        main.shutdown_telemetry = original_shutdown  # type: ignore[assignment]
+
+    assert call_order == ["telemetry", "dispose"]
+
+
+def test_worker_settings_register_queue_probe() -> None:
+    assert main.probe_queue_depth in main.WorkerSettings.functions

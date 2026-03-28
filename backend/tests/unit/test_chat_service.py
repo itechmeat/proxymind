@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -101,6 +102,7 @@ def _make_service(
         return RewriteResult(query=rewritten_query, is_rewritten=True, original_query=query)
 
     rewrite_service = SimpleNamespace(rewrite=AsyncMock(side_effect=_rewrite))
+    audit_service = SimpleNamespace(log_response=AsyncMock())
     context_assembler = ContextAssembler(
         persona_context=persona_context,
         promotions_service=PromotionsService(promotions_text=""),
@@ -120,6 +122,7 @@ def _make_service(
         min_retrieved_chunks=min_retrieved_chunks,
         conversation_memory_service=conversation_memory_service,
         summary_enqueuer=summary_enqueuer,
+        audit_service=audit_service,
     )
     return service, retrieval_service, llm_service
 
@@ -626,6 +629,121 @@ async def test_answer_enqueues_summary_without_window_start_when_window_is_empty
     await service.answer(session_id=chat_session.id, text="Question?")
 
     summary_enqueuer.assert_awaited_once_with(str(chat_session.id), None)
+
+
+@pytest.mark.asyncio
+async def test_log_audit_is_noop_without_audit_service(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    service, _, _ = _make_service(db_session, persona_context=persona_context)
+    chat_session = await service.create_session()
+    message = await service._persist_message(
+        chat_session,
+        role=MessageRole.ASSISTANT,
+        content="audit",
+        status=MessageStatus.COMPLETE,
+        snapshot_id=None,
+    )
+
+    await service._log_audit(message=message, retrieval_chunks_count=0, latency_ms=10)
+
+
+@pytest.mark.asyncio
+async def test_log_audit_delegates_to_audit_service(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    audit_service = SimpleNamespace(log_response=AsyncMock())
+    service, _, _ = _make_service(db_session, persona_context=persona_context)
+    service._audit_service = audit_service
+    chat_session = await service.create_session()
+    message = await service._persist_message(
+        chat_session,
+        role=MessageRole.ASSISTANT,
+        content="audit",
+        status=MessageStatus.COMPLETE,
+        snapshot_id=None,
+    )
+
+    await service._log_audit(message=message, retrieval_chunks_count=2, latency_ms=20)
+
+    audit_service.log_response.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_log_audit_swallows_audit_service_errors(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    audit_service = SimpleNamespace(log_response=AsyncMock(side_effect=RuntimeError("boom")))
+    service, _, _ = _make_service(db_session, persona_context=persona_context)
+    service._audit_service = audit_service
+    service._logger = MagicMock()
+    chat_session = await service.create_session()
+    message = await service._persist_message(
+        chat_session,
+        role=MessageRole.ASSISTANT,
+        content="audit",
+        status=MessageStatus.COMPLETE,
+        snapshot_id=None,
+    )
+
+    await service._log_audit(message=message, retrieval_chunks_count=2, latency_ms=20)
+
+    service._logger.error.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_save_partial_on_disconnect_logs_partial_audit(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    service, _, _ = _make_service(db_session, persona_context=persona_context)
+    service._audit_service = SimpleNamespace(log_response=AsyncMock())
+    chat_session = await service.create_session()
+    message = await service._persist_message(
+        chat_session,
+        role=MessageRole.ASSISTANT,
+        content="",
+        status=MessageStatus.STREAMING,
+        snapshot_id=chat_session.snapshot_id,
+        source_ids=[uuid.uuid4()],
+    )
+    message.created_at = datetime.now(UTC) - timedelta(seconds=2)
+
+    await service.save_partial_on_disconnect(message.id, "partial")
+
+    service._audit_service.log_response.assert_awaited_once()
+    assert service._audit_service.log_response.await_args.kwargs["status"] == "partial"
+    assert service._audit_service.log_response.await_args.kwargs["latency_ms"] >= 2000
+
+
+@pytest.mark.asyncio
+async def test_save_failed_on_timeout_logs_failed_audit(
+    db_session: AsyncSession,
+    persona_context: PersonaContext,
+) -> None:
+    await _create_snapshot(db_session, status=SnapshotStatus.ACTIVE)
+    service, _, _ = _make_service(db_session, persona_context=persona_context)
+    service._audit_service = SimpleNamespace(log_response=AsyncMock())
+    chat_session = await service.create_session()
+    message = await service._persist_message(
+        chat_session,
+        role=MessageRole.ASSISTANT,
+        content="",
+        status=MessageStatus.STREAMING,
+        snapshot_id=chat_session.snapshot_id,
+        source_ids=[uuid.uuid4()],
+    )
+    message.created_at = datetime.now(UTC) - timedelta(seconds=3)
+
+    await service.save_failed_on_timeout(message.id, "timed out")
+
+    service._audit_service.log_response.assert_awaited_once()
+    assert service._audit_service.log_response.await_args.kwargs["status"] == "failed"
+    assert service._audit_service.log_response.await_args.kwargs["latency_ms"] >= 3000
 
 
 @pytest.mark.asyncio

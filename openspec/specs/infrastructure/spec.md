@@ -2,19 +2,23 @@
 
 ### Requirement: Docker Compose services
 
-Docker Compose SHALL define six services: `postgres`, `qdrant`, `seaweedfs`, `redis`, `api`, and `worker`. Each service SHALL use image versions at or above the minimums specified in `docs/spec.md`. The `api` service SHALL build from `./backend` and expose port 8000. The `worker` service SHALL build from `./backend` with the command `python -m app.workers.run`. The `worker` service SHALL use the same Docker image as `api` but with a different startup command. The `worker` service SHALL set `SKIP_MIGRATIONS=1` so the worker does not race the API container during Alembic startup. The `worker` service SHALL NOT expose any ports and SHALL NOT require a healthcheck.
+**[Modified by S7-02]** Docker Compose SHALL define nine runtime services: `postgres`, `qdrant`, `seaweedfs`, `redis`, `api`, `worker`, `prometheus`, `grafana`, and `tempo` (excluding `backend-test` which is a test-only container). Each service SHALL use image versions at or above the minimums specified in `docs/spec.md`. The `api` service SHALL build from `./backend` and expose port 8000. The `worker` service SHALL build from `./backend` with the command `python -m app.workers.run`. The `worker` service SHALL use the same Docker image as `api` but with a different startup command. The `worker` service SHALL set `SKIP_MIGRATIONS=1` so the worker does not race the API container during Alembic startup. The `worker` service SHALL NOT expose any ports and SHALL NOT require a healthcheck.
 
-The `seaweedfs` service SHALL use the `chrislusf/seaweedfs:latest` image and run `server -filer -dir=/data -master.port=9333 -filer.port=8888 -volume.port=9340` as the command. It SHALL expose port `8888` (Filer HTTP API) and port `9333` (Master). Port `9340` (volume server) SHALL NOT be exposed — the Filer communicates with it internally. The service SHALL use the `seaweedfs-data` named volume mounted at `/data`.
+The `prometheus` service SHALL define a healthcheck using `wget --spider -q http://127.0.0.1:9090/-/healthy`. The `grafana` service SHALL define a healthcheck using `wget --spider -q http://127.0.0.1:3000/api/health`. The `tempo` service SHALL define a healthcheck using `test: ["CMD", "/tempo", "-health"]` so the distroless Tempo image is checked via its native readiness command.
+
+The `seaweedfs` service SHALL use the `chrislusf/seaweedfs:latest` image and run `weed server -filer -dir=/data -master.port=9333 -filer.port=8888 -volume.port=9340` as the command. It SHALL expose port `8888` (Filer HTTP API) and port `9333` (Master). Port `9340` (volume server) SHALL NOT be exposed -- the Filer communicates with it internally. The service SHALL use the `seaweedfs-data` named volume mounted at `/data`.
+
+The `prometheus` service SHALL use image `prom/prometheus:v3.10.0`, expose port `9090`, and mount `monitoring/prometheus/prometheus.yml` at `/etc/prometheus/prometheus.yml`. The `grafana` service SHALL use image `grafana/grafana:12.4.1`, expose port `3000`, and mount provisioning and dashboard files from `monitoring/grafana/`. The `tempo` service SHALL use image `grafana/tempo:2.10.3`, expose port `3200` (HTTP API) to the host, keep OTLP gRPC port `4317` internal to the Compose network, and mount `monitoring/tempo/tempo.yml`.
 
 #### Scenario: All services start successfully
 
 - **WHEN** `docker-compose up` is executed after the one-time local setup (copying `.env.example` files)
-- **THEN** all six services SHALL reach a running state without errors
+- **THEN** all nine runtime services SHALL reach a running state without errors
 
 #### Scenario: Image versions meet spec minimums
 
 - **WHEN** inspecting docker-compose.yml service definitions
-- **THEN** PostgreSQL SHALL use image tag `18` or higher, Qdrant SHALL use `qdrant/qdrant` at 1.17+, Redis SHALL use image tag `8` or higher, SeaweedFS SHALL use `chrislusf/seaweedfs:latest`, and the `api` service SHALL build from `./backend`
+- **THEN** PostgreSQL SHALL use image tag `18` or higher, Qdrant SHALL use `qdrant/qdrant` at 1.17+, Redis SHALL use image tag `8` or higher, SeaweedFS SHALL use `chrislusf/seaweedfs:latest`, Prometheus SHALL use `prom/prometheus:v3.10.0` or higher, Grafana SHALL use `grafana/grafana:12.4.1` or higher, Tempo SHALL use `grafana/tempo:2.10.3` or higher, and the `api` service SHALL build from `./backend`
 
 #### Scenario: Worker service exists in Docker Compose
 
@@ -38,6 +42,12 @@ The `seaweedfs` service SHALL use the `chrislusf/seaweedfs:latest` image and run
 - **THEN** it SHALL declare `env_file` that includes both the root `.env` and `backend/.env`
 - **AND** it SHALL set `SKIP_MIGRATIONS=1`
 
+#### Scenario: API and worker enable OTel tracing via environment
+
+- **WHEN** the `api` and `worker` service definitions are inspected in `docker-compose.yml`
+- **THEN** both SHALL set `OTEL_ENABLED=true` in their `environment` section
+- **AND** this SHALL override the application default of `False`, enabling tracing only when the full monitoring stack is running
+
 #### Scenario: Worker has no port mapping
 
 - **WHEN** the `worker` service definition is inspected
@@ -49,11 +59,54 @@ The `seaweedfs` service SHALL use the `chrislusf/seaweedfs:latest` image and run
 - **THEN** it SHALL run `weed server -filer` with master, volume, and filer in a single process
 - **AND** it SHALL use LevelDB (the built-in default) for Filer metadata storage
 
+#### Scenario: Monitoring services exist in Docker Compose
+
+- **WHEN** `docker compose config --services` is executed
+- **THEN** the output SHALL include `prometheus`, `grafana`, and `tempo`
+
+#### Scenario: Prometheus service configuration
+
+- **WHEN** the `prometheus` service definition is inspected
+- **THEN** it SHALL use image `prom/prometheus:v3.10.0`
+- **AND** it SHALL expose port `9090`
+- **AND** it SHALL mount `monitoring/prometheus/prometheus.yml` as a volume
+
+#### Scenario: Grafana service configuration
+
+- **WHEN** the `grafana` service definition is inspected
+- **THEN** it SHALL use image `grafana/grafana:12.4.1`
+- **AND** it SHALL expose port `3000`
+- **AND** it SHALL mount provisioning files from `monitoring/grafana/provisioning/`
+- **AND** it SHALL mount dashboards from `monitoring/grafana/dashboards/`
+- **AND** it SHALL depend on `prometheus` and `tempo`
+
+#### Scenario: Tempo service configuration
+
+- **WHEN** the `tempo` service definition is inspected
+- **THEN** it SHALL use image `grafana/tempo:2.10.3`
+- **AND** it SHALL expose port `3200` to the host while keeping OTLP gRPC internal to the Compose network
+- **AND** it SHALL mount `monitoring/tempo/tempo.yml` as a volume
+
+#### Scenario: Prometheus health check is configured
+
+- **WHEN** the `prometheus` service healthcheck is inspected in `docker-compose.yml`
+- **THEN** it SHALL define a healthcheck with test `wget --spider -q http://127.0.0.1:9090/-/healthy`
+
+#### Scenario: Grafana health check is configured
+
+- **WHEN** the `grafana` service healthcheck is inspected in `docker-compose.yml`
+- **THEN** it SHALL define a healthcheck with test `wget --spider -q http://127.0.0.1:3000/api/health`
+
+#### Scenario: Tempo health check is configured
+
+- **WHEN** the `tempo` service healthcheck is inspected in `docker-compose.yml`
+- **THEN** it SHALL define a healthcheck with test `test: ["CMD", "/tempo", "-health"]`
+
 ---
 
 ### Requirement: Service healthchecks
 
-Each service in Docker Compose SHALL define a `healthcheck` configuration that verifies the service is operational.
+Each long-running Docker Compose service except `worker` SHALL define a `healthcheck` configuration that verifies the service is operational.
 
 #### Scenario: PostgreSQL healthcheck
 
@@ -97,12 +150,55 @@ The `api` service SHALL declare `depends_on` with `condition: service_healthy` f
 
 ### Requirement: Persistent volumes
 
-Docker Compose SHALL define named volumes for services that require data persistence across container restarts. The volume `seaweedfs-data` SHALL replace the former `minio-data` volume.
+**[Modified by S7-02]** Docker Compose SHALL define named volumes for services that require data persistence across container restarts. The volume `seaweedfs-data` SHALL replace the former `minio-data` volume. Three additional named volumes SHALL be defined for monitoring services: `prometheus-data`, `grafana-data`, and `tempo-data`.
 
 #### Scenario: Store data persists across restarts
 
 - **WHEN** `docker-compose down` followed by `docker-compose up` is executed (without `-v` flag)
 - **THEN** PostgreSQL, Qdrant, SeaweedFS, and Redis data SHALL be preserved
+
+#### Scenario: Monitoring data persists across restarts
+
+- **WHEN** `docker-compose down` followed by `docker-compose up` is executed (without `-v` flag)
+- **THEN** Prometheus metrics history, Grafana settings, and Tempo traces SHALL be preserved
+
+#### Scenario: All named volumes defined
+
+- **WHEN** the `volumes` section of `docker-compose.yml` is inspected
+- **THEN** it SHALL include: `postgres-data`, `qdrant-data`, `seaweedfs-data`, `redis-data`, `prometheus-data`, `grafana-data`, `tempo-data`
+
+---
+
+### Requirement: Monitoring configuration directories
+
+**[Added by S7-02]** The repository SHALL contain monitoring configuration files in a `monitoring/` directory at the project root with the following structure:
+
+```
+monitoring/
+	prometheus/
+		prometheus.yml
+	tempo/
+		tempo.yml
+	grafana/
+		provisioning/
+			datasources/
+				datasources.yml
+			dashboards/
+				dashboards.yml
+		dashboards/
+			proxymind-overview.json
+```
+
+#### Scenario: Configuration directory structure exists
+
+- **WHEN** the repository is inspected
+- **THEN** all five configuration files SHALL exist at the specified paths under `monitoring/`
+
+#### Scenario: Configuration files are valid
+
+- **WHEN** the YAML configuration files are parsed
+- **THEN** `prometheus.yml`, `tempo.yml`, `datasources.yml`, and `dashboards.yml` SHALL be valid YAML
+- **AND** `proxymind-overview.json` SHALL be valid JSON
 
 ---
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import time
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -16,11 +17,13 @@ from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
 from app.db.models import CatalogItem, Message, Session, Source
 from app.db.models.enums import MessageRole, MessageStatus, SessionChannel, SessionStatus
 from app.persona.loader import PersonaContext
+from app.services.audit import AuditService
 from app.services.citation import Citation, CitationService, SourceInfo
 from app.services.content_type import compute_content_type_spans
 from app.services.context_assembler import ContextAssembler
 from app.services.conversation_memory import ConversationMemoryService, MemoryBlock
 from app.services.llm_types import LLMToken
+from app.services.metrics import CHAT_RESPONSES_TOTAL, CHAT_RESPONSE_LATENCY_SECONDS
 from app.services.product_recommendation import ProductRecommendation, ProductRecommendationService
 from app.services.prompt import NO_CONTEXT_REFUSAL
 from app.services.qdrant import RetrievedChunk
@@ -129,6 +132,7 @@ class ChatService:
         max_citations_per_response: int = 5,
         conversation_memory_service: ConversationMemoryService | None = None,
         summary_enqueuer: SummaryEnqueuer | None = None,
+        audit_service: AuditService,
     ) -> None:
         self._session = session
         self._snapshot_service = snapshot_service
@@ -140,6 +144,7 @@ class ChatService:
         self._max_citations_per_response = max_citations_per_response
         self._conversation_memory_service = conversation_memory_service
         self._summary_enqueuer = summary_enqueuer
+        self._audit_service = audit_service
         self._logger = structlog.get_logger(__name__)
 
     @property
@@ -180,6 +185,7 @@ class ChatService:
         session_id: uuid.UUID,
         text: str,
     ) -> ChatAnswerResult:
+        started_at = time.perf_counter()
         chat_session = await self._load_session(session_id)
         snapshot_id = await self._ensure_snapshot_binding(chat_session)
 
@@ -232,6 +238,13 @@ class ChatService:
                     min_retrieved_chunks=self._min_retrieved_chunks,
                     config_commit_hash=self._persona_context.config_commit_hash,
                     config_content_hash=self._persona_context.config_content_hash,
+                )
+                latency_ms = self._latency_ms(started_at)
+                self._record_response_metrics(status=MessageStatus.COMPLETE, latency_ms=latency_ms)
+                await self._log_audit(
+                    message=assistant_message,
+                    retrieval_chunks_count=len(retrieved_chunks),
+                    latency_ms=latency_ms,
                 )
                 return ChatAnswerResult(
                     assistant_message=assistant_message,
@@ -298,14 +311,22 @@ class ChatService:
                 config_commit_hash=self._persona_context.config_commit_hash,
                 config_content_hash=self._persona_context.config_content_hash,
             )
+            latency_ms = self._latency_ms(started_at)
+            self._record_response_metrics(status=MessageStatus.COMPLETE, latency_ms=latency_ms)
+            await self._log_audit(
+                message=assistant_message,
+                retrieval_chunks_count=len(selected_chunks),
+                latency_ms=latency_ms,
+            )
             await self._maybe_enqueue_summary(memory_block, chat_session.id)
             return ChatAnswerResult(
                 assistant_message=assistant_message,
                 retrieved_chunks_count=len(selected_chunks),
             )
         except Exception as error:
+            failed_message: Message | None = None
             try:
-                await self._persist_message(
+                failed_message = await self._persist_message(
                     chat_session,
                     role=MessageRole.ASSISTANT,
                     content=FAILED_ASSISTANT_CONTENT,
@@ -330,6 +351,14 @@ class ChatService:
                 retrieved_chunks_count=len(retrieved_chunks),
                 error=str(error),
             )
+            latency_ms = self._latency_ms(started_at)
+            self._record_response_metrics(status=MessageStatus.FAILED, latency_ms=latency_ms)
+            if failed_message is not None:
+                await self._log_audit(
+                    message=failed_message,
+                    retrieval_chunks_count=len(retrieved_chunks),
+                    latency_ms=latency_ms,
+                )
             raise
 
     async def stream_answer(
@@ -339,6 +368,7 @@ class ChatService:
         text: str,
         idempotency_key: str | None = None,
     ) -> AsyncIterator[ChatStreamEvent]:
+        started_at = time.perf_counter()
         chat_session = await self._load_session(session_id)
         snapshot_id = await self._ensure_snapshot_binding(chat_session)
         user_message: Message | None = None
@@ -418,6 +448,13 @@ class ChatService:
                 min_retrieved_chunks=self._min_retrieved_chunks,
                 config_commit_hash=self._persona_context.config_commit_hash,
                 config_content_hash=self._persona_context.config_content_hash,
+            )
+            latency_ms = self._latency_ms(started_at)
+            self._record_response_metrics(status=MessageStatus.COMPLETE, latency_ms=latency_ms)
+            await self._log_audit(
+                message=assistant_message,
+                retrieval_chunks_count=len(retrieved_chunks),
+                latency_ms=latency_ms,
             )
             yield ChatStreamMeta(
                 message_id=assistant_message.id,
@@ -511,6 +548,16 @@ class ChatService:
                     config_commit_hash=self._persona_context.config_commit_hash,
                     config_content_hash=self._persona_context.config_content_hash,
                 )
+                latency_ms = self._latency_ms(started_at)
+                self._record_response_metrics(
+                    status=MessageStatus.COMPLETE,
+                    latency_ms=latency_ms,
+                )
+                await self._log_audit(
+                    message=assistant_message,
+                    retrieval_chunks_count=len(selected_chunks),
+                    latency_ms=latency_ms,
+                )
                 await self._maybe_enqueue_summary(memory_block, chat_session.id)
                 yield ChatStreamCitations(citations=citations)
                 if products:
@@ -527,6 +574,13 @@ class ChatService:
             assistant_message.config_commit_hash = self._persona_context.config_commit_hash
             assistant_message.config_content_hash = self._persona_context.config_content_hash
             await self._session.commit()
+            latency_ms = self._latency_ms(started_at)
+            self._record_response_metrics(status=MessageStatus.FAILED, latency_ms=latency_ms)
+            await self._log_audit(
+                message=assistant_message,
+                retrieval_chunks_count=len(retrieved_chunks),
+                latency_ms=latency_ms,
+            )
             self._logger.error(
                 "chat.stream_failed",
                 session_id=str(chat_session.id),
@@ -550,6 +604,13 @@ class ChatService:
         message.content = accumulated_content
         message.status = MessageStatus.PARTIAL
         await self._session.commit()
+        latency_ms = self._message_latency_ms(message)
+        self._record_response_metrics(status=MessageStatus.PARTIAL, latency_ms=latency_ms)
+        await self._log_audit(
+            message=message,
+            retrieval_chunks_count=len(message.source_ids or []),
+            latency_ms=latency_ms,
+        )
 
     async def save_failed_on_timeout(
         self,
@@ -563,6 +624,13 @@ class ChatService:
         message.content = accumulated_content
         message.status = MessageStatus.FAILED
         await self._session.commit()
+        latency_ms = self._message_latency_ms(message)
+        self._record_response_metrics(status=MessageStatus.FAILED, latency_ms=latency_ms)
+        await self._log_audit(
+            message=message,
+            retrieval_chunks_count=len(message.source_ids or []),
+            latency_ms=latency_ms,
+        )
 
     async def _load_session(
         self,
@@ -734,6 +802,55 @@ class ChatService:
                 session_id=str(session_id),
                 error=str(error),
             )
+
+    async def _log_audit(
+        self,
+        *,
+        message: Message,
+        retrieval_chunks_count: int,
+        latency_ms: int | None,
+    ) -> None:
+        try:
+            await self._audit_service.log_response(
+                session_id=message.session_id,
+                message_id=message.id,
+                snapshot_id=message.snapshot_id,
+                source_ids=message.source_ids,
+                config_commit_hash=message.config_commit_hash,
+                config_content_hash=message.config_content_hash,
+                model_name=message.model_name,
+                token_count_prompt=message.token_count_prompt,
+                token_count_completion=message.token_count_completion,
+                retrieval_chunks_count=retrieval_chunks_count,
+                latency_ms=latency_ms,
+                status=message.status.value,
+            )
+        except Exception as error:
+            self._logger.error(
+                "audit.log_failed",
+                session_id=str(message.session_id) if message.session_id else None,
+                message_id=str(message.id),
+                error=error.__class__.__name__,
+            )
+
+    @staticmethod
+    def _record_response_metrics(*, status: MessageStatus, latency_ms: int | None) -> None:
+        CHAT_RESPONSES_TOTAL.labels(status=status.value).inc()
+        if latency_ms is not None:
+            CHAT_RESPONSE_LATENCY_SECONDS.observe(latency_ms / 1000)
+
+    @staticmethod
+    def _message_latency_ms(message: Message) -> int | None:
+        created_at = message.created_at
+        if created_at is None:
+            return None
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        return max(0, int((datetime.now(UTC) - created_at).total_seconds() * 1000))
+
+    @staticmethod
+    def _latency_ms(started_at: float) -> int:
+        return max(0, int((time.perf_counter() - started_at) * 1000))
 
     async def _check_idempotency(
         self,
