@@ -10,6 +10,7 @@ from qdrant_client import AsyncQdrantClient
 from redis.asyncio import Redis
 
 from app.api.admin import router as admin_router
+from app.api.admin_eval import router as admin_eval_router
 from app.api.chat import router as chat_router
 from app.api.health import router as health_router
 from app.api.metrics import router as metrics_router
@@ -210,6 +211,7 @@ app = FastAPI(title="ProxyMind API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(ObservabilityMiddleware)
 app.include_router(admin_router)
+app.include_router(admin_eval_router)
 app.include_router(profile_admin_router)
 app.include_router(chat_router)
 app.include_router(profile_chat_router)

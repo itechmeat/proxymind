@@ -1,0 +1,13 @@
+# Seed eval dataset — replace UUIDs with real values from your knowledge base.
+# Run: docker compose run --rm backend-test python -m evals.run_evals
+
+suite: retrieval_basic
+description: Basic retrieval quality smoke test
+snapshot_id: 00000000-0000-0000-0000-000000000000
+cases:
+  - id: ret-001
+    query: Example query — replace with a real question from your knowledge base
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000001
+        contains: expected substring from the relevant chunk
+    tags: [retrieval, smoke]
