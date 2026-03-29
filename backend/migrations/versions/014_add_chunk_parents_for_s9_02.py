@@ -48,6 +48,13 @@ def upgrade() -> None:
             "parent_index",
             name="uq_chunk_parents_document_version_id_parent_index",
         ),
+        sa.UniqueConstraint(
+            "id",
+            "document_version_id",
+            "snapshot_id",
+            "source_id",
+            name="uq_chunk_parents_scope_identity",
+        ),
     )
     op.create_index("ix_chunk_parents_snapshot_id", "chunk_parents", ["snapshot_id"])
     op.create_index("ix_chunk_parents_source_id", "chunk_parents", ["source_id"])
@@ -61,11 +68,19 @@ def upgrade() -> None:
         ["id"],
         ondelete="SET NULL",
     )
+    op.create_foreign_key(
+        "fk_chunks_parent_scope_chunk_parents",
+        "chunks",
+        "chunk_parents",
+        ["parent_id", "document_version_id", "snapshot_id", "source_id"],
+        ["id", "document_version_id", "snapshot_id", "source_id"],
+    )
     op.create_index("ix_chunks_parent_id", "chunks", ["parent_id"])
 
 
 def downgrade() -> None:
     op.drop_index("ix_chunks_parent_id", table_name="chunks")
+    op.drop_constraint("fk_chunks_parent_scope_chunk_parents", "chunks", type_="foreignkey")
     op.drop_constraint("fk_chunks_parent_id_chunk_parents", "chunks", type_="foreignkey")
     op.drop_column("chunks", "parent_id")
     op.drop_index("ix_chunk_parents_source_id", table_name="chunk_parents")

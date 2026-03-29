@@ -25,6 +25,31 @@ from app.workers.tasks.pipeline import (
 logger = structlog.get_logger(__name__)
 
 
+def _resolve_parent_id(
+    *,
+    chunk_index: int,
+    document_version_id: uuid.UUID,
+    child_parent_index_by_chunk_index: dict[int, int],
+    parent_id_by_parent_index: dict[int, uuid.UUID],
+) -> uuid.UUID:
+    # Guard against orphan chunks if hierarchy construction ever stops mapping every child.
+    parent_index = child_parent_index_by_chunk_index.get(chunk_index)
+    if parent_index is None:
+        raise ValueError(
+            "Chunk hierarchy is missing a child-to-parent mapping: "
+            f"chunk_index={chunk_index}, document_version_id={document_version_id}"
+        )
+
+    parent_id = parent_id_by_parent_index.get(parent_index)
+    if parent_id is None:
+        raise ValueError(
+            "Chunk hierarchy is missing a persisted parent identifier: "
+            f"chunk_index={chunk_index}, parent_index={parent_index}, "
+            f"document_version_id={document_version_id}"
+        )
+    return parent_id
+
+
 @dataclass(slots=True, frozen=True)
 class PathCResult:
     snapshot_id: uuid.UUID
@@ -122,6 +147,7 @@ async def handle_path_c(
                     anchor_chapter=parent.anchor_chapter,
                     anchor_section=parent.anchor_section,
                     anchor_timecode=parent.anchor_timecode,
+                    # ChunkHierarchyBuilder always materializes heading_path as tuple[str, ...].
                     heading_path=list(parent.heading_path) or None,
                 )
                 parent_rows_by_id[parent_id] = parent_row
@@ -154,9 +180,12 @@ async def handle_path_c(
                 text_content=chunk.text_content,
                 token_count=chunk.token_count,
                 parent_id=(
-                    parent_id_by_parent_index[
-                        child_parent_index_by_chunk_index[chunk.chunk_index]
-                    ]
+                    _resolve_parent_id(
+                        chunk_index=chunk.chunk_index,
+                        document_version_id=document_version.id,
+                        child_parent_index_by_chunk_index=child_parent_index_by_chunk_index,
+                        parent_id_by_parent_index=parent_id_by_parent_index,
+                    )
                     if hierarchy is not None
                     else None
                 ),

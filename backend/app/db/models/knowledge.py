@@ -4,7 +4,17 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import (
+    BigInteger,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -113,6 +123,13 @@ class ChunkParent(PrimaryKeyMixin, TenantMixin, KnowledgeScopeMixin, TimestampMi
     __tablename__ = "chunk_parents"
     __table_args__ = (
         UniqueConstraint(
+            "id",
+            "document_version_id",
+            "snapshot_id",
+            "source_id",
+            name="uq_chunk_parents_scope_identity",
+        ),
+        UniqueConstraint(
             "document_version_id",
             "parent_index",
             name="uq_chunk_parents_document_version_id_parent_index",
@@ -138,6 +155,16 @@ class ChunkParent(PrimaryKeyMixin, TenantMixin, KnowledgeScopeMixin, TimestampMi
 class Chunk(PrimaryKeyMixin, TenantMixin, KnowledgeScopeMixin, TimestampMixin, Base):
     __tablename__ = "chunks"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["parent_id", "document_version_id", "snapshot_id", "source_id"],
+            [
+                "chunk_parents.id",
+                "chunk_parents.document_version_id",
+                "chunk_parents.snapshot_id",
+                "chunk_parents.source_id",
+            ],
+            name="fk_chunks_parent_scope_chunk_parents",
+        ),
         UniqueConstraint(
             "document_version_id",
             "chunk_index",
