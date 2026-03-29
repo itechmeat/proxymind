@@ -13,3 +13,5 @@ frontend/dist/
 backend/.python-version
 .idea/
 .vscode/
+backend/evals/reports/
+!backend/evals/reports/.gitkeep

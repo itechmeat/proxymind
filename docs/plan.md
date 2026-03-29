@@ -217,7 +217,7 @@ Phase outcome: the product is secured, observable, and auditable.
 
 Phase outcome: measured quality, data-driven decisions on upgrade paths.
 
-- [ ] **S8-01: Eval framework**
+- [x] **S8-01: Eval framework**
       Test harness, dataset format, suite runner, report generation. Separate from CI.
   - **Outcome:** eval suite can be run and produces a report
   - **Verification:** `run-evals` → report with metrics
