@@ -76,6 +76,53 @@ async def test_search_supports_empty_results() -> None:
 
 
 @pytest.mark.asyncio
+async def test_search_preserves_parent_metadata_from_qdrant_results() -> None:
+    parent_id = uuid.uuid4()
+    chunk = RetrievedChunk(
+        chunk_id=uuid.uuid4(),
+        source_id=uuid.uuid4(),
+        text_content="retrieved",
+        score=0.88,
+        anchor_metadata={
+            "anchor_page": None,
+            "anchor_chapter": None,
+            "anchor_section": None,
+            "anchor_timecode": None,
+        },
+        parent_id=parent_id,
+        parent_text_content="parent body",
+        parent_token_count=120,
+        parent_anchor_metadata={
+            "anchor_page": 7,
+            "anchor_chapter": "Ch. 1",
+            "anchor_section": "Intro",
+            "anchor_timecode": None,
+        },
+    )
+    embedding_service = AsyncMock()
+    embedding_service.embed_texts.return_value = [[0.1, 0.2, 0.3]]
+    qdrant_service = AsyncMock()
+    qdrant_service.hybrid_search.return_value = [chunk]
+    service = RetrievalService(
+        embedding_service=embedding_service,
+        qdrant_service=qdrant_service,
+        top_n=3,
+        min_dense_similarity=None,
+    )
+
+    results = await service.search("Has parent", snapshot_id=uuid.uuid4())
+
+    assert results[0].parent_id == parent_id
+    assert results[0].parent_text_content == "parent body"
+    assert results[0].parent_anchor_metadata == {
+        "anchor_page": 7,
+        "anchor_chapter": "Ch. 1",
+        "anchor_section": "Intro",
+        "anchor_timecode": None,
+    }
+
+
+@pytest.mark.asyncio
 async def test_search_respects_explicit_zero_top_n() -> None:
     embedding_service = AsyncMock()
     embedding_service.embed_texts.return_value = [[0.1, 0.2, 0.3]]

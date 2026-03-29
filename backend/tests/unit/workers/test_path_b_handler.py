@@ -23,7 +23,12 @@ from app.services.document_processing import ChunkData
 from app.services.enrichment import EnrichmentResult, build_enriched_text
 from app.services.path_router import FileMetadata
 from app.services.snapshot import SnapshotService
-from app.workers.tasks.handlers.path_b import PathBResult, _is_suspected_scan, handle_path_b
+from app.workers.tasks.handlers.path_b import (
+    PathBResult,
+    _is_suspected_scan,
+    _resolve_parent_id,
+    handle_path_b,
+)
 from app.workers.tasks.pipeline import BatchSubmittedResult, PipelineServices
 
 
@@ -116,6 +121,16 @@ def _services(
         batch_orchestrator=batch_orchestrator,
         enrichment_service=enrichment_service,
     )
+
+
+def test_resolve_parent_id_raises_clear_error_for_orphan_chunk() -> None:
+    with pytest.raises(ValueError, match="child-to-parent mapping"):
+        _resolve_parent_id(
+            chunk_index=7,
+            document_version_id=uuid.uuid7(),
+            child_parent_index_by_chunk_index={},
+            parent_id_by_parent_index={},
+        )
 
 
 @pytest.mark.asyncio

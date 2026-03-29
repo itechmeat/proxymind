@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     document_ai_location: str = Field(default="us", min_length=1)
     document_ai_processor_id: str | None = Field(default=None)
     chunk_max_tokens: int = Field(default=1024, ge=1, le=8192)
+    parent_child_min_document_tokens: int = Field(default=1500, ge=1)
+    parent_child_min_flat_chunks: int = Field(default=6, ge=1)
+    parent_child_parent_target_tokens: int = Field(default=1200, ge=1)
+    parent_child_parent_max_tokens: int = Field(default=1800, ge=1)
     path_c_min_chars_per_page: int = Field(default=50, ge=1)
     path_a_text_threshold_pdf: int = Field(default=2000, ge=1)
     path_a_text_threshold_media: int = Field(default=500, ge=1)
@@ -140,6 +144,11 @@ class Settings(BaseSettings):
     def validate_retrieval_settings(self) -> Settings:
         if self.min_retrieved_chunks > self.retrieval_top_n:
             raise ValueError("MIN_RETRIEVED_CHUNKS must be less than or equal to RETRIEVAL_TOP_N")
+        if self.parent_child_parent_target_tokens > self.parent_child_parent_max_tokens:
+            raise ValueError(
+                "PARENT_CHILD_PARENT_TARGET_TOKENS must be less than or equal to "
+                "PARENT_CHILD_PARENT_MAX_TOKENS"
+            )
         has_document_ai_project = self.document_ai_project_id is not None
         has_document_ai_processor = self.document_ai_processor_id is not None
         if has_document_ai_project != has_document_ai_processor:

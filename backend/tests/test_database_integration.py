@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.db.models import (
     Agent,
     Chunk,
+    ChunkParent,
     Document,
     DocumentVersion,
     KnowledgeSnapshot,
@@ -228,6 +229,46 @@ async def test_relationships_and_fk_constraints(
         status=ChunkStatus.PENDING,
     )
     db_session.add(duplicate_chunk)
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+    await db_session.rollback()
+
+    parent = ChunkParent(
+        owner_id=owner_id,
+        agent_id=agent_id,
+        knowledge_base_id=knowledge_base_id,
+        document_version_id=document_version_id,
+        snapshot_id=snapshot_id,
+        source_id=source_id,
+        parent_index=0,
+        text_content="parent body",
+        token_count=2,
+    )
+    db_session.add(parent)
+    await db_session.commit()
+
+    other_version = DocumentVersion(
+        document=document,
+        version_number=2,
+        file_path="/tmp/source-v2.md",
+        status=DocumentVersionStatus.PROCESSING,
+    )
+    db_session.add(other_version)
+    await db_session.commit()
+
+    cross_scope_parent_link = Chunk(
+        owner_id=owner_id,
+        agent_id=agent_id,
+        knowledge_base_id=knowledge_base_id,
+        document_version_id=other_version.id,
+        parent_id=parent.id,
+        snapshot_id=uuid.uuid4(),
+        source_id=source_id,
+        chunk_index=0,
+        text_content="invalid cross-scope chunk body",
+        status=ChunkStatus.PENDING,
+    )
+    db_session.add(cross_scope_parent_link)
     with pytest.raises(IntegrityError):
         await db_session.commit()
     await db_session.rollback()

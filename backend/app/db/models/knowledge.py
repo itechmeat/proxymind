@@ -4,7 +4,17 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import (
+    BigInteger,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -109,9 +119,52 @@ class DocumentVersion(PrimaryKeyMixin, TimestampMixin, Base):
     chunks: Mapped[list[Chunk]] = relationship(back_populates="document_version")
 
 
+class ChunkParent(PrimaryKeyMixin, TenantMixin, KnowledgeScopeMixin, TimestampMixin, Base):
+    __tablename__ = "chunk_parents"
+    __table_args__ = (
+        UniqueConstraint(
+            "id",
+            "document_version_id",
+            "snapshot_id",
+            "source_id",
+            name="uq_chunk_parents_scope_identity",
+        ),
+        UniqueConstraint(
+            "document_version_id",
+            "parent_index",
+            name="uq_chunk_parents_document_version_id_parent_index",
+        ),
+    )
+
+    document_version_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("document_versions.id"),
+        nullable=False,
+    )
+    snapshot_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    source_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    parent_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    text_content: Mapped[str] = mapped_column(Text, nullable=False)
+    token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    anchor_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    anchor_chapter: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    anchor_section: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    anchor_timecode: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    heading_path: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+
+
 class Chunk(PrimaryKeyMixin, TenantMixin, KnowledgeScopeMixin, TimestampMixin, Base):
     __tablename__ = "chunks"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["parent_id", "document_version_id", "snapshot_id", "source_id"],
+            [
+                "chunk_parents.id",
+                "chunk_parents.document_version_id",
+                "chunk_parents.snapshot_id",
+                "chunk_parents.source_id",
+            ],
+            name="fk_chunks_parent_scope_chunk_parents",
+        ),
         UniqueConstraint(
             "document_version_id",
             "chunk_index",
@@ -122,6 +175,11 @@ class Chunk(PrimaryKeyMixin, TenantMixin, KnowledgeScopeMixin, TimestampMixin, B
     document_version_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("document_versions.id"),
         nullable=False,
+    )
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("chunk_parents.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     # Both fields stay as plain UUIDs by design: snapshot_id avoids a circular FK path,
     # and source_id is denormalized for citation lookup speed.

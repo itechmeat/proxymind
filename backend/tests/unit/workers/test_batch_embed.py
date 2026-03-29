@@ -74,6 +74,51 @@ async def test_process_batch_embed_uses_stored_chunk_order() -> None:
 
 
 @pytest.mark.asyncio
+async def test_process_batch_embed_prefers_enriched_text_when_present() -> None:
+    task_id = uuid.uuid7()
+    chunk_id = uuid.uuid7()
+    task = SimpleNamespace(
+        id=task_id,
+        status=BackgroundTaskStatus.PENDING,
+        result_metadata={"source_ids": []},
+    )
+    batch_job = SimpleNamespace(
+        id=uuid.uuid7(),
+        result_metadata={"chunk_ids": [str(chunk_id)]},
+        status=BatchStatus.PENDING,
+        error_message=None,
+    )
+    chunk = SimpleNamespace(
+        id=chunk_id,
+        text_content="child text",
+        enriched_text="child text\n\nSummary: summary",
+        status=ChunkStatus.PENDING,
+    )
+    session = SimpleNamespace(
+        scalar=AsyncMock(side_effect=[task, batch_job]),
+        scalars=AsyncMock(return_value=SimpleNamespace(all=lambda: [chunk])),
+        commit=AsyncMock(),
+    )
+    batch_orchestrator = SimpleNamespace(submit_to_gemini=AsyncMock())
+
+    original_async_sessionmaker = batch_embed.async_sessionmaker
+    batch_embed.async_sessionmaker = object
+    try:
+        await process_batch_embed(
+            {
+                "session_factory": lambda: _SessionContextManager(session),
+                "batch_orchestrator": batch_orchestrator,
+            },
+            str(task_id),
+        )
+    finally:
+        batch_embed.async_sessionmaker = original_async_sessionmaker
+
+    submit_call = batch_orchestrator.submit_to_gemini.await_args
+    assert submit_call.kwargs["texts"] == ["child text\n\nSummary: summary"]
+
+
+@pytest.mark.asyncio
 async def test_process_batch_embed_fails_on_malformed_chunk_ids() -> None:
     task_id = uuid.uuid7()
     task = SimpleNamespace(

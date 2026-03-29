@@ -41,6 +41,7 @@ TRUNCATE_TEST_DATA_SQL = text(
     """
     TRUNCATE TABLE
       background_tasks,
+            chunk_parents,
       chunks,
       document_versions,
       documents,

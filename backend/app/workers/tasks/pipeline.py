@@ -8,7 +8,7 @@ import structlog
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import BackgroundTask, Chunk, Document, DocumentVersion, Source
+from app.db.models import BackgroundTask, Chunk, ChunkParent, Document, DocumentVersion, Source
 from app.db.models.enums import (
     ChunkStatus,
     DocumentStatus,
@@ -146,6 +146,7 @@ async def initialize_pipeline_records(
         status=DocumentVersionStatus.PROCESSING,
     )
     session.add_all([document, document_version])
+    await session.flush()
 
     snapshot = await snapshot_service.ensure_draft_or_rebind(
         session,
@@ -173,6 +174,30 @@ async def cleanup_qdrant_chunks(
         )
 
 
+def _require_parent_row(
+    *,
+    chunk: Chunk,
+    parent_rows_by_id: dict[uuid.UUID, ChunkParent] | None,
+) -> ChunkParent | None:
+    if chunk.parent_id is None:
+        return None
+    if parent_rows_by_id is None:
+        raise ValueError(
+            "Parent chunk metadata was required for hierarchy-aware indexing but no "
+            f"parent rows were provided: chunk_id={chunk.id}, parent_id={chunk.parent_id}, "
+            f"document_version_id={chunk.document_version_id}"
+        )
+
+    parent_row = parent_rows_by_id.get(chunk.parent_id)
+    if parent_row is None:
+        raise ValueError(
+            "Parent chunk metadata is missing for hierarchy-aware indexing: "
+            f"chunk_id={chunk.id}, parent_id={chunk.parent_id}, "
+            f"document_version_id={chunk.document_version_id}"
+        )
+    return parent_row
+
+
 async def embed_and_index_chunks(
     session: AsyncSession,
     *,
@@ -186,6 +211,7 @@ async def embed_and_index_chunks(
     document_version_id: uuid.UUID,
     processing_path: ProcessingPath,
     pipeline_version: str,
+    parent_rows_by_id: dict[uuid.UUID, ChunkParent] | None = None,
     page_count: int | None = None,
     duration_seconds: float | None = None,
 ) -> SkipEmbeddingResult | BatchSubmittedResult | PersistedPipelineState:
@@ -301,36 +327,51 @@ async def embed_and_index_chunks(
         task.progress = 85
         await session.commit()
 
-        qdrant_points = [
-            QdrantChunkPoint(
-                chunk_id=row.id,
-                vector=vector,
-                snapshot_id=snapshot_id,
-                source_id=source.id,
-                document_version_id=document_version_id,
-                agent_id=source.agent_id,
-                knowledge_base_id=source.knowledge_base_id,
-                text_content=row.text_content,
-                chunk_index=row.chunk_index,
-                token_count=row.token_count,
-                anchor_page=row.anchor_page,
-                anchor_chapter=row.anchor_chapter,
-                anchor_section=row.anchor_section,
-                anchor_timecode=row.anchor_timecode,
-                source_type=source.source_type,
-                language=source.language or services.default_language,
-                status=ChunkStatus.INDEXED,
-                page_count=page_count,
-                duration_seconds=duration_seconds,
-                enriched_summary=row.enriched_summary,
-                enriched_keywords=row.enriched_keywords,
-                enriched_questions=row.enriched_questions,
-                enriched_text=row.enriched_text,
-                enrichment_model=row.enrichment_model,
-                enrichment_pipeline_version=row.enrichment_pipeline_version,
+        qdrant_points: list[QdrantChunkPoint] = []
+        for row, vector in zip(chunk_rows, vectors, strict=True):
+            parent_row = _require_parent_row(chunk=row, parent_rows_by_id=parent_rows_by_id)
+            qdrant_points.append(
+                QdrantChunkPoint(
+                    chunk_id=row.id,
+                    vector=vector,
+                    snapshot_id=snapshot_id,
+                    source_id=source.id,
+                    document_version_id=document_version_id,
+                    agent_id=source.agent_id,
+                    knowledge_base_id=source.knowledge_base_id,
+                    text_content=row.text_content,
+                    chunk_index=row.chunk_index,
+                    token_count=row.token_count,
+                    anchor_page=row.anchor_page,
+                    anchor_chapter=row.anchor_chapter,
+                    anchor_section=row.anchor_section,
+                    anchor_timecode=row.anchor_timecode,
+                    parent_id=row.parent_id,
+                    parent_text_content=parent_row.text_content if parent_row is not None else None,
+                    parent_token_count=parent_row.token_count if parent_row is not None else None,
+                    parent_anchor_page=parent_row.anchor_page if parent_row is not None else None,
+                    parent_anchor_chapter=(
+                        parent_row.anchor_chapter if parent_row is not None else None
+                    ),
+                    parent_anchor_section=(
+                        parent_row.anchor_section if parent_row is not None else None
+                    ),
+                    parent_anchor_timecode=(
+                        parent_row.anchor_timecode if parent_row is not None else None
+                    ),
+                    source_type=source.source_type,
+                    language=source.language or services.default_language,
+                    status=ChunkStatus.INDEXED,
+                    page_count=page_count,
+                    duration_seconds=duration_seconds,
+                    enriched_summary=row.enriched_summary,
+                    enriched_keywords=row.enriched_keywords,
+                    enriched_questions=row.enriched_questions,
+                    enriched_text=row.enriched_text,
+                    enrichment_model=row.enrichment_model,
+                    enrichment_pipeline_version=row.enrichment_pipeline_version,
+                )
             )
-            for row, vector in zip(chunk_rows, vectors, strict=True)
-        ]
         qdrant_write_may_have_happened = True
         await services.qdrant_service.upsert_chunks(qdrant_points)
         task.progress = 95

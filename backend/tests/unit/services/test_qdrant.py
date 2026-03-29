@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -89,6 +90,36 @@ def _assert_scope_filters(
         ("agent_id", str(agent_id)),
         ("knowledge_base_id", str(knowledge_base_id)),
     ]
+
+
+def _point(
+    *,
+    chunk_id: uuid.UUID,
+    snapshot_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    knowledge_base_id: uuid.UUID,
+    vector: list[float],
+    text_content: str,
+) -> QdrantChunkPoint:
+    return QdrantChunkPoint(
+        chunk_id=chunk_id,
+        vector=vector,
+        snapshot_id=snapshot_id,
+        source_id=uuid.uuid4(),
+        document_version_id=uuid.uuid4(),
+        agent_id=agent_id,
+        knowledge_base_id=knowledge_base_id,
+        text_content=text_content,
+        chunk_index=0,
+        token_count=12,
+        anchor_page=None,
+        anchor_chapter=None,
+        anchor_section=None,
+        anchor_timecode=None,
+        source_type=SourceType.MARKDOWN,
+        language="english",
+        status=ChunkStatus.INDEXED,
+    )
 
 
 @pytest.mark.asyncio
@@ -600,6 +631,90 @@ async def test_dense_search_omits_score_threshold_when_disabled(
     assert results == []
     kwargs = client.query_points.await_args.kwargs
     assert "score_threshold" not in kwargs
+
+
+def test_build_payload_includes_parent_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _logger = _service(
+        monkeypatch,
+        client=SimpleNamespace(),
+        embedding_dimensions=3,
+    )
+    point = replace(
+        _point(
+            chunk_id=uuid.uuid4(),
+            snapshot_id=uuid.uuid4(),
+            agent_id=uuid.uuid4(),
+            knowledge_base_id=uuid.uuid4(),
+            vector=[1.0, 0.0, 0.0],
+            text_content="child text",
+        ),
+        parent_id=uuid.uuid4(),
+        parent_text_content="parent text",
+        parent_token_count=90,
+        parent_anchor_chapter="Chapter 1",
+        parent_anchor_section="Section A",
+    )
+
+    payload = service._build_payload(point)
+
+    assert payload["parent_text_content"] == "parent text"
+    assert payload["parent_anchor_section"] == "Section A"
+
+
+@pytest.mark.asyncio
+async def test_dense_search_returns_parent_metadata_when_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chunk_id = uuid.uuid4()
+    source_id = uuid.uuid4()
+    parent_id = uuid.uuid4()
+    client = SimpleNamespace(
+        query_points=AsyncMock(
+            return_value=SimpleNamespace(
+                points=[
+                    SimpleNamespace(
+                        score=0.91,
+                        payload={
+                            "chunk_id": str(chunk_id),
+                            "source_id": str(source_id),
+                            "text_content": "retrieved body",
+                            "anchor_page": 7,
+                            "anchor_chapter": "Ch. 1",
+                            "anchor_section": "Intro",
+                            "anchor_timecode": None,
+                            "parent_id": str(parent_id),
+                            "parent_text_content": "parent body",
+                            "parent_token_count": 120,
+                            "parent_anchor_page": 1,
+                            "parent_anchor_chapter": "Parent Chapter",
+                            "parent_anchor_section": "Parent Section",
+                            "parent_anchor_timecode": None,
+                        },
+                    )
+                ]
+            )
+        )
+    )
+    service, _logger = _service(monkeypatch, client=client, embedding_dimensions=3)
+
+    results = await service.dense_search(
+        vector=[0.1, 0.2, 0.3],
+        snapshot_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        knowledge_base_id=uuid.uuid4(),
+        limit=5,
+    )
+
+    assert results[0].parent_id == parent_id
+    assert results[0].parent_text_content == "parent body"
+    assert results[0].parent_anchor_metadata == {
+        "anchor_page": 1,
+        "anchor_chapter": "Parent Chapter",
+        "anchor_section": "Parent Section",
+        "anchor_timecode": None,
+    }
 
 
 @pytest.mark.asyncio

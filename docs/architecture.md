@@ -73,6 +73,8 @@ Processes user messages in real time:
 6. Citation Builder substitutes real links based on `source_id` from the LLM response.
 7. Returns the response to the client via SSE.
 
+Retrieval remains child-ranked even when hierarchy is present. Context assembly may attach parent text to selected children and deduplicates shared parents across multiple hits.
+
 ### Channel connectors (future)
 
 Later stages may expose the same dialogue capabilities through external messaging and social platforms such as Telegram, Facebook, VK, Instagram, TikTok, and similar channels. To avoid ambiguity with MCP data connectors, the preferred term for these integrations is **channel connectors**.
@@ -97,8 +99,8 @@ Runs asynchronously, does not block chat. Routing policy: local-first, external-
       - **Video** — transcript + visual description via Gemini LLM.
    2. **Gemini Embedding 2** — generates an embedding directly from the file (multimodal input).
       Worker saves: `text_content` (required textual context for LLM during retrieval), anchor metadata (filename, format, duration/page count), link to the file in SeaweedFS. During retrieval, `text_content` is passed to the LLM; citations are formed from anchor metadata.
-   - **Path B (lightweight local)** — default path for Markdown, TXT, HTML, DOCX, and text-based PDFs of any length when lightweight extraction is sufficient. This includes short text PDFs; Path A does not take ownership of them just because they fit inside Gemini limits. Local parsers extract text and structure, the lightweight chunker builds normalized chunks with anchor metadata, and Gemini Embedding 2 generates embeddings from chunk text.
-   - **Path C (Document AI fallback)** — used only when local extraction is insufficient: scanned PDFs, complex tables, complex reading order, or other layout-heavy documents. Worker sends the file to Google Cloud Document AI, normalizes the parsed output into the same local chunk contract, and then continues through the standard embedding and indexing pipeline.
+   - **Path B (lightweight local)** — default path for Markdown, TXT, HTML, DOCX, and text-based PDFs of any length when lightweight extraction is sufficient. This includes short text PDFs; Path A does not take ownership of them just because they fit inside Gemini limits. Local parsers extract text and structure, the lightweight chunker builds normalized chunks with anchor metadata, optional parent sections are derived for qualifying long-form documents, and Gemini Embedding 2 generates embeddings from child chunk text.
+   - **Path C (Document AI fallback)** — used only when local extraction is insufficient: scanned PDFs, complex tables, complex reading order, or other layout-heavy documents. Worker sends the file to Google Cloud Document AI, normalizes the parsed output into the same local chunk contract, builds the same optional parent-child hierarchy for qualifying documents, and then continues through the standard embedding and indexing pipeline.
 5. For bulk operations (book uploads, reindex) worker uses **Gemini Batch API** (−50% cost, SLO ≤24h). For individual files — interactive API.
 
 **Batch API lifecycle within the task system:**
@@ -108,7 +110,7 @@ Runs asynchronously, does not block chat. Routing policy: local-first, external-
 - Worker periodically checks batch job status (polling).
 - **Deduplication guard:** before creating a batch job, worker checks for an existing `batch_operation_name` for the given `task_id` in PostgreSQL. If the batch job already exists, worker joins it (polling) instead of creating a new one. This prevents duplicates during arq retry, since Gemini Batch API creation is not idempotent.
 
-6. Chunks with payload metadata are indexed in Qdrant with the `snapshot_id` of the current draft.
+6. Child chunks with payload metadata are indexed in Qdrant with the `snapshot_id` of the current draft. When hierarchy is active, parent rows remain canonical in PostgreSQL while each child payload carries denormalized parent metadata for retrieval-time context expansion.
 7. Snapshot Manager updates the draft snapshot.
 
 ### Snapshot lifecycle
@@ -263,15 +265,17 @@ graph TB
 
     PG --- pg_data["Business entities:
     agents, sources, documents,
-    document_versions, chunks metadata,
+    document_versions, chunk_parents,
+    chunks metadata,
     knowledge_snapshots, catalog_items,
     sessions, messages, audit_logs,
     embedding_profiles"]
 
     Q --- q_data["Vectors + payload:
-    chunk vectors, anchor metadata
+    child chunk vectors, child/parent anchor metadata
     (page, chapter, section, timecode),
     source_id, chunk_id, snapshot_id,
+    parent_id, parent_text_content,
     language, source_type,
     text_content (for LLM context)"]
 
@@ -293,11 +297,11 @@ graph TB
 
 ### PostgreSQL — source of truth
 
-All business entities and their lifecycle. OAuth built-in. Tables contain tenant-ready fields: `owner_id`, `agent_id`, `knowledge_base_id`, `published_version_id`.
+All business entities and their lifecycle. OAuth built-in. Tables contain tenant-ready fields: `owner_id`, `agent_id`, `knowledge_base_id`, `published_version_id`. For hierarchy-aware ingestion, PostgreSQL is also the canonical store for `chunk_parents` and `chunks.parent_id` links.
 
 ### Qdrant — vector retrieval
 
-Chunks with embeddings and payload metadata. Payload indexes on frequently filtered fields. Collection organization (single or separate) — decision deferred until first evals.
+Child chunks with embeddings and payload metadata. Payload indexes on frequently filtered fields. When hierarchy is active, Qdrant still stores only child vectors, but child payloads include denormalized parent metadata so retrieval and prompt assembly do not need a second fetch path.
 
 Qdrant remains local and is the canonical retrieval store. External Google services are used only for processing, never as the primary knowledge store.
 

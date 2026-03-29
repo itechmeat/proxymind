@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 
 import pytest
 from qdrant_client import AsyncQdrantClient, models
@@ -191,6 +192,67 @@ async def test_qdrant_hybrid_search_returns_results(qdrant_url: str) -> None:
                 },
             )
         ]
+    finally:
+        await _cleanup_collection(client, collection_name)
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_roundtrip_preserves_parent_metadata(qdrant_url: str) -> None:
+    client = AsyncQdrantClient(url=qdrant_url)
+    collection_name = f"test_chunks_{uuid.uuid4().hex}"
+    service = QdrantService(
+        client=client,
+        collection_name=collection_name,
+        embedding_dimensions=3,
+        bm25_language="english",
+    )
+    snapshot_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    knowledge_base_id = uuid.uuid4()
+    source_id = uuid.uuid4()
+
+    try:
+        await service.ensure_collection()
+        await service.upsert_chunks(
+            [
+                replace(
+                    _point(
+                        chunk_id=uuid.uuid4(),
+                        snapshot_id=snapshot_id,
+                        agent_id=agent_id,
+                        knowledge_base_id=knowledge_base_id,
+                        source_id=source_id,
+                        vector=[1.0, 0.0, 0.0],
+                        text_content="child text",
+                    ),
+                    parent_id=uuid.uuid4(),
+                    parent_text_content="Chapter 1 full section",
+                    parent_token_count=120,
+                    parent_anchor_page=7,
+                    parent_anchor_chapter="Chapter 1",
+                    parent_anchor_section="Section A",
+                    parent_anchor_timecode=None,
+                )
+            ]
+        )
+
+        response = await service.hybrid_search(
+            text="child",
+            vector=[1.0, 0.0, 0.0],
+            snapshot_id=snapshot_id,
+            agent_id=agent_id,
+            knowledge_base_id=knowledge_base_id,
+            limit=5,
+        )
+
+        assert response[0].parent_text_content == "Chapter 1 full section"
+        assert response[0].parent_anchor_metadata == {
+            "anchor_page": 7,
+            "anchor_chapter": "Chapter 1",
+            "anchor_section": "Section A",
+            "anchor_timecode": None,
+        }
     finally:
         await _cleanup_collection(client, collection_name)
         await client.close()

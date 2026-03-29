@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
+from structlog.testing import capture_logs
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -13,6 +14,7 @@ from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
 from app.db.models import (
     BackgroundTask,
     Chunk,
+    ChunkParent,
     Document,
     DocumentVersion,
     EmbeddingProfile,
@@ -110,13 +112,21 @@ def _worker_context(
         embed_texts=(
             AsyncMock(side_effect=embedding_side_effect)
             if embedding_side_effect is not None
-            else AsyncMock(return_value=[[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
+            else AsyncMock(
+                side_effect=lambda texts, **kwargs: [[0.1, 0.2, 0.3] for _ in texts]
+            )
         ),
         embed_file=AsyncMock(return_value=[0.1, 0.2, 0.3]),
     )
     return {
         "session_factory": session_factory,
-        "settings": SimpleNamespace(bm25_language="english"),
+        "settings": SimpleNamespace(
+            bm25_language="english",
+            parent_child_min_document_tokens=1500,
+            parent_child_min_flat_chunks=6,
+            parent_child_parent_target_tokens=1200,
+            parent_child_parent_max_tokens=1800,
+        ),
         "path_a_text_threshold_pdf": 2000,
         "path_a_text_threshold_media": 500,
         "path_a_max_pdf_pages": 6,
@@ -150,7 +160,13 @@ def _real_parser_worker_context(
     )
     return {
         "session_factory": session_factory,
-        "settings": SimpleNamespace(bm25_language="english"),
+        "settings": SimpleNamespace(
+            bm25_language="english",
+            parent_child_min_document_tokens=1500,
+            parent_child_min_flat_chunks=6,
+            parent_child_parent_target_tokens=1200,
+            parent_child_parent_max_tokens=1800,
+        ),
         "path_a_text_threshold_pdf": 2000,
         "path_a_text_threshold_media": 500,
         "path_a_max_pdf_pages": 6,
@@ -314,6 +330,130 @@ async def test_worker_reuses_draft_and_accumulates_chunk_count(
     assert snapshots[0].status is SnapshotStatus.DRAFT
     assert snapshots[0].chunk_count == 4
     assert worker_ctx["qdrant_service"].upsert_chunks.await_count == 2  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_worker_persists_chunk_parents_for_long_markdown(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    _source_id, task_id = await _seed_task(
+        session_factory,
+        source_type=SourceType.MARKDOWN,
+        filename="book.md",
+        title="Book source",
+    )
+    worker_ctx = _real_parser_worker_context(
+        session_factory,
+        file_bytes=_fixture_bytes("book_long.md"),
+    )
+    worker_ctx["settings"] = SimpleNamespace(
+        bm25_language="english",
+        parent_child_min_document_tokens=100,
+        parent_child_min_flat_chunks=3,
+        parent_child_parent_target_tokens=400,
+        parent_child_parent_max_tokens=700,
+    )
+
+    with capture_logs() as captured_logs:
+        await ingestion.process_ingestion(worker_ctx, str(task_id))
+
+    async with session_factory() as session:
+        parents = (
+            await session.scalars(select(ChunkParent).order_by(ChunkParent.parent_index.asc()))
+        ).all()
+        chunks = (await session.scalars(select(Chunk).order_by(Chunk.chunk_index.asc()))).all()
+
+    assert parents
+    assert all(chunk.parent_id is not None for chunk in chunks)
+    assert {chunk.parent_id for chunk in chunks} <= {parent.id for parent in parents}
+    assert any(
+        entry.get("event") == "worker.ingestion.parent_child_decision"
+        and entry.get("reason") == "long_form_structure_first"
+        for entry in captured_logs
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_worker_uses_fallback_hierarchy_for_weakly_structured_long_form(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    _source_id, task_id = await _seed_task(session_factory)
+    chunk_data = [
+        ChunkData(text_content="alpha " * 80, token_count=80, chunk_index=0, anchor_page=None, anchor_chapter=None, anchor_section=None),
+        ChunkData(text_content="beta " * 80, token_count=80, chunk_index=1, anchor_page=None, anchor_chapter=None, anchor_section=None),
+        ChunkData(text_content="gamma " * 80, token_count=80, chunk_index=2, anchor_page=None, anchor_chapter=None, anchor_section=None),
+    ]
+    worker_ctx = _worker_context(session_factory, chunk_data=chunk_data)
+    worker_ctx["settings"] = SimpleNamespace(
+        bm25_language="english",
+        parent_child_min_document_tokens=100,
+        parent_child_min_flat_chunks=3,
+        parent_child_parent_target_tokens=120,
+        parent_child_parent_max_tokens=150,
+    )
+
+    with capture_logs() as captured_logs:
+        await ingestion.process_ingestion(worker_ctx, str(task_id))
+
+    async with session_factory() as session:
+        parents = (
+            await session.scalars(select(ChunkParent).order_by(ChunkParent.parent_index.asc()))
+        ).all()
+        chunks = (await session.scalars(select(Chunk).order_by(Chunk.chunk_index.asc()))).all()
+
+    assert parents
+    assert all(chunk.parent_id is not None for chunk in chunks)
+    assert any(
+        entry.get("event") == "worker.ingestion.parent_child_decision"
+        and entry.get("reason") == "long_form_fallback"
+        and entry.get("fallback_used") is True
+        for entry in captured_logs
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_worker_marks_qualifying_hierarchy_failure_as_failed(
+    monkeypatch: pytest.MonkeyPatch,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id, task_id = await _seed_task(session_factory)
+    chunk_data = [
+        ChunkData(text_content="alpha " * 80, token_count=80, chunk_index=0, anchor_page=None, anchor_chapter="Chapter 1", anchor_section="Section A"),
+        ChunkData(text_content="beta " * 80, token_count=80, chunk_index=1, anchor_page=None, anchor_chapter="Chapter 1", anchor_section="Section B"),
+        ChunkData(text_content="gamma " * 80, token_count=80, chunk_index=2, anchor_page=None, anchor_chapter="Chapter 2", anchor_section="Section C"),
+    ]
+    worker_ctx = _worker_context(session_factory, chunk_data=chunk_data)
+    worker_ctx["settings"] = SimpleNamespace(
+        bm25_language="english",
+        parent_child_min_document_tokens=100,
+        parent_child_min_flat_chunks=3,
+        parent_child_parent_target_tokens=120,
+        parent_child_parent_max_tokens=150,
+    )
+
+    def _fail_build(self, chunks):
+        raise RuntimeError("hierarchy build failed")
+
+    monkeypatch.setattr("app.workers.tasks.handlers.path_b.ChunkHierarchyBuilder.build", _fail_build)
+
+    await ingestion.process_ingestion(worker_ctx, str(task_id))
+
+    async with session_factory() as session:
+        task = await session.get(BackgroundTask, task_id)
+        source = await session.get(Source, source_id)
+        parents = (await session.scalars(select(ChunkParent))).all()
+        chunks = (await session.scalars(select(Chunk))).all()
+
+    assert task is not None
+    assert source is not None
+    assert task.status is BackgroundTaskStatus.FAILED
+    assert task.error_message == "hierarchy build failed"
+    assert source.status is SourceStatus.FAILED
+    assert parents == []
+    assert chunks == []
 
 
 @pytest.mark.asyncio
