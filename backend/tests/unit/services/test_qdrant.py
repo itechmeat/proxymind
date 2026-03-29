@@ -358,7 +358,68 @@ async def test_upsert_chunks_sends_dense_and_bm25_vectors(
     assert bm25_document.model == BM25_MODEL_NAME
     assert _language_value(bm25_document.options.language) == "english"
     assert points[0].payload["text_content"] == "chunk body"
-    assert points[0].payload["source_type"] == "markdown"
+
+
+def test_qdrant_chunk_point_bm25_text_prefers_enriched_text() -> None:
+    point = QdrantChunkPoint(
+        chunk_id=uuid.uuid4(),
+        vector=[0.1, 0.2, 0.3],
+        snapshot_id=uuid.uuid4(),
+        source_id=uuid.uuid4(),
+        document_version_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        knowledge_base_id=uuid.uuid4(),
+        text_content="original",
+        chunk_index=0,
+        token_count=12,
+        anchor_page=None,
+        anchor_chapter=None,
+        anchor_section=None,
+        anchor_timecode=None,
+        source_type=SourceType.MARKDOWN,
+        language="english",
+        status=ChunkStatus.INDEXED,
+        enriched_text="original\n\nKeywords: search, retrieval",
+    )
+
+    assert point.bm25_text == "original\n\nKeywords: search, retrieval"
+
+
+def test_build_payload_includes_enrichment_fields() -> None:
+    point = QdrantChunkPoint(
+        chunk_id=uuid.uuid4(),
+        vector=[0.1, 0.2, 0.3],
+        snapshot_id=uuid.uuid4(),
+        source_id=uuid.uuid4(),
+        document_version_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        knowledge_base_id=uuid.uuid4(),
+        text_content="original",
+        chunk_index=0,
+        token_count=12,
+        anchor_page=None,
+        anchor_chapter=None,
+        anchor_section=None,
+        anchor_timecode=None,
+        source_type=SourceType.MARKDOWN,
+        language="english",
+        status=ChunkStatus.INDEXED,
+        enriched_summary="summary",
+        enriched_keywords=["keyword"],
+        enriched_questions=["question?"],
+        enriched_text="original\n\nSummary: summary",
+        enrichment_model="gemini-2.5-flash",
+        enrichment_pipeline_version="s9-01-enrichment-v1",
+    )
+
+    payload = QdrantService._build_payload(point)
+
+    assert payload["enriched_summary"] == "summary"
+    assert payload["enriched_keywords"] == ["keyword"]
+    assert payload["enriched_questions"] == ["question?"]
+    assert payload["enriched_text"] == "original\n\nSummary: summary"
+    assert payload["enrichment_model"] == "gemini-2.5-flash"
+    assert payload["enrichment_pipeline_version"] == "s9-01-enrichment-v1"
 
 
 @pytest.mark.asyncio

@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from app.services.document_ai_parser import DocumentAIParser
     from app.services.document_processing import ChunkData, DocumentProcessor
     from app.services.embedding import EmbeddingService
+    from app.services.enrichment import EnrichmentResult, EnrichmentService
     from app.services.gemini_content import GeminiContentService
     from app.services.qdrant import QdrantService
     from app.services.snapshot import SnapshotService
@@ -53,6 +54,7 @@ class PipelineServices:
     path_c_min_chars_per_page: int
     document_ai_enabled: bool
     batch_orchestrator: BatchOrchestrator | None = None
+    enrichment_service: EnrichmentService | None = None
 
     @property
     def has_document_ai(self) -> bool:
@@ -187,6 +189,9 @@ async def embed_and_index_chunks(
     page_count: int | None = None,
     duration_seconds: float | None = None,
 ) -> SkipEmbeddingResult | BatchSubmittedResult | PersistedPipelineState:
+    from app.services.enrichment import PIPELINE_VERSION as ENRICHMENT_PIPELINE_VERSION
+    from app.services.enrichment import build_enriched_text
+
     persisted_state = PersistedPipelineState(
         snapshot_id=snapshot_id,
         document_id=document_id,
@@ -214,6 +219,39 @@ async def embed_and_index_chunks(
                 pipeline_version=pipeline_version,
             )
 
+        enrichment_results: list[EnrichmentResult | None] = [None] * len(chunk_data)
+        texts_for_embedding = [chunk.text_content for chunk in chunk_data]
+        if services.enrichment_service is not None:
+            try:
+                enrichment_results = await services.enrichment_service.enrich(chunk_data)
+            except Exception:
+                logger.warning(
+                    "worker.ingestion.enrichment_batch_failed",
+                    source_id=str(source.id),
+                    chunk_count=len(chunk_data),
+                    exc_info=True,
+                )
+                enrichment_results = [None] * len(chunk_data)
+            for index, (chunk_info, chunk_row, enrichment_result) in enumerate(
+                zip(chunk_data, chunk_rows, enrichment_results, strict=True)
+            ):
+                if enrichment_result is None:
+                    continue
+                enriched_text = build_enriched_text(
+                    text_content=chunk_info.text_content,
+                    summary=enrichment_result.summary,
+                    keywords=enrichment_result.keywords,
+                    questions=enrichment_result.questions,
+                )
+                texts_for_embedding[index] = enriched_text
+                chunk_row.enriched_summary = enrichment_result.summary
+                chunk_row.enriched_keywords = enrichment_result.keywords
+                chunk_row.enriched_questions = enrichment_result.questions
+                chunk_row.enriched_text = enriched_text
+                chunk_row.enrichment_model = services.enrichment_service.model
+                chunk_row.enrichment_pipeline_version = ENRICHMENT_PIPELINE_VERSION
+            await session.flush()
+
         if (
             services.batch_orchestrator is not None
             and len(chunk_rows) > services.settings.batch_embed_chunk_threshold
@@ -234,7 +272,7 @@ async def embed_and_index_chunks(
             await services.batch_orchestrator.submit_to_gemini(
                 session,
                 background_task_id=task.id,
-                texts=[chunk.text_content for chunk in chunk_rows],
+                texts=texts_for_embedding,
                 chunk_ids=persisted_state.chunk_ids,
                 display_name=source.title,
             )
@@ -252,7 +290,7 @@ async def embed_and_index_chunks(
             )
 
         vectors = await services.embedding_service.embed_texts(
-            [chunk.text_content for chunk in chunk_data],
+            texts_for_embedding,
             task_type=getattr(
                 services.settings,
                 "embedding_task_type",
@@ -284,6 +322,12 @@ async def embed_and_index_chunks(
                 status=ChunkStatus.INDEXED,
                 page_count=page_count,
                 duration_seconds=duration_seconds,
+                enriched_summary=row.enriched_summary,
+                enriched_keywords=row.enriched_keywords,
+                enriched_questions=row.enriched_questions,
+                enriched_text=row.enriched_text,
+                enrichment_model=row.enrichment_model,
+                enrichment_pipeline_version=row.enrichment_pipeline_version,
             )
             for row, vector in zip(chunk_rows, vectors, strict=True)
         ]

@@ -1,0 +1,40 @@
+suite: retrieval_enrichment
+description: Vocabulary-gap retrieval cases for chunk enrichment A/B evaluation
+snapshot_id: "00000000-0000-0000-0000-000000000000"
+cases:
+  - id: re-001
+    query: How do I set up the application from scratch?
+    tags: [synonym, enrichment]
+    expected:
+      - source_id: "00000000-0000-0000-0000-000000000011"
+        contains: docker
+  - id: re-002
+    query: What are the system's data storage options?
+    tags: [abstraction, enrichment]
+    expected:
+      - source_id: "00000000-0000-0000-0000-000000000011"
+        contains: Qdrant
+  - id: re-003
+    query: How do I deploy the application?
+    tags: [question-form, enrichment]
+    expected:
+      - source_id: "00000000-0000-0000-0000-000000000011"
+        contains: docker
+  - id: re-004
+    query: Tell me about the expert's background.
+    tags: [abstraction, enrichment]
+    expected:
+      - source_id: "00000000-0000-0000-0000-000000000021"
+        contains: Morgan
+  - id: re-005
+    query: How does the system ingest new knowledge?
+    tags: [terminology_mismatch, enrichment]
+    expected:
+      - source_id: "00000000-0000-0000-0000-000000000011"
+        contains: ingest
+  - id: re-006
+    query: How does the system handle measuring quality?
+    tags: [synonym, enrichment]
+    expected:
+      - source_id: "00000000-0000-0000-0000-000000000011"
+        contains: eval

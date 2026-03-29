@@ -214,41 +214,41 @@ Described in detail in [docs/spec.md](spec.md#citation-protocol). In brief:
 3. The backend substitutes real URLs (for online sources) or text citations (for offline sources).
 4. The LLM **never** generates URLs on its own.
 
-## Chunk enrichment (deferred)
+## Chunk enrichment
 
-### What it is
-
-A pattern from RAGFlow (Transformer stage): before indexing, an LLM enriches each chunk with additional data:
+Chunk enrichment is implemented as an optional stage between chunking and embedding for Path B and Path C. When `ENRICHMENT_ENABLED=true`, the worker calls Gemini to generate three fields per chunk:
 
 - **Summary** — brief description of chunk contents.
-- **Keywords** — keywords for BM25 recall.
-- **Questions** — questions this chunk can answer.
+- **Keywords** — retrieval-oriented terms and synonyms.
+- **Questions** — natural questions the chunk can answer.
 
-Enriched data is indexed in the Qdrant payload. Retrieval can search not only by chunk text but also by generated questions/keywords, improving recall for queries phrased differently from the original text.
+These fields are persisted on the `chunks` table and copied into the Qdrant payload as `enriched_summary`, `enriched_keywords`, `enriched_questions`, `enriched_text`, `enrichment_model`, and `enrichment_pipeline_version`.
 
-### Why deferred
+### Text source matrix
 
-1. **Cost:** enrichment increases ingestion cost by 10–20x (LLM call per chunk). With Gemini Batch API (−50%) — by 5–10x.
-2. **Unknown utility:** hybrid search (dense + BM25) may provide sufficient retrieval quality without enrichment. The baseline needs to be measured on evals first.
-3. **Easy rollback:** the pipeline is staged; enrichment is a separate stage between chunking and embedding. Adding it later takes 1–2 days of development without breaking the architecture.
+| Consumer           | Source                                                   |
+| ------------------ | -------------------------------------------------------- |
+| Dense embedding    | `enriched_text` when available, otherwise `text_content` |
+| BM25 sparse vector | `enriched_text` when available, otherwise `text_content` |
+| LLM answer context | original `text_content` only                             |
+| Citation display   | original `text_content` only                             |
 
-### Implementation plan (when needed)
+### Execution model
 
-1. **Re-research best practices**, primarily based on RAGFlow (Transformer stage, Improvise/Precise/Balance modes, field selection for indexing). By the time of implementation, RAGFlow may have updated its approaches.
-2. Add a stage to the worker pipeline: `LightweightParser/DocumentAIParser → chunks → [Enrichment] → embeddings → Qdrant`.
-3. New fields in Qdrant payload: `summary`, `keywords`, `questions`.
-4. Use **Gemini Batch API** for enrichment (cost minimization).
-5. Update retrieval — optionally search by enriched fields.
-6. Reindex existing chunks (mechanism already exists).
-7. Run A/B evals: retrieval with enrichment vs without.
+1. Path B / Path C parse into chunks.
+2. Enrichment runs concurrently through interactive Gemini calls with a semaphore limit.
+3. Successful chunks get `enriched_text = text_content + summary + keywords + questions`.
+4. Inline embedding and batch embedding both consume `texts_for_embedding` built from enriched text when present.
+5. Batch completion reads persisted enrichment columns from PostgreSQL before building the final Qdrant payload.
 
-### Enrichment cost (approximate)
+Path A skips enrichment deliberately because its `text_content` is already LLM-generated.
 
-| Knowledge base size     | Without enrichment | With enrichment (Batch API) |
-| ----------------------- | ------------------ | --------------------------- |
-| 100 chunks (articles)   | ~$0.01–0.05        | ~$0.20–1.00                 |
-| 1,000 chunks (book)     | ~$0.10–0.50        | ~$2–10                      |
-| 10,000 chunks (library) | ~$1–5              | ~$20–100                    |
+### Operational notes
+
+- Default state is off: `ENRICHMENT_ENABLED=false`.
+- Interactive enrichment cost is roughly ~$1.60 per 1,000 chunks with Gemini 2.5 Flash.
+- Retrieval behavior does not change structurally; the improvement comes from better dense and BM25 inputs.
+- The feature remains experiment-driven and should be validated through A/B eval runs using `backend/evals/datasets/retrieval_enrichment.yaml`.
 
 ## Parent-child chunking (future)
 

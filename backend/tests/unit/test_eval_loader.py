@@ -166,3 +166,14 @@ cases:
     assert suites[0].cases[0].answer_expectations is not None
     assert suites[0].cases[0].answer_expectations.should_refuse is False
     assert suites[0].cases[0].answer_expectations.persona_tags == ["expert"]
+
+
+def test_load_retrieval_enrichment_dataset_from_repo() -> None:
+    from evals.loader import load_datasets
+
+    dataset = Path(__file__).resolve().parents[2] / "evals" / "datasets" / "retrieval_enrichment.yaml"
+    suites = load_datasets(dataset)
+
+    assert len(suites) == 1
+    assert suites[0].suite == "retrieval_enrichment"
+    assert len(suites[0].cases) == 6

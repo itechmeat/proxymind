@@ -264,6 +264,12 @@ class BatchOrchestrator:
                     source_type=source.source_type,
                     language=source.language or self._qdrant_service.bm25_language,
                     status=ChunkStatus.INDEXED,
+                    enriched_summary=chunk.enriched_summary,
+                    enriched_keywords=chunk.enriched_keywords,
+                    enriched_questions=chunk.enriched_questions,
+                    enriched_text=chunk.enriched_text,
+                    enrichment_model=chunk.enrichment_model,
+                    enrichment_pipeline_version=chunk.enrichment_pipeline_version,
                 )
             )
             succeeded_chunk_ids.append(chunk.id)

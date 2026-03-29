@@ -31,6 +31,7 @@ async def on_startup(ctx: dict[str, Any]) -> None:
     from app.services.batch_orchestrator import BatchOrchestrator
     from app.services.document_ai_parser import DocumentAIParser
     from app.services.embedding import EmbeddingService
+    from app.services.enrichment import EnrichmentService
     from app.services.gemini_content import GeminiContentService
     from app.services.lightweight_parser import LightweightParser
     from app.services.llm import LLMService
@@ -76,6 +77,21 @@ async def on_startup(ctx: dict[str, Any]) -> None:
         use_vertexai=settings.google_genai_use_vertexai,
         project=settings.google_cloud_project,
         location=settings.google_cloud_location,
+    )
+    enrichment_service = (
+        EnrichmentService(
+            model=settings.enrichment_model,
+            temperature=settings.enrichment_temperature,
+            max_output_tokens=settings.enrichment_max_output_tokens,
+            min_chunk_tokens=settings.enrichment_min_chunk_tokens,
+            max_concurrency=settings.enrichment_max_concurrency,
+            api_key=settings.gemini_api_key,
+            use_vertexai=settings.google_genai_use_vertexai,
+            project=settings.google_cloud_project,
+            location=settings.google_cloud_location,
+        )
+        if settings.enrichment_enabled
+        else None
     )
     batch_embedding_client = BatchEmbeddingClient(
         model=settings.embedding_model,
@@ -123,6 +139,7 @@ async def on_startup(ctx: dict[str, Any]) -> None:
     ctx["document_ai_parser"] = document_ai_parser
     ctx["embedding_service"] = embedding_service
     ctx["gemini_content_service"] = gemini_content_service
+    ctx["enrichment_service"] = enrichment_service
     ctx["batch_embedding_client"] = batch_embedding_client
     ctx["batch_orchestrator"] = batch_orchestrator
     ctx["summary_llm_service"] = summary_llm_service

@@ -20,6 +20,7 @@ from app.db.models.enums import (
     SourceType,
 )
 from app.services.document_processing import ChunkData
+from app.services.enrichment import EnrichmentResult, build_enriched_text
 from app.services.path_router import FileMetadata
 from app.services.snapshot import SnapshotService
 from app.workers.tasks.handlers.path_b import PathBResult, _is_suspected_scan, handle_path_b
@@ -78,6 +79,7 @@ def _services(
     chunk_count: int,
     document_ai_enabled: bool = False,
     batch_orchestrator: object | None = None,
+    enrichment_service: object | None = None,
 ) -> PipelineServices:
     return PipelineServices(
         storage_service=SimpleNamespace(download=AsyncMock()),
@@ -112,6 +114,7 @@ def _services(
         path_c_min_chars_per_page=50,
         document_ai_enabled=document_ai_enabled,
         batch_orchestrator=batch_orchestrator,
+        enrichment_service=enrichment_service,
     )
 
 
@@ -187,6 +190,198 @@ async def test_handle_path_b_submits_batch_above_threshold(
     services.qdrant_service.upsert_chunks.assert_not_awaited()  # type: ignore[attr-defined]
     batch_orchestrator.create_batch_job_for_threshold.assert_awaited_once()
     batch_orchestrator.submit_to_gemini.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_handle_path_b_uses_enriched_text_for_embedding_and_payload(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id, task_id = await _seed_source_and_task(session_factory)
+    enrichment_result = EnrichmentResult(
+        summary="Summary for chunk 0.",
+        keywords=["retrieval", "search"],
+        questions=["What is chunk 0 about?"],
+    )
+    enrichment_service = SimpleNamespace(
+        model="gemini-2.5-flash",
+        enrich=AsyncMock(return_value=[enrichment_result, None]),
+    )
+    services = _services(chunk_count=2, enrichment_service=enrichment_service)
+
+    async with session_factory() as session:
+        source = await session.get(Source, source_id)
+        task = await session.get(BackgroundTask, task_id)
+        assert source is not None
+        assert task is not None
+
+        result = await handle_path_b(
+            session,
+            task,
+            source,
+            b"markdown-bytes",
+            FileMetadata(page_count=None, duration_seconds=None, file_size_bytes=14),
+            services,
+        )
+
+        chunks = (await session.scalars(select(Chunk).order_by(Chunk.chunk_index.asc()))).all()
+
+    assert isinstance(result, PathBResult)
+    expected_text = build_enriched_text(
+        text_content="chunk-0",
+        summary=enrichment_result.summary,
+        keywords=enrichment_result.keywords,
+        questions=enrichment_result.questions,
+    )
+    services.embedding_service.embed_texts.assert_awaited_once_with(  # type: ignore[attr-defined]
+        [expected_text, "chunk-1"],
+        task_type="RETRIEVAL_DOCUMENT",
+        title="Path B source",
+    )
+    qdrant_points = services.qdrant_service.upsert_chunks.await_args.args[0]  # type: ignore[attr-defined]
+    assert qdrant_points[0].enriched_text == expected_text
+    assert qdrant_points[0].enriched_summary == enrichment_result.summary
+    assert qdrant_points[1].enriched_text is None
+    assert chunks[0].enriched_text == expected_text
+    assert chunks[0].enriched_keywords == ["retrieval", "search"]
+    assert chunks[1].enriched_text is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_handle_path_b_without_enrichment_service_uses_original_text(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id, task_id = await _seed_source_and_task(session_factory)
+    services = _services(chunk_count=2, enrichment_service=None)
+
+    async with session_factory() as session:
+        source = await session.get(Source, source_id)
+        task = await session.get(BackgroundTask, task_id)
+        assert source is not None
+        assert task is not None
+
+        result = await handle_path_b(
+            session,
+            task,
+            source,
+            b"markdown-bytes",
+            FileMetadata(page_count=None, duration_seconds=None, file_size_bytes=14),
+            services,
+        )
+
+        chunks = (await session.scalars(select(Chunk).order_by(Chunk.chunk_index.asc()))).all()
+
+    assert isinstance(result, PathBResult)
+    services.embedding_service.embed_texts.assert_awaited_once_with(  # type: ignore[attr-defined]
+        ["chunk-0", "chunk-1"],
+        task_type="RETRIEVAL_DOCUMENT",
+        title="Path B source",
+    )
+    qdrant_points = services.qdrant_service.upsert_chunks.await_args.args[0]  # type: ignore[attr-defined]
+    assert qdrant_points[0].bm25_text == "chunk-0"
+    assert qdrant_points[0].enriched_text is None
+    assert qdrant_points[1].bm25_text == "chunk-1"
+    assert chunks[0].enriched_text is None
+    assert chunks[1].enriched_text is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_handle_path_b_falls_back_to_original_text_when_enrichment_batch_fails(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id, task_id = await _seed_source_and_task(session_factory)
+    enrichment_service = SimpleNamespace(
+        model="gemini-2.5-flash",
+        enrich=AsyncMock(side_effect=RuntimeError("enrichment offline")),
+    )
+    services = _services(chunk_count=2, enrichment_service=enrichment_service)
+
+    async with session_factory() as session:
+        source = await session.get(Source, source_id)
+        task = await session.get(BackgroundTask, task_id)
+        assert source is not None
+        assert task is not None
+
+        result = await handle_path_b(
+            session,
+            task,
+            source,
+            b"markdown-bytes",
+            FileMetadata(page_count=None, duration_seconds=None, file_size_bytes=14),
+            services,
+        )
+
+        chunks = (await session.scalars(select(Chunk).order_by(Chunk.chunk_index.asc()))).all()
+
+    assert isinstance(result, PathBResult)
+    services.embedding_service.embed_texts.assert_awaited_once_with(  # type: ignore[attr-defined]
+        ["chunk-0", "chunk-1"],
+        task_type="RETRIEVAL_DOCUMENT",
+        title="Path B source",
+    )
+    qdrant_points = services.qdrant_service.upsert_chunks.await_args.args[0]  # type: ignore[attr-defined]
+    assert qdrant_points[0].enriched_text is None
+    assert qdrant_points[1].enriched_text is None
+    assert chunks[0].enriched_text is None
+    assert chunks[1].enriched_text is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_handle_path_b_uses_enriched_text_for_batch_submission(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id, task_id = await _seed_source_and_task(session_factory)
+    batch_orchestrator = SimpleNamespace(
+        create_batch_job_for_threshold=AsyncMock(return_value=SimpleNamespace()),
+        submit_to_gemini=AsyncMock(return_value=SimpleNamespace()),
+    )
+    enrichment_result = EnrichmentResult(
+        summary="Summary for chunk 0.",
+        keywords=["retrieval", "search"],
+        questions=["What is chunk 0 about?"],
+    )
+    enrichment_service = SimpleNamespace(
+        model="gemini-2.5-flash",
+        enrich=AsyncMock(return_value=[enrichment_result] + [None] * 50),
+    )
+    services = _services(
+        chunk_count=51,
+        batch_orchestrator=batch_orchestrator,
+        enrichment_service=enrichment_service,
+    )
+
+    async with session_factory() as session:
+        source = await session.get(Source, source_id)
+        task = await session.get(BackgroundTask, task_id)
+        assert source is not None
+        assert task is not None
+
+        result = await handle_path_b(
+            session,
+            task,
+            source,
+            b"markdown-bytes",
+            FileMetadata(page_count=None, duration_seconds=None, file_size_bytes=14),
+            services,
+        )
+
+        chunks = (await session.scalars(select(Chunk).order_by(Chunk.chunk_index.asc()))).all()
+
+    assert isinstance(result, BatchSubmittedResult)
+    expected_text = build_enriched_text(
+        text_content="chunk-0",
+        summary=enrichment_result.summary,
+        keywords=enrichment_result.keywords,
+        questions=enrichment_result.questions,
+    )
+    submit_kwargs = batch_orchestrator.submit_to_gemini.await_args.kwargs
+    assert submit_kwargs["texts"][0] == expected_text
+    assert submit_kwargs["texts"][1] == "chunk-1"
+    assert chunks[0].enriched_text == expected_text
+    assert chunks[0].enrichment_model == "gemini-2.5-flash"
 
 
 @pytest.mark.asyncio

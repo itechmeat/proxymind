@@ -212,6 +212,52 @@ async def test_apply_results_finalizes_multiple_sources_without_losing_task_meta
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("committed_data_cleanup")
+async def test_apply_results_includes_persisted_enrichment_fields(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    _task_id, batch_job_id, ordered_chunk_ids = await _seed_batch_context(
+        session_factory,
+        source_count=1,
+    )
+    qdrant_service = SimpleNamespace(upsert_chunks=AsyncMock(), bm25_language="english")
+    orchestrator = BatchOrchestrator(
+        batch_client=SimpleNamespace(model="gemini-embedding-2-preview", dimensions=3),
+        qdrant_service=qdrant_service,
+    )
+
+    async with session_factory() as session:
+        chunk = await session.get(Chunk, ordered_chunk_ids[0])
+        assert chunk is not None
+        chunk.enriched_summary = "summary"
+        chunk.enriched_keywords = ["keyword"]
+        chunk.enriched_questions = ["question?"]
+        chunk.enriched_text = "chunk-0\n\nSummary: summary"
+        chunk.enrichment_model = "gemini-2.5-flash"
+        chunk.enrichment_pipeline_version = "s9-01-enrichment-v1"
+        await session.commit()
+
+    async with session_factory() as session:
+        batch_job = await session.get(BatchJob, batch_job_id)
+        assert batch_job is not None
+        await orchestrator._apply_results(
+            session,
+            batch_job=batch_job,
+            results=[
+                BatchEmbeddingResultItem(index=0, embedding=[0.1, 0.2, 0.3], error_message=None)
+            ],
+        )
+
+    qdrant_points = qdrant_service.upsert_chunks.await_args.args[0]
+    assert qdrant_points[0].enriched_summary == "summary"
+    assert qdrant_points[0].enriched_keywords == ["keyword"]
+    assert qdrant_points[0].enriched_questions == ["question?"]
+    assert qdrant_points[0].enriched_text == "chunk-0\n\nSummary: summary"
+    assert qdrant_points[0].enrichment_model == "gemini-2.5-flash"
+    assert qdrant_points[0].enrichment_pipeline_version == "s9-01-enrichment-v1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
 async def test_submit_to_gemini_rejects_chunk_order_mismatch(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:

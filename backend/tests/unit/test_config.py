@@ -59,6 +59,36 @@ def test_batch_config_defaults() -> None:
     assert settings.batch_max_items_per_request == 1000
 
 
+def test_enrichment_settings_defaults() -> None:
+    settings = Settings(**_base_settings())
+
+    assert settings.enrichment_enabled is False
+    assert settings.enrichment_model == "gemini-2.5-flash"
+    assert settings.enrichment_max_concurrency == 10
+    assert settings.enrichment_temperature == 0.1
+    assert settings.enrichment_max_output_tokens == 512
+    assert settings.enrichment_min_chunk_tokens == 10
+
+
+def test_enrichment_settings_allow_overrides() -> None:
+    settings = Settings(
+        **_base_settings(),
+        enrichment_enabled=True,
+        enrichment_model="gemini-2.5-pro",
+        enrichment_max_concurrency=4,
+        enrichment_temperature=0.2,
+        enrichment_max_output_tokens=256,
+        enrichment_min_chunk_tokens=20,
+    )
+
+    assert settings.enrichment_enabled is True
+    assert settings.enrichment_model == "gemini-2.5-pro"
+    assert settings.enrichment_max_concurrency == 4
+    assert settings.enrichment_temperature == 0.2
+    assert settings.enrichment_max_output_tokens == 256
+    assert settings.enrichment_min_chunk_tokens == 20
+
+
 def test_batch_poll_interval_must_divide_minute() -> None:
     with pytest.raises(
         ValidationError,
