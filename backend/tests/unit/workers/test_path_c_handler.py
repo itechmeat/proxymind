@@ -49,7 +49,11 @@ async def _seed_source_and_task(
     return source_id, task_id
 
 
-def _services(enrichment_service: object | None = None) -> PipelineServices:
+def _services(
+    *,
+    enrichment_service: object | None = None,
+    batch_orchestrator: object | None = None,
+) -> PipelineServices:
     chunk_data = [
         ChunkData(
             text_content="path-c-chunk",
@@ -82,6 +86,7 @@ def _services(enrichment_service: object | None = None) -> PipelineServices:
         path_a_max_video_duration_sec=120,
         path_c_min_chars_per_page=50,
         document_ai_enabled=True,
+        batch_orchestrator=batch_orchestrator,
         enrichment_service=enrichment_service,
     )
 

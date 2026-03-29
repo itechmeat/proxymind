@@ -68,6 +68,7 @@ class EnrichmentService:
         max_output_tokens: int,
         min_chunk_tokens: int,
         max_concurrency: int,
+        request_timeout_seconds: float = 30.0,
         api_key: str | None = None,
         use_vertexai: bool = False,
         project: str | None = None,
@@ -78,6 +79,7 @@ class EnrichmentService:
         self._temperature = temperature
         self._max_output_tokens = max_output_tokens
         self._min_chunk_tokens = min_chunk_tokens
+        self._request_timeout_seconds = request_timeout_seconds
         self._api_key = api_key
         self._use_vertexai = use_vertexai
         self._project = project
@@ -110,12 +112,22 @@ class EnrichmentService:
 
         async with self._semaphore:
             try:
-                response = await asyncio.to_thread(
-                    self._generate_content,
-                    text_content,
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self._generate_content,
+                        text_content,
+                    ),
+                    timeout=self._request_timeout_seconds,
                 )
                 payload = self._parse_response(response)
                 return _normalize_enrichment_result(payload)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "enrichment.chunk_timeout",
+                    chunk_index=getattr(chunk, "chunk_index", None),
+                    exc_info=True,
+                )
+                return None
             except Exception:
                 logger.warning(
                     "enrichment.chunk_failed",

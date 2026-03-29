@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -15,6 +16,8 @@ from app.services.enrichment import (
     _estimate_tokens,
     build_enriched_text,
 )
+
+TIMEOUT_SECONDS = 5
 
 
 def _chunk(text: str = "Revenue grew 3% in Q2 compared to last quarter.", *, token_count: int = 20) -> ChunkData:
@@ -158,6 +161,29 @@ async def test_enrich_fails_open_when_all_chunks_fail() -> None:
 
 
 @pytest.mark.asyncio
+async def test_enrich_fails_open_on_timeout() -> None:
+    service = EnrichmentService(
+        model="gemini-2.5-flash",
+        temperature=0.1,
+        max_output_tokens=512,
+        min_chunk_tokens=1,
+        max_concurrency=1,
+        request_timeout_seconds=0.01,
+        client=MagicMock(),
+    )
+
+    def fake_generate_content(_text: str) -> SimpleNamespace:
+        time.sleep(0.05)
+        return _response(summary="late")
+
+    service._generate_content = fake_generate_content  # type: ignore[method-assign]
+
+    results = await service.enrich([_chunk()])
+
+    assert results == [None]
+
+
+@pytest.mark.asyncio
 async def test_enrich_fails_open_when_structured_fields_are_blank() -> None:
     client = MagicMock()
     client.models.generate_content.return_value = SimpleNamespace(
@@ -206,7 +232,7 @@ async def test_enrich_respects_max_concurrency() -> None:
             max_in_flight = max(max_in_flight, in_flight)
             if in_flight == 2:
                 entered.set()
-        release.wait(timeout=1)
+        release.wait(timeout=TIMEOUT_SECONDS)
         with lock:
             in_flight -= 1
         return _response(summary="ok")
@@ -214,7 +240,7 @@ async def test_enrich_respects_max_concurrency() -> None:
     service._generate_content = fake_generate_content  # type: ignore[method-assign]
 
     task = asyncio.create_task(service.enrich([_chunk("a"), _chunk("b"), _chunk("c")]))
-    assert await asyncio.to_thread(entered.wait, 1)
+    assert await asyncio.to_thread(entered.wait, TIMEOUT_SECONDS)
     with lock:
         assert in_flight == 2
         assert max_in_flight == 2

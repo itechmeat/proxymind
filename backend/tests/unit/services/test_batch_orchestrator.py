@@ -247,6 +247,7 @@ async def test_apply_results_includes_persisted_enrichment_fields(
             ],
         )
 
+    qdrant_service.upsert_chunks.assert_awaited_once()
     qdrant_points = qdrant_service.upsert_chunks.await_args.args[0]
     assert qdrant_points[0].enriched_summary == "summary"
     assert qdrant_points[0].enriched_keywords == ["keyword"]

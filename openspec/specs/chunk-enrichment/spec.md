@@ -91,7 +91,7 @@ The system SHALL add the following settings to the `Settings` class in `backend/
 
 When enrichment succeeds for a chunk, the system SHALL build an `enriched_text` field by concatenating the original `text_content` with enrichment metadata in the following format:
 
-```
+```text
 {text_content}
 
 Summary: {summary}

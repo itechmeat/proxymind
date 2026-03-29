@@ -420,6 +420,7 @@ def test_build_payload_includes_enrichment_fields() -> None:
     assert payload["enriched_text"] == "original\n\nSummary: summary"
     assert payload["enrichment_model"] == "gemini-2.5-flash"
     assert payload["enrichment_pipeline_version"] == "s9-01-enrichment-v1"
+    assert payload["source_type"] == SourceType.MARKDOWN.value
 
 
 @pytest.mark.asyncio
