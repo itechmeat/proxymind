@@ -233,7 +233,7 @@ Phase outcome: measured quality, data-driven decisions on upgrade paths.
 
 Phase outcome: improved retrieval and answer quality driven by data.
 
-- [ ] **S9-01: Chunk enrichment**
+- [x] **S9-01: Chunk enrichment**
       Fresh research (RAGFlow Transformer stage). LLM enrichment (summary, keywords, questions) via Batch API. New payload fields. Reindex.
   - **Outcome:** retrieval metrics improved
   - **Verification:** A/B eval: with enrichment vs without → documented improvement
