@@ -27,6 +27,12 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
         bm25_language="english",
         embedding_model="gemini-embedding-2-preview",
         embedding_batch_size=16,
+        enrichment_enabled=False,
+        enrichment_model="gemini-2.5-flash",
+        enrichment_max_concurrency=10,
+        enrichment_temperature=0.1,
+        enrichment_max_output_tokens=512,
+        enrichment_min_chunk_tokens=10,
         gemini_content_model="gemini-3-flash-preview",
         gemini_file_upload_threshold_bytes=10 * 1024 * 1024,
         gemini_api_key=None,
@@ -118,6 +124,7 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
         "app.services.gemini_content",
         GeminiContentService=lambda **_kwargs: gemini_content_service,
     )
+    install_stub("app.services.enrichment", EnrichmentService=lambda **_kwargs: object())
     install_stub("app.services.snapshot", SnapshotService=lambda: object())
     install_stub("app.services.token_counter", ApproximateTokenizer=lambda: tokenizer)
     install_stub("app.services.batch_embedding", BatchEmbeddingClient=lambda **_kwargs: object())

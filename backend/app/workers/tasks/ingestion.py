@@ -61,6 +61,7 @@ def _load_pipeline_services(ctx: dict[str, Any]) -> PipelineServices:
             getattr(settings, "path_c_min_chars_per_page", 50),
         )
         batch_orchestrator = ctx.get("batch_orchestrator")
+        enrichment_service = ctx.get("enrichment_service")
     except KeyError as error:
         raise RuntimeError(
             f"Worker context is missing required pipeline service: {error.args[0]}"
@@ -82,6 +83,10 @@ def _load_pipeline_services(ctx: dict[str, Any]) -> PipelineServices:
         snapshot_service, "ensure_draft_or_rebind"
     ):
         raise RuntimeError("Worker context contains an invalid snapshot service")
+    if enrichment_service is not None and (
+        not hasattr(enrichment_service, "enrich") or not hasattr(enrichment_service, "model")
+    ):
+        raise RuntimeError("Worker context contains an invalid enrichment service")
     if not hasattr(gemini_content_service, "extract_text_content"):
         raise RuntimeError("Worker context contains an invalid Gemini content service")
     if not hasattr(tokenizer, "count_tokens"):
@@ -108,6 +113,7 @@ def _load_pipeline_services(ctx: dict[str, Any]) -> PipelineServices:
         path_c_min_chars_per_page=path_c_min_chars_per_page,
         document_ai_enabled=getattr(settings, "document_ai_enabled", False),
         batch_orchestrator=batch_orchestrator,
+        enrichment_service=enrichment_service,
     )
 
 

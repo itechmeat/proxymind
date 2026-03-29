@@ -65,6 +65,7 @@ def _services(
     token_count: int = 10,
     upsert_side_effect: Exception | None = None,
     extract_side_effect: Exception | None = None,
+    enrichment_service: object | None = None,
 ) -> PipelineServices:
     qdrant_service = SimpleNamespace(
         upsert_chunks=(
@@ -104,6 +105,7 @@ def _services(
         path_a_max_video_duration_sec=120,
         path_c_min_chars_per_page=50,
         document_ai_enabled=False,
+        enrichment_service=enrichment_service,
     )
 
 
@@ -156,6 +158,39 @@ async def test_handle_path_a_creates_single_image_chunk(
     assert version.processing_path is ProcessingPath.PATH_A
     assert chunk is not None
     assert chunk.status is ChunkStatus.PENDING
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_handle_path_a_never_calls_enrichment_service(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id, task_id = await _seed_source_and_task(
+        session_factory,
+        source_type=SourceType.IMAGE,
+        filename="photo.png",
+        mime_type="image/png",
+    )
+    enrichment_service = SimpleNamespace(model="gemini-2.5-flash", enrich=AsyncMock())
+    services = _services(enrichment_service=enrichment_service)
+
+    async with session_factory() as session:
+        source = await session.get(Source, source_id)
+        task = await session.get(BackgroundTask, task_id)
+        assert source is not None
+        assert task is not None
+
+        result = await handle_path_a(
+            session,
+            task,
+            source,
+            b"image-bytes",
+            FileMetadata(page_count=None, duration_seconds=None, file_size_bytes=11),
+            services,
+        )
+
+    assert isinstance(result, PathAResult)
+    enrichment_service.enrich.assert_not_awaited()
 
 
 @pytest.mark.asyncio

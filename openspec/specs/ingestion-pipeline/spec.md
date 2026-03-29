@@ -143,6 +143,16 @@ The existing `StorageService` SHALL provide a `download(object_key: str) -> byte
 
 **[Modified by S4-06]** The orchestrator SHALL read `processing_hint` from the `BackgroundTask.result_metadata` and pass it to `PathRouter.determine_path()`. The orchestrator SHALL dispatch to `handle_path_c()` when the router returns `PATH_C`. The Path A fallback re-dispatch logic SHALL also consider `PATH_C` as a valid re-dispatch target when Document AI is configured and the document qualifies.
 
+**[Modified by S9-01]** For Path B and Path C, when `ENRICHMENT_ENABLED=true`, an enrichment stage SHALL be inserted between chunking and embedding.
+
+**[Modified by S9-01]** The handler SHALL call `EnrichmentService.enrich(chunks)` after parsing/chunking and before any embedding work begins. For each successfully enriched chunk, the handler SHALL build `enriched_text` (concatenation of `text_content` + summary + keywords + questions) and persist enrichment data to the Chunk DB columns (`enriched_summary`, `enriched_keywords`, `enriched_questions`, `enriched_text`, `enrichment_model`, `enrichment_pipeline_version`). The `texts_for_embedding` list SHALL use `enriched_text` when available, falling back to `text_content` per chunk.
+
+**[Modified by S9-01]** When the batch threshold is exceeded, enrichment SHALL complete and any successful enrichment data SHALL be persisted to the Chunk DB columns before `BatchOrchestrator.create_batch_job_for_threshold()` and `BatchOrchestrator.submit_to_gemini()` are called. The `batch_orchestrator._apply_results` handler SHALL read those persisted enrichment columns when building the Qdrant payload on batch completion.
+
+**[Modified by S9-01]** Enrichment failure SHALL be fail-open at both levels. If enrichment fails for an individual chunk, that chunk SHALL proceed with original `text_content` and `NULL` enrichment columns. If `EnrichmentService.enrich()` is unavailable or raises for the whole batch, the pipeline SHALL continue by processing all chunks with original `text_content` and no enrichment rather than failing the entire source.
+
+**[Modified by S9-01]** Path A SHALL explicitly skip enrichment regardless of the `ENRICHMENT_ENABLED` flag because Path A `text_content` is already LLM-generated. When `ENRICHMENT_ENABLED=false`, the enrichment stage SHALL be skipped entirely and the pipeline SHALL behave exactly as before.
+
 #### Scenario: Orchestrator dispatches to Path C handler
 
 - **WHEN** the orchestrator receives a routing decision of `PATH_C` from PathRouter
@@ -260,6 +270,53 @@ The existing `StorageService` SHALL provide a `download(object_key: str) -> byte
 - **WHEN** the ingestion task has `skip_embedding=false`
 - **AND** parsing produces a chunk count at or below `batch_embed_chunk_threshold`
 - **THEN** the handler SHALL proceed with interactive `embed_texts()` and Qdrant upsert as normal
+
+#### Scenario: Path B enrichment runs when enabled
+
+- **WHEN** a source is routed to Path B
+- **AND** `ENRICHMENT_ENABLED=true`
+- **THEN** the handler SHALL call `EnrichmentService.enrich(chunks)` after chunking and before embedding
+- **AND** successfully enriched chunks SHALL have `enriched_text` used for both dense embedding and BM25 sparse vector generation
+- **AND** enrichment data SHALL be persisted to the Chunk DB columns before embedding begins
+
+#### Scenario: Path C enrichment runs when enabled
+
+- **WHEN** a source is routed to Path C
+- **AND** `ENRICHMENT_ENABLED=true`
+- **THEN** the handler SHALL call `EnrichmentService.enrich(chunks)` after Document AI parsing and chunking and before embedding
+- **AND** successfully enriched chunks SHALL have `enriched_text` used for both dense embedding and BM25 sparse vector generation
+- **AND** enrichment data SHALL be persisted to the Chunk DB columns before embedding begins
+
+#### Scenario: Path A skips enrichment regardless of feature flag
+
+- **WHEN** a source is routed to Path A
+- **AND** `ENRICHMENT_ENABLED=true`
+- **THEN** the handler SHALL NOT call `EnrichmentService.enrich()`
+- **AND** the chunk SHALL be embedded using the original `text_content` only
+- **AND** no enrichment columns SHALL be populated on the Chunk DB row
+
+#### Scenario: Enrichment disabled preserves existing pipeline behavior
+
+- **WHEN** `ENRICHMENT_ENABLED=false`
+- **THEN** the enrichment stage SHALL be skipped entirely for all paths
+- **AND** the pipeline SHALL behave identically to the pre-enrichment implementation
+
+#### Scenario: Enrichment failure is fail-open per chunk
+
+- **WHEN** `ENRICHMENT_ENABLED=true`
+- **AND** `EnrichmentService.enrich()` fails for a specific chunk (timeout, invalid response)
+- **THEN** the failed chunk SHALL proceed with original `text_content` for embedding
+- **AND** the failed chunk's enrichment DB columns SHALL remain NULL
+- **AND** the pipeline SHALL NOT fail — other successfully enriched chunks SHALL use their `enriched_text`
+
+#### Scenario: Batch flow reads enrichment from Chunk DB on completion
+
+- **WHEN** a Path B or Path C source exceeds `batch_embed_chunk_threshold`
+- **AND** `ENRICHMENT_ENABLED=true`
+- **AND** enrichment data has been persisted to Chunk DB columns before batch submission
+- **THEN** `batch_orchestrator._apply_results` SHALL read `enriched_text`, `enriched_summary`, `enriched_keywords`, `enriched_questions`, `enrichment_model`, and `enrichment_pipeline_version` from the Chunk DB rows
+- **AND** the Qdrant payload SHALL include the enrichment fields read from the database
+- **AND** the BM25 sparse vector SHALL use `enriched_text` (when available) as input
 
 ---
 

@@ -58,6 +58,16 @@ class QdrantChunkPoint:
     status: ChunkStatus
     page_count: int | None = None
     duration_seconds: float | None = None
+    enriched_summary: str | None = None
+    enriched_keywords: list[str] | None = None
+    enriched_questions: list[str] | None = None
+    enriched_text: str | None = None
+    enrichment_model: str | None = None
+    enrichment_pipeline_version: str | None = None
+
+    @property
+    def bm25_text(self) -> str:
+        return self.enriched_text or self.text_content
 
 
 @dataclass(slots=True, frozen=True)
@@ -143,7 +153,7 @@ class QdrantService:
                 id=str(chunk.chunk_id),
                 vector={
                     DENSE_VECTOR_NAME: chunk.vector,
-                    BM25_VECTOR_NAME: self._build_bm25_document(chunk.text_content),
+                    BM25_VECTOR_NAME: self._build_bm25_document(chunk.bm25_text),
                 },
                 payload=self._build_payload(chunk),
             )
@@ -276,6 +286,12 @@ class QdrantService:
             "source_type": chunk.source_type.value,
             "language": chunk.language,
             "status": chunk.status.value,
+            "enriched_summary": chunk.enriched_summary,
+            "enriched_keywords": chunk.enriched_keywords,
+            "enriched_questions": chunk.enriched_questions,
+            "enriched_text": chunk.enriched_text,
+            "enrichment_model": chunk.enrichment_model,
+            "enrichment_pipeline_version": chunk.enrichment_pipeline_version,
         }
         if chunk.page_count is not None:
             payload["page_count"] = chunk.page_count

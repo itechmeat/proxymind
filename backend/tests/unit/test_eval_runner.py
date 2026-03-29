@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -287,3 +288,42 @@ async def test_runner_executes_combined_retrieval_and_answer_scoring() -> None:
     assert result.cases[0].scores == {"precision_at_k": 1.0, "groundedness": 0.75}
     client.retrieve.assert_awaited_once()
     client.generate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_runner_processes_repo_retrieval_enrichment_dataset() -> None:
+    from evals.loader import load_datasets
+    from evals.runner import SuiteRunner
+    from evals.scorers import default_scorers
+
+    dataset = (
+        Path(__file__).resolve().parents[2] / "evals" / "datasets" / "retrieval_enrichment.yaml"
+    )
+    suite = load_datasets(dataset)[0]
+    returned_chunks = []
+    for case in suite.cases:
+        assert case.expected, f"Case {case.id} must define at least one expected chunk"
+        expected = case.expected[0]
+        returned_chunks.append(
+            [
+                ReturnedChunk(
+                    chunk_id=uuid.uuid4(),
+                    source_id=expected.source_id,
+                    score=1.0,
+                    text=f"matched text containing {expected.contains}",
+                    rank=1,
+                )
+            ]
+        )
+
+    client = _mock_client(returned_chunks)
+    runner = SuiteRunner(client=client, scorers=default_scorers(), top_n=5)
+
+    result = await runner.run(suite)
+
+    assert result.suite == "retrieval_enrichment"
+    assert result.total_cases == 6
+    assert result.errors == 0
+    assert result.summary["precision_at_k"].mean == 1.0
+    assert result.summary["recall_at_k"].mean == 1.0
+    assert result.summary["mrr"].mean == 1.0
