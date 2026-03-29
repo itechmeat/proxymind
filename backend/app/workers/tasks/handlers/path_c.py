@@ -3,10 +3,12 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import BackgroundTask, Chunk, Source
+from app.db.models import BackgroundTask, Chunk, ChunkParent, Source
 from app.db.models.enums import ChunkStatus, ProcessingPath
+from app.services.chunk_hierarchy import ChunkHierarchyBuilder
 from app.services.path_router import FileMetadata
 from app.workers.tasks.pipeline import (
     BatchSubmittedResult,
@@ -19,6 +21,8 @@ from app.workers.tasks.pipeline import (
     initialize_pipeline_records,
     mark_persisted_records_failed,
 )
+
+logger = structlog.get_logger(__name__)
 
 
 @dataclass(slots=True, frozen=True)
@@ -70,6 +74,73 @@ async def handle_path_c(
         document_version = initialized.document_version
         snapshot_id = initialized.snapshot_id
 
+        hierarchy_builder = ChunkHierarchyBuilder.from_settings(services.settings)
+        decision = hierarchy_builder.qualify(chunk_data)
+        hierarchy = None
+        parent_rows_by_id: dict[uuid.UUID, ChunkParent] = {}
+
+        if decision.qualifies:
+            try:
+                hierarchy = hierarchy_builder.build(chunk_data)
+            except Exception:
+                logger.exception(
+                    "worker.ingestion.parent_child_decision",
+                    source_id=str(source.id),
+                    processing_path=ProcessingPath.PATH_C.value,
+                    qualifies=decision.qualifies,
+                    reason=decision.reason,
+                    total_tokens=decision.total_tokens,
+                    chunk_count=decision.chunk_count,
+                    has_structure=decision.has_structure,
+                    parent_count=0,
+                    fallback_used=(decision.reason == "long_form_fallback"),
+                    failed=True,
+                )
+                raise
+
+        child_parent_index_by_chunk_index = {
+            child.chunk_index: child.parent_index
+            for child in (hierarchy.children if hierarchy is not None else [])
+        }
+        parent_id_by_parent_index: dict[int, uuid.UUID] = {}
+        if hierarchy is not None:
+            for parent in hierarchy.parents:
+                parent_id = uuid.uuid7()
+                parent_id_by_parent_index[parent.parent_index] = parent_id
+                parent_row = ChunkParent(
+                    id=parent_id,
+                    owner_id=source.owner_id,
+                    agent_id=source.agent_id,
+                    knowledge_base_id=source.knowledge_base_id,
+                    document_version_id=document_version.id,
+                    snapshot_id=snapshot_id,
+                    source_id=source.id,
+                    parent_index=parent.parent_index,
+                    text_content=parent.text_content,
+                    token_count=parent.token_count,
+                    anchor_page=parent.anchor_page,
+                    anchor_chapter=parent.anchor_chapter,
+                    anchor_section=parent.anchor_section,
+                    anchor_timecode=parent.anchor_timecode,
+                    heading_path=list(parent.heading_path) or None,
+                )
+                parent_rows_by_id[parent_id] = parent_row
+            session.add_all(parent_rows_by_id.values())
+            await session.flush()
+
+        logger.info(
+            "worker.ingestion.parent_child_decision",
+            source_id=str(source.id),
+            processing_path=ProcessingPath.PATH_C.value,
+            qualifies=decision.qualifies,
+            reason=decision.reason,
+            total_tokens=decision.total_tokens,
+            chunk_count=decision.chunk_count,
+            has_structure=decision.has_structure,
+            parent_count=(len(hierarchy.parents) if hierarchy is not None else 0),
+            fallback_used=(decision.reason == "long_form_fallback"),
+        )
+
         chunk_rows = [
             Chunk(
                 id=uuid.uuid7(),
@@ -82,6 +153,13 @@ async def handle_path_c(
                 chunk_index=chunk.chunk_index,
                 text_content=chunk.text_content,
                 token_count=chunk.token_count,
+                parent_id=(
+                    parent_id_by_parent_index[
+                        child_parent_index_by_chunk_index[chunk.chunk_index]
+                    ]
+                    if hierarchy is not None
+                    else None
+                ),
                 anchor_page=chunk.anchor_page,
                 anchor_chapter=chunk.anchor_chapter,
                 anchor_section=chunk.anchor_section,
@@ -111,6 +189,7 @@ async def handle_path_c(
             document_version_id=document_version.id,
             processing_path=ProcessingPath.PATH_C,
             pipeline_version="s4-06-path-c",
+            parent_rows_by_id=parent_rows_by_id or None,
             page_count=file_metadata.page_count,
             duration_seconds=file_metadata.duration_seconds,
         )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 
 from app.persona.loader import PersonaContext
 from app.services.catalog import CatalogItemInfo
@@ -248,6 +249,55 @@ def test_user_message_contains_knowledge_context_tag() -> None:
     result = _assembler().assemble(chunks=[_chunk("Knowledge text")], query="Q?", source_map={})
     assert "<knowledge_context>" in result.messages[1]["content"]
     assert "Knowledge text" in result.messages[1]["content"]
+
+
+def test_knowledge_context_includes_child_and_parent() -> None:
+    chunk = replace(
+        _chunk("child text"),
+        parent_id=uuid.uuid4(),
+        parent_text_content="parent text",
+        parent_anchor_metadata={
+            "anchor_page": 10,
+            "anchor_chapter": "Chapter 1",
+            "anchor_section": "Section A",
+            "anchor_timecode": None,
+        },
+    )
+
+    result = _assembler().assemble(
+        chunks=[chunk],
+        query="Q?",
+        source_map={chunk.source_id: _source_info(chunk.source_id)},
+    )
+
+    assert "parent text" in result.messages[1]["content"]
+    assert "child text" in result.messages[1]["content"]
+
+
+def test_shared_parent_is_deduplicated_across_multiple_children() -> None:
+    parent_id = uuid.uuid4()
+    parent_anchor_metadata = {
+        "anchor_page": 10,
+        "anchor_chapter": "Chapter 1",
+        "anchor_section": "Section A",
+        "anchor_timecode": None,
+    }
+    first = replace(
+        _chunk("child one"),
+        parent_id=parent_id,
+        parent_text_content="shared parent",
+        parent_anchor_metadata=parent_anchor_metadata,
+    )
+    second = replace(
+        _chunk("child two"),
+        parent_id=parent_id,
+        parent_text_content="shared parent",
+        parent_anchor_metadata=parent_anchor_metadata,
+    )
+
+    result = _assembler().assemble(chunks=[first, second], query="Q?", source_map={})
+
+    assert result.messages[1]["content"].count("shared parent") == 1
 
 
 def test_empty_identity_produces_empty_tag() -> None:

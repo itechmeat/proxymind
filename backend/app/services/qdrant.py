@@ -56,6 +56,13 @@ class QdrantChunkPoint:
     source_type: SourceType
     language: str | None
     status: ChunkStatus
+    parent_id: UUID | None = None
+    parent_text_content: str | None = None
+    parent_token_count: int | None = None
+    parent_anchor_page: int | None = None
+    parent_anchor_chapter: str | None = None
+    parent_anchor_section: str | None = None
+    parent_anchor_timecode: str | None = None
     page_count: int | None = None
     duration_seconds: float | None = None
     enriched_summary: str | None = None
@@ -77,6 +84,10 @@ class RetrievedChunk:
     text_content: str
     score: float
     anchor_metadata: dict[str, int | str | None]
+    parent_id: UUID | None = None
+    parent_text_content: str | None = None
+    parent_token_count: int | None = None
+    parent_anchor_metadata: dict[str, int | str | None] | None = None
 
 
 class QdrantService:
@@ -283,6 +294,13 @@ class QdrantService:
             "anchor_chapter": chunk.anchor_chapter,
             "anchor_section": chunk.anchor_section,
             "anchor_timecode": chunk.anchor_timecode,
+            "parent_id": str(chunk.parent_id) if chunk.parent_id is not None else None,
+            "parent_text_content": chunk.parent_text_content,
+            "parent_token_count": chunk.parent_token_count,
+            "parent_anchor_page": chunk.parent_anchor_page,
+            "parent_anchor_chapter": chunk.parent_anchor_chapter,
+            "parent_anchor_section": chunk.parent_anchor_section,
+            "parent_anchor_timecode": chunk.parent_anchor_timecode,
             "source_type": chunk.source_type.value,
             "language": chunk.language,
             "status": chunk.status.value,
@@ -436,6 +454,41 @@ class QdrantService:
                 "Qdrant point contains invalid retrieval metadata"
             ) from error
 
+        raw_parent_id = payload.get("parent_id")
+        parent_id: UUID | None = None
+        if raw_parent_id is not None:
+            try:
+                parent_id = UUID(str(raw_parent_id))
+            except (TypeError, ValueError) as error:
+                raise InvalidRetrievedChunkError(
+                    "Qdrant point contains invalid parent retrieval metadata"
+                ) from error
+
+        raw_parent_token_count = payload.get("parent_token_count")
+        parent_token_count: int | None = None
+        if raw_parent_token_count is not None:
+            try:
+                parent_token_count = int(raw_parent_token_count)
+            except (TypeError, ValueError) as error:
+                raise InvalidRetrievedChunkError(
+                    "Qdrant point contains invalid parent token metadata"
+                ) from error
+
+        parent_anchor_metadata = {
+            "anchor_page": payload.get("parent_anchor_page"),
+            "anchor_chapter": payload.get("parent_anchor_chapter"),
+            "anchor_section": payload.get("parent_anchor_section"),
+            "anchor_timecode": payload.get("parent_anchor_timecode"),
+        }
+        has_parent_metadata = parent_id is not None or any(
+            value is not None
+            for value in (
+                payload.get("parent_text_content"),
+                parent_token_count,
+                *parent_anchor_metadata.values(),
+            )
+        )
+
         return RetrievedChunk(
             chunk_id=chunk_id,
             source_id=source_id,
@@ -447,6 +500,10 @@ class QdrantService:
                 "anchor_section": payload.get("anchor_section"),
                 "anchor_timecode": payload.get("anchor_timecode"),
             },
+            parent_id=parent_id,
+            parent_text_content=payload.get("parent_text_content"),
+            parent_token_count=parent_token_count,
+            parent_anchor_metadata=parent_anchor_metadata if has_parent_metadata else None,
         )
 
     @staticmethod

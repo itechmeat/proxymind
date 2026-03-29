@@ -240,7 +240,7 @@ Phase outcome: improved retrieval and answer quality driven by data.
   - Tasks: research, enrichment pipeline stage, Batch API integration, reindex, A/B eval
   - **Parallel pair:** S9-02 (Parent-child chunking) — both modify ingestion pipeline but touch different stages
 
-- [ ] **S9-02: Parent-child chunking**
+- [x] **S9-02: Parent-child chunking**
       Hierarchical indexing for books. Search by child, context from parent.
   - **Outcome:** long documents provide richer context
   - **Verification:** book → hierarchical chunks → retrieval returns child + parent

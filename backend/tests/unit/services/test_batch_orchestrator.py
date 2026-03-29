@@ -13,6 +13,7 @@ from app.db.models import (
     BackgroundTask,
     BatchJob,
     Chunk,
+    ChunkParent,
     Document,
     DocumentVersion,
     EmbeddingProfile,
@@ -40,6 +41,7 @@ async def _seed_batch_context(
     session_factory: async_sessionmaker[AsyncSession],
     *,
     source_count: int,
+    with_parent: bool = False,
 ) -> tuple[uuid.UUID, uuid.UUID, list[uuid.UUID]]:
     snapshot_id = uuid.uuid7()
     task_id = uuid.uuid7()
@@ -73,6 +75,7 @@ async def _seed_batch_context(
             document_id = uuid.uuid7()
             document_version_id = uuid.uuid7()
             chunk_id = uuid.uuid7()
+            parent_id = uuid.uuid7() if with_parent else None
             ordered_chunk_ids.append(chunk_id)
 
             session.add_all(
@@ -104,19 +107,44 @@ async def _seed_batch_context(
                         processing_path=ProcessingPath.PATH_B,
                         status=DocumentVersionStatus.PROCESSING,
                     ),
-                    Chunk(
-                        id=chunk_id,
+                ]
+            )
+            await session.flush()
+            if parent_id is not None:
+                session.add(
+                    ChunkParent(
+                        id=parent_id,
                         agent_id=DEFAULT_AGENT_ID,
                         knowledge_base_id=DEFAULT_KNOWLEDGE_BASE_ID,
                         document_version_id=document_version_id,
                         snapshot_id=snapshot_id,
                         source_id=source_id,
-                        chunk_index=0,
-                        text_content=f"chunk-{index}",
-                        token_count=index + 1,
-                        status=ChunkStatus.PENDING,
-                    ),
-                ]
+                        parent_index=0,
+                        text_content=f"parent-{index}",
+                        token_count=100,
+                        anchor_page=index + 1,
+                        anchor_chapter=f"Chapter {index}",
+                        anchor_section=f"Section {index}",
+                        anchor_timecode=None,
+                        heading_path=[f"Chapter {index}", f"Section {index}"],
+                    )
+                )
+                await session.flush()
+
+            session.add(
+                Chunk(
+                    id=chunk_id,
+                    agent_id=DEFAULT_AGENT_ID,
+                    knowledge_base_id=DEFAULT_KNOWLEDGE_BASE_ID,
+                    document_version_id=document_version_id,
+                    parent_id=parent_id,
+                    snapshot_id=snapshot_id,
+                    source_id=source_id,
+                    chunk_index=0,
+                    text_content=f"chunk-{index}",
+                    token_count=index + 1,
+                    status=ChunkStatus.PENDING,
+                )
             )
 
         task.result_metadata = {
@@ -255,6 +283,40 @@ async def test_apply_results_includes_persisted_enrichment_fields(
     assert qdrant_points[0].enriched_text == "chunk-0\n\nSummary: summary"
     assert qdrant_points[0].enrichment_model == "gemini-2.5-flash"
     assert qdrant_points[0].enrichment_pipeline_version == "s9-01-enrichment-v1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("committed_data_cleanup")
+async def test_apply_results_includes_parent_payload_fields(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    _task_id, batch_job_id, _ordered_chunk_ids = await _seed_batch_context(
+        session_factory,
+        source_count=1,
+        with_parent=True,
+    )
+    qdrant_service = SimpleNamespace(upsert_chunks=AsyncMock(), bm25_language="english")
+    orchestrator = BatchOrchestrator(
+        batch_client=SimpleNamespace(model="gemini-embedding-2-preview", dimensions=3),
+        qdrant_service=qdrant_service,
+    )
+
+    async with session_factory() as session:
+        batch_job = await session.get(BatchJob, batch_job_id)
+        assert batch_job is not None
+        await orchestrator._apply_results(
+            session,
+            batch_job=batch_job,
+            results=[
+                BatchEmbeddingResultItem(index=0, embedding=[0.1, 0.2, 0.3], error_message=None)
+            ],
+        )
+
+    qdrant_service.upsert_chunks.assert_awaited_once()
+    qdrant_point = qdrant_service.upsert_chunks.await_args.args[0][0]
+    assert qdrant_point.parent_id is not None
+    assert qdrant_point.parent_text_content == "parent-0"
+    assert qdrant_point.parent_anchor_section == "Section 0"
 
 
 @pytest.mark.asyncio

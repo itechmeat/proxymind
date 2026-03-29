@@ -3,6 +3,7 @@ from app.db.models.core import Agent, CatalogItem
 from app.db.models.dialogue import Message, Session
 from app.db.models.knowledge import (
     Chunk,
+    ChunkParent,
     Document,
     DocumentVersion,
     EmbeddingProfile,
@@ -18,6 +19,7 @@ __all__ = [
     "BatchJob",
     "CatalogItem",
     "Chunk",
+    "ChunkParent",
     "Document",
     "DocumentVersion",
     "EmbeddingProfile",

@@ -102,3 +102,22 @@ def test_chunk_format_includes_anchor_metadata_when_available() -> None:
     assert 'chapter: "Chapter 5"' in header
     assert 'section: "Interfaces"' in header
     assert "page: 7" in header
+
+def test_chunk_format_omits_empty_parentheses_when_anchor_parts_are_empty() -> None:
+    source_id = uuid.uuid4()
+    header = format_chunk_header(
+        1,
+        _chunk_with_anchor(
+            "Context body",
+            source_id=source_id,
+            anchor_page=None,
+            anchor_chapter=None,
+            anchor_section=None,
+            anchor_timecode=None,
+        ),
+        {
+            source_id: _source_info(source_id, title=""),
+        },
+    )
+
+    assert header == "[source:1]"

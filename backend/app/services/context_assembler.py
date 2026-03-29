@@ -11,7 +11,7 @@ from app.persona.safety import SYSTEM_SAFETY_POLICY
 from app.services.catalog import CatalogItemInfo
 from app.services.conversation_memory import MemoryBlock
 from app.services.promotions import Promotion, PromotionsService
-from app.services.prompt import format_chunk_header
+from app.services.prompt import format_hierarchy_context
 from app.services.qdrant import RetrievedChunk
 from app.services.token_counter import estimate_tokens
 
@@ -24,6 +24,12 @@ class PromptLayer:
     tag: str
     content: str
     token_estimate: int
+
+
+@dataclass(slots=True, frozen=True)
+class SelectedChunk:
+    chunk: RetrievedChunk
+    include_parent: bool
 
 
 @dataclass(slots=True, frozen=True)
@@ -160,14 +166,21 @@ class ContextAssembler:
         self,
         chunks: list[RetrievedChunk],
         source_map: dict[uuid.UUID, SourceInfo],
-    ) -> list[RetrievedChunk]:
-        selected_chunks: list[RetrievedChunk] = []
+    ) -> list[SelectedChunk]:
+        selected_chunks: list[SelectedChunk] = []
         used_tokens = 0
+        seen_parent_ids: set[uuid.UUID] = set()
 
         for chunk in chunks:
             next_index = len(selected_chunks) + 1
-            formatted_chunk = (
-                f"{format_chunk_header(next_index, chunk, source_map)}\n{chunk.text_content}"
+            include_parent = not (
+                chunk.parent_id is not None and chunk.parent_id in seen_parent_ids
+            )
+            formatted_chunk = format_hierarchy_context(
+                next_index,
+                chunk,
+                source_map,
+                include_parent=include_parent,
             )
             chunk_tokens = estimate_tokens(formatted_chunk)
             if used_tokens + chunk_tokens > self._retrieval_context_budget:
@@ -177,11 +190,15 @@ class ContextAssembler:
                         retrieval_context_budget=self._retrieval_context_budget,
                         min_retrieved_chunks=self._min_retrieved_chunks,
                     )
-                    selected_chunks.append(chunk)
+                    selected_chunks.append(SelectedChunk(chunk=chunk, include_parent=include_parent))
+                    if include_parent and chunk.parent_id is not None:
+                        seen_parent_ids.add(chunk.parent_id)
                     used_tokens += chunk_tokens
                     continue
                 break
-            selected_chunks.append(chunk)
+            selected_chunks.append(SelectedChunk(chunk=chunk, include_parent=include_parent))
+            if include_parent and chunk.parent_id is not None:
+                seen_parent_ids.add(chunk.parent_id)
             used_tokens += chunk_tokens
 
         return selected_chunks
@@ -264,13 +281,19 @@ class ContextAssembler:
 
     def _build_knowledge_context(
         self,
-        chunks: list[RetrievedChunk],
+        chunks: list[SelectedChunk],
         source_map: dict[uuid.UUID, SourceInfo],
     ) -> str:
         lines: list[str] = []
-        for index, chunk in enumerate(chunks, start=1):
-            lines.append(format_chunk_header(index, chunk, source_map))
-            lines.append(chunk.text_content)
+        for index, selected in enumerate(chunks, start=1):
+            lines.append(
+                format_hierarchy_context(
+                    index,
+                    selected.chunk,
+                    source_map,
+                    include_parent=selected.include_parent,
+                )
+            )
             if index < len(chunks):
                 lines.append("")
         return self._wrap("knowledge_context", "\n".join(lines))

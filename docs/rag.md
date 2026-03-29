@@ -91,8 +91,11 @@ Pipeline Path B:
 
 1. **LightweightParser** — local parsing for Markdown, TXT, HTML, DOCX, and text-based PDFs.
 2. **TextChunker** — shared chunking with anchor metadata preservation.
-3. **Gemini Embedding 2** — generating embeddings from chunk text.
-4. Multiple chunk-records, each with `text_content` and anchor metadata.
+3. **Parent-child hierarchy (qualifying documents only)** — long-form documents are evaluated after chunking. If they meet the configured thresholds, child chunks are grouped into larger parent sections using structure-first grouping or deterministic bounded fallback grouping when headings are weak.
+4. **Gemini Embedding 2** — generating embeddings from child chunk text.
+5. Multiple chunk-records, each with `text_content` and anchor metadata.
+
+For non-qualifying documents, Path B stays flat: no parent rows, no parent links, and no retrieval-format changes.
 
 ### Path C — Document AI fallback
 
@@ -106,8 +109,9 @@ Pipeline Path C:
 
 1. **Google Cloud Document AI** — OCR and layout-aware parsing.
 2. **TextChunker** — normalization into the same chunk contract used by Path B.
-3. **Gemini Embedding 2** — generating embeddings from chunk text.
-4. Multiple chunk-records with the same anchor contract and `processing_path=path_c`.
+3. **Parent-child hierarchy (qualifying documents only)** — the same hierarchy builder used by Path B runs over normalized chunks, preserving parity between local and external parsing paths.
+4. **Gemini Embedding 2** — generating embeddings from child chunk text.
+5. Multiple chunk-records with the same anchor contract and `processing_path=path_c`.
 
 ### Bulk operations
 
@@ -149,6 +153,48 @@ The relevance threshold is applied to **dense cosine similarity before RRF fusio
 ### Top-N selection
 
 A limited set of chunks (top-N by RRF score) is passed to the LLM. N is a configurable parameter (balance between context completeness and prompt cost).
+
+## Parent-child chunking
+
+Parent-child chunking is part of the default Path B / Path C pipeline for qualifying long-form documents.
+
+### Qualification
+
+A document qualifies only when both conditions are met:
+
+- total child token count reaches `parent_child_min_document_tokens`
+- child count reaches `parent_child_min_flat_chunks`
+
+Qualification emits a structured decision log with one of three outcomes:
+
+- `long_form_structure_first` — document qualifies and has usable heading structure
+- `long_form_fallback` — document qualifies but headings are weak, so bounded fallback grouping is used
+- `below_long_form_threshold` — document stays flat
+
+If a document qualifies but hierarchy construction or parent persistence fails, ingestion fails closed instead of silently falling back to flat chunks.
+
+### Storage contract
+
+- **PostgreSQL** stores canonical parent rows in `chunk_parents`.
+- **Child chunks** keep `parent_id` in `chunks.parent_id`.
+- **Qdrant** still indexes only child vectors, but each child payload also carries denormalized parent metadata (`parent_id`, parent text, parent anchors, parent token count).
+
+This keeps ranking precise at the child level while making parent context available without an extra round trip during retrieval.
+
+### Retrieval and context assembly
+
+- Retrieval remains **child-first**: dense, sparse, and hybrid search all rank child chunks only.
+- Context assembly may attach the matching parent text to a selected child chunk.
+- Shared parents are deduplicated across multiple selected children, so the prompt preserves child evidence without repeating the same larger section.
+
+### Batch parity
+
+Interactive embedding and Gemini Batch embedding use the same contract:
+
+- `enriched_text` is preferred over raw `text_content` when available
+- final Qdrant child payloads always include the same parent-aware metadata shape
+
+This keeps batch and non-batch indexing behavior identical for hierarchy-aware retrieval.
 
 ## Query rewriting
 
@@ -250,25 +296,6 @@ Path A skips enrichment deliberately because its `text_content` is already LLM-g
 - Retrieval behavior does not change structurally; the improvement comes from better dense and BM25 inputs.
 - The feature remains experiment-driven and should be validated through A/B eval runs using `backend/evals/datasets/retrieval_enrichment.yaml`.
 
-## Parent-child chunking (future)
-
-### Idea
-
-A pattern from RAGFlow (TreeRAG): for long documents (books), chunking creates a hierarchy:
-
-- **Child chunks** (small) — indexed for precise retrieval.
-- **Parent chunks** (large) — used for context expansion.
-
-During retrieval: find the relevant child chunk, but pass its parent (or siblings) to the LLM for context completeness. This solves the problem of "found the right fragment, but there is not enough context for an answer."
-
-### Relationship with the lightweight parser stack
-
-The lightweight parser stack preserves the hierarchical document structure (heading levels). This creates a natural foundation for parent-child: heading level 1 → parent, heading level 2–3 → children.
-
-### Status
-
-Deferred. Implementation after evals, once it is clear whether flat chunking is sufficient for the typical documents of a digital twin.
-
 ## Multilingual support
 
 ProxyMind defaults to English, but all language-dependent components are configurable:
@@ -289,20 +316,24 @@ The BM25 language is set at deploy time via `.env` and applies system-wide.
 
 Starting values for v1. All configurable. Refined based on eval results.
 
-| Parameter                     | Default                    | Description                                                                                                                                                                                                                   |
-| ----------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `retrieval_top_n`             | 5                          | Number of chunks passed to the LLM                                                                                                                                                                                            |
-| `retrieval_context_budget`    | 4096 tokens                | Maximum retrieval context budget in the prompt                                                                                                                                                                                |
-| `min_dense_similarity`        | to be determined via evals | Minimum cosine similarity for dense vector. Applied **before** RRF fusion. The RRF score is not used as a threshold — it depends on the fusion formula and ranking depth and is not a stable metric for an absolute threshold |
-| `min_retrieved_chunks`        | 1                          | Minimum chunks required for an answer. If retrieval returns fewer — the digital twin responds "no answer found in the knowledge base"                                                                                         |
-| `rewrite_timeout_ms`          | 3000                       | Query rewriting timeout (fail-open on exceed)                                                                                                                                                                                 |
-| `rewrite_token_budget`        | 2048 tokens                | Maximum prompt budget for query rewriting (history + query). If history is longer — truncated to the most recent messages that fit within the budget                                                                          |
-| `max_citations_per_response`  | 5                          | Maximum citations per response                                                                                                                                                                                                |
-| `max_promotions_per_response` | 1                          | Maximum commercial recommendations per response                                                                                                                                                                               |
-| `path_a_text_threshold_pdf`   | 2000 tokens                | text_content threshold for PDF: Path A → Path B                                                                                                                                                                               |
-| `path_a_text_threshold_media` | 500 tokens                 | text_content threshold for audio/video only. Over-threshold audio/video fail ingestion because Path B is not yet available; images ignore this threshold and remain single-chunk Path A                                       |
-| `rewrite_history_messages`    | 10                         | Maximum recent messages for query rewriting (additionally limited by `rewrite_token_budget`)                                                                                                                                  |
-| `bm25_language`               | english                    | Qdrant BM25 language (Snowball stemmer)                                                                                                                                                                                       |
+| Parameter                           | Default                    | Description                                                                                                                                                                                                                   |
+| ----------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `retrieval_top_n`                   | 5                          | Number of chunks passed to the LLM                                                                                                                                                                                            |
+| `retrieval_context_budget`          | 4096 tokens                | Maximum retrieval context budget in the prompt                                                                                                                                                                                |
+| `min_dense_similarity`              | to be determined via evals | Minimum cosine similarity for dense vector. Applied **before** RRF fusion. The RRF score is not used as a threshold — it depends on the fusion formula and ranking depth and is not a stable metric for an absolute threshold |
+| `min_retrieved_chunks`              | 1                          | Minimum chunks required for an answer. If retrieval returns fewer — the digital twin responds "no answer found in the knowledge base"                                                                                         |
+| `rewrite_timeout_ms`                | 3000                       | Query rewriting timeout (fail-open on exceed)                                                                                                                                                                                 |
+| `rewrite_token_budget`              | 2048 tokens                | Maximum prompt budget for query rewriting (history + query). If history is longer — truncated to the most recent messages that fit within the budget                                                                          |
+| `max_citations_per_response`        | 5                          | Maximum citations per response                                                                                                                                                                                                |
+| `max_promotions_per_response`       | 1                          | Maximum commercial recommendations per response                                                                                                                                                                               |
+| `path_a_text_threshold_pdf`         | 2000 tokens                | text_content threshold for PDF: Path A → Path B                                                                                                                                                                               |
+| `path_a_text_threshold_media`       | 500 tokens                 | text_content threshold for audio/video only. Over-threshold audio/video fail ingestion because Path B is not yet available; images ignore this threshold and remain single-chunk Path A                                       |
+| `parent_child_min_document_tokens`  | 1500 tokens                | Minimum total child-token volume required before Path B / Path C build parent sections                                                                                                                                        |
+| `parent_child_min_flat_chunks`      | 6                          | Minimum child chunk count required before hierarchy activation                                                                                                                                                                |
+| `parent_child_parent_target_tokens` | 1200 tokens                | Soft target for parent section size during bounded grouping                                                                                                                                                                   |
+| `parent_child_parent_max_tokens`    | 1800 tokens                | Hard upper bound for parent section size before deterministic splitting                                                                                                                                                       |
+| `rewrite_history_messages`          | 10                         | Maximum recent messages for query rewriting (additionally limited by `rewrite_token_budget`)                                                                                                                                  |
+| `bm25_language`                     | english                    | Qdrant BM25 language (Snowball stemmer)                                                                                                                                                                                       |
 
 ## Quality metrics
 
@@ -326,4 +357,4 @@ Two testing tracks (see [docs/spec.md](spec.md#testing-strategy)):
 - **CI (deterministic)** — mock retrieval results, verify citation builder, prompt assembly, snapshot filtering.
 - **Evals (on real models)** — run test conversations, manual/semi-automated assessment of answer metrics. Run separately, do not block CI.
 
-Evals determine whether upgrade paths are needed: chunk enrichment, parent-child chunking, BGE-M3 fallback.
+Evals determine whether further upgrade paths are needed: more advanced parent expansion strategies, chunk enrichment tuning, and BGE-M3 fallback.

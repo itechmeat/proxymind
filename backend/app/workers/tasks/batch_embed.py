@@ -118,7 +118,10 @@ async def process_batch_embed(
                 await batch_orchestrator.submit_to_gemini(
                     session,
                     background_task_id=task.id,
-                    texts=[chunk.text_content for chunk in pending_chunks],
+                    texts=[
+                        (getattr(chunk, "enriched_text", None) or chunk.text_content)
+                        for chunk in pending_chunks
+                    ],
                     chunk_ids=[chunk.id for chunk in pending_chunks],
                     display_name=f"batch-embed-{task.id}",
                 )

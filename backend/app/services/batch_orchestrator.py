@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import BackgroundTask, BatchJob, Chunk, Document, DocumentVersion, Source
+from app.db.models import BackgroundTask, BatchJob, Chunk, ChunkParent, Document, DocumentVersion, Source
 from app.db.models.enums import (
     BackgroundTaskStatus,
     BatchOperationType,
@@ -228,6 +228,14 @@ class BatchOrchestrator:
         ).all()
         document_by_id = {document.id: document for document in documents}
 
+        parent_by_id: dict[uuid.UUID, ChunkParent] = {}
+        parent_ids = {chunk.parent_id for chunk in chunk_rows if chunk.parent_id is not None}
+        if parent_ids:
+            parents = (
+                await session.scalars(select(ChunkParent).where(ChunkParent.id.in_(parent_ids)))
+            ).all()
+            parent_by_id = {parent.id: parent for parent in parents}
+
         succeeded_chunk_ids: list[uuid.UUID] = []
         failed_chunk_ids: list[uuid.UUID] = []
         failed_items: list[dict[str, str]] = []
@@ -245,6 +253,9 @@ class BatchOrchestrator:
                 continue
             source = source_by_id[chunk.source_id]
             document_version = document_version_by_id[chunk.document_version_id]
+            parent = parent_by_id.get(chunk.parent_id) if chunk.parent_id is not None else None
+            if chunk.parent_id is not None and parent is None:
+                raise ValueError("Stored batch chunk parent_id could not be loaded from the database")
             qdrant_points.append(
                 QdrantChunkPoint(
                     chunk_id=chunk.id,
@@ -261,6 +272,13 @@ class BatchOrchestrator:
                     anchor_chapter=chunk.anchor_chapter,
                     anchor_section=chunk.anchor_section,
                     anchor_timecode=chunk.anchor_timecode,
+                    parent_id=chunk.parent_id,
+                    parent_text_content=parent.text_content if parent is not None else None,
+                    parent_token_count=parent.token_count if parent is not None else None,
+                    parent_anchor_page=parent.anchor_page if parent is not None else None,
+                    parent_anchor_chapter=parent.anchor_chapter if parent is not None else None,
+                    parent_anchor_section=parent.anchor_section if parent is not None else None,
+                    parent_anchor_timecode=parent.anchor_timecode if parent is not None else None,
                     source_type=source.source_type,
                     language=source.language or self._qdrant_service.bm25_language,
                     status=ChunkStatus.INDEXED,
