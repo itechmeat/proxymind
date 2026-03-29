@@ -223,7 +223,7 @@ Phase outcome: measured quality, data-driven decisions on upgrade paths.
   - **Verification:** `run-evals` → report with metrics
   - Tasks: dataset format, eval runner, report generator
 
-- [ ] **S8-02: Eval runs + upgrade decision**
+- [x] **S8-02: Eval runs + upgrade decision**
       Retrieval evals: Precision@K, Recall@K, MRR baseline. Answer quality: groundedness, citation accuracy, persona fidelity, refusal quality (LLM-as-judge + manual sampling). Upgrade path decision documented based on results: chunk enrichment, parent-child, BGE-M3.
   - **Outcome:** retrieval and answer quality measured; data-backed improvement plan
   - **Verification:** report with retrieval + answer metrics; baseline recorded; decision document supported by data

@@ -41,11 +41,56 @@ def test_eval_case_with_tags() -> None:
     assert case.tags == ["retrieval", "contact"]
 
 
-def test_eval_case_empty_expected_rejected() -> None:
+def test_eval_case_empty_expected_allowed() -> None:
     from evals.models import EvalCase
 
-    with pytest.raises(ValidationError):
-        EvalCase(id="bad", query="q", expected=[])
+    case = EvalCase(id="ok", query="q", expected=[])
+
+    assert case.expected == []
+
+
+def test_eval_case_answer_expectations_default_none() -> None:
+    from evals.models import EvalCase
+
+    case = EvalCase(id="a-001", query="What is X?")
+
+    assert case.answer_expectations is None
+
+
+def test_answer_expectations_defaults() -> None:
+    from evals.models import AnswerExpectations
+
+    expectations = AnswerExpectations()
+
+    assert expectations.should_refuse is False
+    assert expectations.expected_citations == []
+    assert expectations.persona_tags == []
+    assert expectations.groundedness_notes == ""
+
+
+def test_generation_result_model() -> None:
+    from evals.models import GenerationResult, ReturnedChunk
+
+    result = GenerationResult(
+        answer="The answer is X.",
+        citations=[],
+        retrieved_chunks=[
+            ReturnedChunk(
+                chunk_id=uuid.uuid4(),
+                source_id=uuid.uuid4(),
+                score=0.9,
+                text="chunk text",
+                rank=1,
+            )
+        ],
+        rewritten_query="What is X?",
+        timing_ms=150.0,
+        model="gemini/gemini-2.0-flash",
+    )
+
+    assert result.answer == "The answer is X."
+    assert result.model == "gemini/gemini-2.0-flash"
+    assert len(result.retrieved_chunks) == 1
 
 
 def test_eval_suite_valid() -> None:
@@ -145,6 +190,8 @@ def test_eval_config_defaults() -> None:
     assert config.top_n == 5
     assert config.output_dir == "evals/reports"
     assert config.snapshot_id is None
+    assert config.judge_model is None
+    assert config.persona_path == "persona/"
 
 
 def test_eval_config_snapshot_id_validated() -> None:

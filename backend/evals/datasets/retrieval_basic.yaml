@@ -1,13 +1,51 @@
-# Seed eval dataset — replace UUIDs with real values from your knowledge base.
-# Run: docker compose run --rm backend-test python -m evals.run_evals
+# Seed retrieval dataset.
+# Placeholder UUID mapping for seed content:
+# - 00000000-0000-0000-0000-000000000011 -> evals/seed_knowledge/guide.md
+# - 00000000-0000-0000-0000-000000000012 -> evals/seed_knowledge/faq.md
+# - 00000000-0000-0000-0000-000000000021 -> evals/seed_knowledge/biography.md
 
 suite: retrieval_basic
-description: Basic retrieval quality smoke test
+description: Retrieval quality baseline for seed knowledge
 snapshot_id: 00000000-0000-0000-0000-000000000000
 cases:
   - id: ret-001
-    query: Example query — replace with a real question from your knowledge base
+    query: What are the three deployment steps in chapter 3?
     expected:
-      - source_id: 00000000-0000-0000-0000-000000000001
-        contains: expected substring from the relevant chunk
-    tags: [retrieval, smoke]
+      - source_id: 00000000-0000-0000-0000-000000000011
+        contains: Deployment requires three steps
+    tags: [retrieval, guide]
+
+  - id: ret-002
+    query: What do anchors power in the ingestion flow?
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000011
+        contains: Those anchors later power citations
+    tags: [retrieval, guide]
+
+  - id: ret-003
+    query: What is the purpose of snapshots?
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000012
+        contains: Snapshots freeze a specific published knowledge state
+    tags: [retrieval, faq]
+
+  - id: ret-004
+    query: What does Qdrant store?
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000012
+        contains: dense and BM25 sparse vectors
+    tags: [retrieval, faq]
+
+  - id: ret-005
+    query: How is Morgan Hale described as a communicator?
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000021
+        contains: friendly, precise, and grounded in evidence
+    tags: [retrieval, biography]
+
+  - id: ret-006
+    query: What kind of work did Morgan do before AI systems?
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000021
+        contains: led operations for a documentation platform
+    tags: [retrieval, biography]

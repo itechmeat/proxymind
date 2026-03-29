@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from evals.models import RetrievalResult, ReturnedChunk
+from evals.models import GenerationResult, RetrievalResult, ReturnedChunk
 
 if TYPE_CHECKING:
     import httpx
@@ -45,3 +45,33 @@ class EvalClient:
             )
         except Exception as error:
             raise EvalClientError(f"Eval API request failed: {error}") from error
+
+    async def generate(
+        self,
+        query: str,
+        *,
+        snapshot_id: uuid.UUID,
+    ) -> GenerationResult:
+        url = f"{self._config.base_url}/api/admin/eval/generate"
+        headers = {"Authorization": f"Bearer {self._config.admin_key}"}
+        payload = {
+            "query": query,
+            "snapshot_id": str(snapshot_id),
+        }
+
+        try:
+            response = await self._http.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            return GenerationResult(
+                answer=data["answer"],
+                citations=data.get("citations", []),
+                retrieved_chunks=[
+                    ReturnedChunk(**chunk) for chunk in data.get("retrieved_chunks", [])
+                ],
+                rewritten_query=data.get("rewritten_query", query),
+                timing_ms=data.get("timing_ms", 0.0),
+                model=data.get("model", "unknown"),
+            )
+        except Exception as error:
+            raise EvalClientError(f"Eval generate request failed: {error}") from error
