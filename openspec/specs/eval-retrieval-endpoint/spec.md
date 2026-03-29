@@ -8,7 +8,7 @@ Admin API endpoint exposing raw retrieval results for use by the eval framework'
 
 A new endpoint `POST /api/admin/eval/retrieve` SHALL accept a JSON request body with the following fields:
 
-- `query` (string, min_length=1) -- the search query to evaluate
+- `query` (string, min_length=1 after trimming) -- the search query to evaluate
 - `snapshot_id` (UUID) -- the knowledge snapshot to search against
 - `top_n` (integer, default=5, range 1-50) -- number of top chunks to return
 
@@ -19,6 +19,7 @@ The response SHALL be a JSON object with:
 
 Request and response models SHALL be defined as Pydantic schemas in `backend/app/api/eval_schemas.py`. The router SHALL be registered in `backend/app/main.py`.
 The endpoint SHALL validate `snapshot_id` syntactically only; it SHALL NOT perform a separate existence lookup, so a syntactically valid UUID with no indexed chunks returns HTTP 200 with an empty `chunks` list rather than HTTP 404.
+The endpoint SHALL trim surrounding whitespace from `query`; a value that becomes empty after trimming SHALL be rejected with HTTP 422.
 
 #### Scenario: Successful retrieval returns ranked chunks
 
@@ -59,6 +60,16 @@ The endpoint SHALL validate `snapshot_id` syntactically only; it SHALL NOT perfo
 
 - **WHEN** a request sends `query=""`
 - **THEN** the endpoint returns HTTP 422 with a validation error
+
+#### Scenario: Whitespace-only query rejected
+
+- **WHEN** a request sends `query="   "`
+- **THEN** the endpoint returns HTTP 422 with a validation error
+
+#### Scenario: Query is trimmed before retrieval
+
+- **WHEN** a request sends `query="  refund policy  "`
+- **THEN** the endpoint calls `RetrievalService.search()` with `query="refund policy"`
 
 #### Scenario: Invalid snapshot_id rejected
 

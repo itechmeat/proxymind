@@ -20,7 +20,7 @@ def load_datasets(
         raise FileNotFoundError(f"Dataset path not found: {dataset_path}")
 
     if dataset_path.is_dir():
-        files = sorted(dataset_path.glob("*.yaml")) + sorted(dataset_path.glob("*.yml"))
+        files = sorted([*dataset_path.glob("*.yaml"), *dataset_path.glob("*.yml")])
     else:
         files = [dataset_path]
 

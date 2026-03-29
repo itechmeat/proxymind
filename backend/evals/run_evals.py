@@ -66,11 +66,16 @@ async def main(argv: list[str] | None = None) -> int:
     output_dir = Path(config.output_dir)
 
     print(f"Loading datasets from: {dataset_path}")
-    suites = load_datasets(
-        dataset_path,
-        tags=args.tags,
-        snapshot_id_override=config.snapshot_id,
-    )
+    try:
+        suites = load_datasets(
+            dataset_path,
+            tags=args.tags,
+            snapshot_id_override=config.snapshot_id,
+        )
+    except (FileNotFoundError, ValueError) as error:
+        print(f"Dataset loading failed: {error}", file=sys.stderr)
+        return 1
+
     if not suites:
         print("No datasets found.")
         return 1

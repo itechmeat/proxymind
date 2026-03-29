@@ -62,11 +62,36 @@ def test_load_directory(datasets_dir: Path, valid_yaml: Path) -> None:
     assert {suite.suite for suite in suites} == {"test_suite", "second"}
 
 
-def test_load_nonexistent_path() -> None:
+def test_load_directory_sorts_yaml_and_yml_together(datasets_dir: Path) -> None:
+    snapshot_id = str(uuid.uuid4())
+    source_id = str(uuid.uuid4())
+    second = datasets_dir / "b.yml"
+    first = datasets_dir / "a.yaml"
+    second.write_text(
+        f'suite: second\nsnapshot_id: "{snapshot_id}"\n'
+        f'cases:\n  - id: "s-001"\n    query: "Q"\n'
+        f'    expected:\n      - source_id: "{source_id}"\n        contains: "A"\n',
+        encoding="utf-8",
+    )
+    first.write_text(
+        f'suite: first\nsnapshot_id: "{snapshot_id}"\n'
+        f'cases:\n  - id: "f-001"\n    query: "Q"\n'
+        f'    expected:\n      - source_id: "{source_id}"\n        contains: "A"\n',
+        encoding="utf-8",
+    )
+
+    from evals.loader import load_datasets
+
+    suites = load_datasets(datasets_dir)
+
+    assert [suite.suite for suite in suites] == ["first", "second"]
+
+
+def test_load_nonexistent_path(tmp_path: Path) -> None:
     from evals.loader import load_datasets
 
     with pytest.raises(FileNotFoundError):
-        load_datasets(Path("/nonexistent/path"))
+        load_datasets(tmp_path / "does-not-exist")
 
 
 def test_load_invalid_yaml(datasets_dir: Path) -> None:

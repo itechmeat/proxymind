@@ -37,7 +37,7 @@ The eval dataset format SHALL use YAML files. Each file SHALL describe one `Eval
 
 ### Requirement: Dataset loader
 
-The dataset loader SHALL accept a filesystem path (file or directory). When given a single `.yaml` or `.yml` file, it SHALL parse and validate that file into an `EvalSuite`. When given a directory, it SHALL discover all `.yaml` and `.yml` files in that directory and return a list of `EvalSuite` objects. Validation SHALL use the Pydantic models; invalid files SHALL raise a `ValueError`. A nonexistent path SHALL raise `FileNotFoundError`. The loader SHALL support optional tag filtering: when tags are provided, only cases matching at least one tag are retained; suites with zero remaining cases after filtering SHALL be dropped from the result. The loader SHALL support an optional `snapshot_id` override (UUID type) that replaces the `snapshot_id` in all loaded suites.
+The dataset loader SHALL accept a filesystem path (file or directory). When given a single `.yaml` or `.yml` file, it SHALL parse and validate that file into an `EvalSuite`. When given a directory, it SHALL discover all `.yaml` and `.yml` files in that directory, sort the combined file list deterministically, and return a list of `EvalSuite` objects. Validation SHALL use the Pydantic models; invalid files SHALL raise a `ValueError`. A nonexistent path SHALL raise `FileNotFoundError`. The loader SHALL support optional tag filtering: when tags are provided, only cases matching at least one tag are retained; suites with zero remaining cases after filtering SHALL be dropped from the result. The loader SHALL support an optional `snapshot_id` override (UUID type) that replaces the `snapshot_id` in all loaded suites.
 
 #### Scenario: Load single YAML file
 
@@ -48,6 +48,11 @@ The dataset loader SHALL accept a filesystem path (file or directory). When give
 
 - **WHEN** `load_datasets` is called with a directory containing two valid YAML files
 - **THEN** a list of two `EvalSuite` objects is returned
+
+#### Scenario: Directory discovery order is deterministic across extensions
+
+- **WHEN** `load_datasets` is called with a directory containing both `.yaml` and `.yml` files
+- **THEN** files are processed in one combined sorted order rather than by extension bucket
 
 #### Scenario: Nonexistent path raises error
 
@@ -245,7 +250,7 @@ Both files SHALL be written to the configured output directory.
 
 ### Requirement: CLI entry point
 
-The CLI entry point (`run_evals.py`) SHALL use `argparse` with the following options: `--base-url` (default: `http://localhost:8000`), `--admin-key` (default: from `PROXYMIND_ADMIN_API_KEY` env var), `--dataset` (path to a YAML file or directory; default: `evals/datasets/`), `--tag` (repeatable, filters cases by tag), `--top-n` (override retrieval top_n; default: 5, range 1-50), `--output-dir` (report output directory; default: `evals/reports/`), and `--snapshot-id` (override snapshot_id, UUID type). The CLI SHALL load datasets, run the suite runner, and generate reports. It SHALL be executable as `python -m evals.run_evals` from the `backend/` directory and is designed to run inside the `backend-test` Docker container.
+The CLI entry point (`run_evals.py`) SHALL use `argparse` with the following options: `--base-url` (default: `http://localhost:8000`), `--admin-key` (default: from `PROXYMIND_ADMIN_API_KEY` env var), `--dataset` (path to a YAML file or directory; default: `evals/datasets/`), `--tag` (repeatable, filters cases by tag), `--top-n` (override retrieval top_n; default: 5, range 1-50), `--output-dir` (report output directory; default: `evals/reports/`), and `--snapshot-id` (override snapshot_id, UUID type). The CLI SHALL load datasets, run the suite runner, and generate reports. If dataset loading fails because the path is missing or the YAML content is invalid, the CLI SHALL print a human-readable error to stderr and exit with code `1` instead of surfacing a traceback. It SHALL be executable as `python -m evals.run_evals` from the `backend/` directory and is designed to run inside the `backend-test` Docker container.
 
 #### Scenario: CLI with default arguments
 
@@ -256,6 +261,11 @@ The CLI entry point (`run_evals.py`) SHALL use `argparse` with the following opt
 
 - **WHEN** the CLI is invoked with `--tag retrieval --tag policy`
 - **THEN** only cases tagged "retrieval" or "policy" are included in the run
+
+#### Scenario: CLI handles dataset loading failures cleanly
+
+- **WHEN** dataset loading raises `FileNotFoundError` or `ValueError`
+- **THEN** the CLI prints a concise error message to stderr and exits with code `1`
 
 #### Scenario: CLI with snapshot-id override
 

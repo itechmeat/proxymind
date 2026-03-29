@@ -129,6 +129,13 @@ def test_scorer_output_rejects_score_above_one() -> None:
         ScorerOutput(score=1.5)
 
 
+def test_scorer_output_rejects_negative_score() -> None:
+    from evals.models import ScorerOutput
+
+    with pytest.raises(ValidationError):
+        ScorerOutput(score=-0.1)
+
+
 def test_eval_config_defaults() -> None:
     from evals.config import EvalConfig
 

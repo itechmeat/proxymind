@@ -16,7 +16,10 @@ router = APIRouter(
 
 
 @router.post("/retrieve", response_model=EvalRetrieveResponse)
-async def eval_retrieve(request: Request, body: EvalRetrieveRequest) -> EvalRetrieveResponse:
+async def eval_retrieve(
+    request: Request,
+    body: EvalRetrieveRequest,
+) -> EvalRetrieveResponse | JSONResponse:
     retrieval_service = request.app.state.retrieval_service
     started_at = time.monotonic()
     try:

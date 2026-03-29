@@ -37,21 +37,28 @@ def _make_chunk() -> RetrievedChunk:
 
 
 @pytest_asyncio.fixture
-async def client() -> httpx.AsyncClient:
-    app = _make_app()
+async def app() -> FastAPI:
+    return _make_app()
+
+
+@pytest_asyncio.fixture
+async def client(app: FastAPI) -> httpx.AsyncClient:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         yield client
 
 
 @pytest.mark.asyncio
-async def test_retrieve_success_returns_expected_shape(client: httpx.AsyncClient) -> None:
-    client._transport.app.state.retrieval_service.search = AsyncMock(return_value=[_make_chunk()])
+async def test_retrieve_success_returns_expected_shape(
+    client: httpx.AsyncClient,
+    app: FastAPI,
+) -> None:
+    app.state.retrieval_service.search = AsyncMock(return_value=[_make_chunk()])
 
     response = await client.post(
         "/api/admin/eval/retrieve",
         headers={"Authorization": f"Bearer {TEST_ADMIN_KEY}"},
-        json={"query": "refund policy", "snapshot_id": str(SNAPSHOT_ID)},
+        json={"query": "  refund policy  ", "snapshot_id": str(SNAPSHOT_ID)},
     )
 
     assert response.status_code == 200
@@ -64,7 +71,7 @@ async def test_retrieve_success_returns_expected_shape(client: httpx.AsyncClient
     assert data["chunks"][0]["text"] == "This is chunk text about refund policy"
     assert data["chunks"][0]["rank"] == 1
     assert data["chunks"][0]["score"] == 0.92
-    client._transport.app.state.retrieval_service.search.assert_awaited_once_with(
+    app.state.retrieval_service.search.assert_awaited_once_with(
         "refund policy",
         snapshot_id=SNAPSHOT_ID,
         top_n=5,
@@ -72,8 +79,8 @@ async def test_retrieve_success_returns_expected_shape(client: httpx.AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_retrieve_custom_top_n(client: httpx.AsyncClient) -> None:
-    client._transport.app.state.retrieval_service.search = AsyncMock(return_value=[_make_chunk()])
+async def test_retrieve_custom_top_n(client: httpx.AsyncClient, app: FastAPI) -> None:
+    app.state.retrieval_service.search = AsyncMock(return_value=[_make_chunk()])
 
     response = await client.post(
         "/api/admin/eval/retrieve",
@@ -82,7 +89,7 @@ async def test_retrieve_custom_top_n(client: httpx.AsyncClient) -> None:
     )
 
     assert response.status_code == 200
-    client._transport.app.state.retrieval_service.search.assert_awaited_once_with(
+    app.state.retrieval_service.search.assert_awaited_once_with(
         "q",
         snapshot_id=SNAPSHOT_ID,
         top_n=10,
@@ -90,8 +97,8 @@ async def test_retrieve_custom_top_n(client: httpx.AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_retrieve_empty_results_are_valid(client: httpx.AsyncClient) -> None:
-    client._transport.app.state.retrieval_service.search = AsyncMock(return_value=[])
+async def test_retrieve_empty_results_are_valid(client: httpx.AsyncClient, app: FastAPI) -> None:
+    app.state.retrieval_service.search = AsyncMock(return_value=[])
 
     response = await client.post(
         "/api/admin/eval/retrieve",
@@ -106,8 +113,11 @@ async def test_retrieve_empty_results_are_valid(client: httpx.AsyncClient) -> No
 
 
 @pytest.mark.asyncio
-async def test_retrieve_returns_fewer_chunks_than_requested(client: httpx.AsyncClient) -> None:
-    client._transport.app.state.retrieval_service.search = AsyncMock(
+async def test_retrieve_returns_fewer_chunks_than_requested(
+    client: httpx.AsyncClient,
+    app: FastAPI,
+) -> None:
+    app.state.retrieval_service.search = AsyncMock(
         return_value=[_make_chunk(), _make_chunk(), _make_chunk()]
     )
 
@@ -124,8 +134,11 @@ async def test_retrieve_returns_fewer_chunks_than_requested(client: httpx.AsyncC
 
 
 @pytest.mark.asyncio
-async def test_retrieve_maps_search_failures_to_json_500(client: httpx.AsyncClient) -> None:
-    client._transport.app.state.retrieval_service.search = AsyncMock(
+async def test_retrieve_maps_search_failures_to_json_500(
+    client: httpx.AsyncClient,
+    app: FastAPI,
+) -> None:
+    app.state.retrieval_service.search = AsyncMock(
         side_effect=RuntimeError("retrieval failed")
     )
 
@@ -145,6 +158,7 @@ async def test_retrieve_maps_search_failures_to_json_500(client: httpx.AsyncClie
     [
         {"snapshot_id": str(SNAPSHOT_ID)},
         {"query": "", "snapshot_id": str(SNAPSHOT_ID)},
+        {"query": "   ", "snapshot_id": str(SNAPSHOT_ID)},
     ],
 )
 async def test_retrieve_rejects_missing_or_empty_query(
