@@ -66,7 +66,7 @@ def _resolve_persona_path(
 
 
 def _resolve_judge_model(config: EvalConfig) -> str | None:
-    return config.judge_model or os.environ.get("LLM_MODEL") or None
+    return config.judge_model or os.environ.get("LLM_MODEL")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

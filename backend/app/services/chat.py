@@ -967,23 +967,3 @@ class ChatService:
 
     async def _load_source_map(self, source_ids: list[uuid.UUID]) -> dict[uuid.UUID, SourceInfo]:
         return await load_source_map(self._session, source_ids)
-
-    @staticmethod
-    def _is_catalog_item_active(
-        *,
-        is_active: bool | None,
-        valid_from: datetime | None,
-        valid_until: datetime | None,
-        deleted_at: datetime | None,
-    ) -> bool:
-        if not is_active or deleted_at is not None:
-            return False
-
-        today = datetime.now(UTC).date()
-        valid_from_date = valid_from.date() if valid_from is not None else None
-        valid_until_date = valid_until.date() if valid_until is not None else None
-        if valid_from_date is not None and valid_from_date > today:
-            return False
-        if valid_until_date is not None and valid_until_date < today:
-            return False
-        return True

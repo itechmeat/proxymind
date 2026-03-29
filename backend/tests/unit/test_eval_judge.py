@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from evals.judge import EvalJudge, normalize, parse_judge_response
+from evals.judge import EmptyJudgeContentError, EvalJudge, JudgeRetryableError, normalize, parse_judge_response
 
 
 def test_parse_judge_response_success() -> None:
@@ -39,3 +39,40 @@ async def test_eval_judge_calls_completion() -> None:
 
     assert response == "Score: 5\nReasoning: Great"
     completion.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_eval_judge_does_not_retry_empty_content() -> None:
+    completion = AsyncMock(
+        return_value=SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="   "))]
+        )
+    )
+    judge = EvalJudge(model="openai/gpt-4o", completion_func=completion)
+
+    with pytest.raises(EmptyJudgeContentError):
+        await judge.judge("Evaluate this")
+
+    completion.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_eval_judge_retries_retryable_failures() -> None:
+    completion = AsyncMock(
+        side_effect=[
+            RuntimeError("temporary failure"),
+            SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="Score: 4\nReasoning: Good"))]
+            ),
+        ]
+    )
+    judge = EvalJudge(
+        model="openai/gpt-4o",
+        completion_func=completion,
+        timeout_seconds=0.1,
+    )
+
+    response = await judge.judge("Evaluate this")
+
+    assert response == "Score: 4\nReasoning: Good"
+    assert completion.await_count == 2

@@ -127,3 +127,19 @@ async def test_generate_error_wrapped(config: EvalConfig) -> None:
     client = EvalClient(config=config, http_client=http_client)
     with pytest.raises(EvalClientError, match="Eval generate request failed"):
         await client.generate("q", snapshot_id=uuid.uuid4())
+
+
+@pytest.mark.asyncio
+async def test_generate_invalid_payload_error_is_wrapped(config: EvalConfig) -> None:
+    from evals.client import EvalClient, EvalClientError
+
+    response = Mock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {"timing_ms": 50.0}
+
+    http_client = AsyncMock()
+    http_client.post.return_value = response
+
+    client = EvalClient(config=config, http_client=http_client)
+    with pytest.raises(EvalClientError, match="Eval generate request failed"):
+        await client.generate("q", snapshot_id=uuid.uuid4())

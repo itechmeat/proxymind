@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from evals.config import DEFAULT_THRESHOLDS, ThresholdZone
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True, frozen=True)
@@ -37,6 +40,13 @@ def compare_reports(
     baseline_summary = baseline_data.get("summary", {})
     current_summary = current_data.get("summary", {})
     if not isinstance(baseline_summary, dict) or not isinstance(current_summary, dict):
+        logger.warning(
+            "Eval report summary is malformed",
+            extra={
+                "baseline_summary_type": type(baseline_summary).__name__,
+                "current_summary_type": type(current_summary).__name__,
+            },
+        )
         return []
 
     rows: list[ComparisonRow] = []

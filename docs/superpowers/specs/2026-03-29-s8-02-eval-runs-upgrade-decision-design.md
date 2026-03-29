@@ -6,15 +6,15 @@ Extend the eval framework (S8-01) to run retrieval and answer quality evaluation
 
 ## Decisions Log
 
-| # | Question | Chosen | Rationale |
-|---|----------|--------|-----------|
-| 1 | Answer quality eval architecture | New endpoint `/api/admin/eval/generate` | Isolated from SSE, exposes intermediate artifacts (retrieved chunks, rewritten query) needed for groundedness and citation scoring. Debug mode for the generation pipeline. |
-| 2 | LLM-as-judge model | Configurable `EVAL_JUDGE_MODEL` with fallback to twin model | Flexibility without complexity. Owner can set a stronger model for accurate scoring. LiteLLM already in stack — any provider works. Zero-config default uses the twin's model. |
-| 3 | Dataset format for answer quality | Unified format with optional sections | Natural extension of S8-01 YAML format. `answer_expectations` is optional — runner auto-selects scorers based on available fields. No duplication, one loader, one format. |
-| 4 | Scoring rubric | 1-5 scale with level descriptions | Gold middle. LLMs score well on discrete scales with described levels. Normalized to 0.0-1.0 for aggregation via `(raw - 1) / 4`. Reproducible and explainable. |
-| 5 | Dataset composition | Seed dataset (~15-20 cases) + docs for extension | Works out of box for baseline. Seed cases serve as format examples. Owner extends with real data. |
-| 6 | Baseline persistence | JSON reports + baseline file + compare CLI | Minimal extension of existing infrastructure. Baseline = promoted report in `evals/baselines/`, committed to git. Compare CLI shows delta + zone coloring. YAGNI on DB storage. |
-| 7 | Decision document format | Threshold zones (green/yellow/red) + qualitative override | Initial thresholds are orientation — calibrated after first run. Decision doc contains numbers + analysis + recommendations. Structured process with room for context. |
+| #   | Question                          | Chosen                                                      | Rationale                                                                                                                                                                       |
+| --- | --------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Answer quality eval architecture  | New endpoint `/api/admin/eval/generate`                     | Isolated from SSE, exposes intermediate artifacts (retrieved chunks, rewritten query) needed for groundedness and citation scoring. Debug mode for the generation pipeline.     |
+| 2   | LLM-as-judge model                | Configurable `EVAL_JUDGE_MODEL` with fallback to twin model | Flexibility without complexity. Owner can set a stronger model for accurate scoring. LiteLLM already in stack — any provider works. Zero-config default uses the twin's model.  |
+| 3   | Dataset format for answer quality | Unified format with optional sections                       | Natural extension of S8-01 YAML format. `answer_expectations` is optional — runner auto-selects scorers based on available fields. No duplication, one loader, one format.      |
+| 4   | Scoring rubric                    | 1-5 scale with level descriptions                           | Gold middle. LLMs score well on discrete scales with described levels. Normalized to 0.0-1.0 for aggregation via `(raw - 1) / 4`. Reproducible and explainable.                 |
+| 5   | Dataset composition               | Seed dataset (~15-20 cases) + docs for extension            | Works out of box for baseline. Seed cases serve as format examples. Owner extends with real data.                                                                               |
+| 6   | Baseline persistence              | JSON reports + baseline file + compare CLI                  | Minimal extension of existing infrastructure. Baseline = promoted report in `evals/baselines/`, committed to git. Compare CLI shows delta + zone coloring. YAGNI on DB storage. |
+| 7   | Decision document format          | Threshold zones (green/yellow/red) + qualitative override   | Initial thresholds are orientation — calibrated after first run. Decision doc contains numbers + analysis + recommendations. Structured process with room for context.          |
 
 ---
 
@@ -22,7 +22,7 @@ Extend the eval framework (S8-01) to run retrieval and answer quality evaluation
 
 ### 1.1 Component Overview
 
-```
+```text
                     S8-01 (existing)              S8-02 (new)
                     ─────────────────             ──────────────────
 Endpoints:          /eval/retrieve          +     /eval/generate
@@ -44,21 +44,21 @@ Artifacts:                                  +     baseline file, decision docume
 
 **Request:**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `query` | str | yes | User question |
-| `snapshot_id` | UUID | yes | Knowledge snapshot for retrieval |
+| Field         | Type | Required | Description                      |
+| ------------- | ---- | -------- | -------------------------------- |
+| `query`       | str  | yes      | User question                    |
+| `snapshot_id` | UUID | yes      | Knowledge snapshot for retrieval |
 
 **Response:**
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `answer` | str | Full text of the twin's response |
-| `citations` | list[dict] | Citations as JSON dicts (serialized from backend Citation dataclass) |
-| `retrieved_chunks` | list[EvalChunk] | Chunks fed to LLM (text + source_id + score) |
-| `rewritten_query` | str | Reformulated query (or original if rewriting skipped) |
-| `timing_ms` | float | Total generation time |
-| `model` | str | Model used for generation |
+| Field              | Type            | Description                                                          |
+| ------------------ | --------------- | -------------------------------------------------------------------- |
+| `answer`           | str             | Full text of the twin's response                                     |
+| `citations`        | list[dict]      | Citations as JSON dicts (serialized from backend Citation dataclass) |
+| `retrieved_chunks` | list[EvalChunk] | Chunks fed to LLM (text + source_id + score)                         |
+| `rewritten_query`  | str             | Reformulated query (or original if rewriting skipped)                |
+| `timing_ms`        | float           | Total generation time                                                |
+| `model`            | str             | Model used for generation                                            |
 
 **Implementation:** Reuses existing retrieval service, query rewriter, prompt assembler, and LLM service. The only difference from the chat endpoint: synchronous JSON response instead of SSE, and exposure of `retrieved_chunks` and `rewritten_query` in the response body.
 
@@ -87,14 +87,14 @@ snapshot_id: "00000000-0000-0000-0000-000000000000"
 cases:
   - id: aq-001
     query: "What is covered in chapter 3 of the guide?"
-    expected:                          # optional — retrieval expectations (S8-01)
+    expected: # optional — retrieval expectations (S8-01)
       - source_id: "<uuid>"
         contains: "chapter 3"
-    answer_expectations:               # optional — answer quality expectations (S8-02)
-      should_refuse: false             # true = twin should refuse to answer
-      expected_citations:              # source_ids expected in citations
+    answer_expectations: # optional — answer quality expectations (S8-02)
+      should_refuse: false # true = twin should refuse to answer
+      expected_citations: # source_ids expected in citations
         - "<uuid>"
-      persona_tags:                    # persona aspects to verify
+      persona_tags: # persona aspects to verify
         - expert
         - friendly
       groundedness_notes: "Answer should reference guide content"
@@ -103,7 +103,7 @@ cases:
 
 ### 2.2 New Pydantic Models
 
-```
+```text
 AnswerExpectations (BaseModel):
     should_refuse: bool = False
     expected_citations: list[UUID] = []
@@ -126,27 +126,27 @@ GenerationResult (BaseModel):
 
 **Seed knowledge** (`backend/evals/seed_knowledge/`):
 
-| File | Content | Purpose |
-|------|---------|---------|
-| `guide.md` | Technical guide with 3-4 chapters | Retrieval precision, groundedness |
-| `biography.md` | Prototype biography | Persona fidelity |
-| `faq.md` | FAQ with 5-6 Q&A pairs | Citation accuracy |
+| File           | Content                           | Purpose                           |
+| -------------- | --------------------------------- | --------------------------------- |
+| `guide.md`     | Technical guide with 3-4 chapters | Retrieval precision, groundedness |
+| `biography.md` | Prototype biography               | Persona fidelity                  |
+| `faq.md`       | FAQ with 5-6 Q&A pairs            | Citation accuracy                 |
 
 **Seed persona** (`backend/evals/seed_persona/`):
 
-| File | Content |
-|------|---------|
-| `IDENTITY.md` | Minimal identity: name, role, background |
-| `SOUL.md` | Tone: friendly, expert, concise |
+| File          | Content                                                  |
+| ------------- | -------------------------------------------------------- |
+| `IDENTITY.md` | Minimal identity: name, role, background                 |
+| `SOUL.md`     | Tone: friendly, expert, concise                          |
 | `BEHAVIOR.md` | Boundaries: stays on topic, refuses off-topic gracefully |
 
 **Seed datasets** (`backend/evals/datasets/`):
 
-| File | Cases | Focus |
-|------|-------|-------|
-| `retrieval_basic.yaml` | 5-7 | Retrieval precision, recall, MRR (extends S8-01) |
-| `answer_quality.yaml` | 5-7 | Groundedness + citation accuracy |
-| `persona_and_refusal.yaml` | 5-7 | Persona fidelity (3-4) + refusal quality (2-3) |
+| File                       | Cases | Focus                                            |
+| -------------------------- | ----- | ------------------------------------------------ |
+| `retrieval_basic.yaml`     | 5-7   | Retrieval precision, recall, MRR (extends S8-01) |
+| `answer_quality.yaml`      | 5-7   | Groundedness + citation accuracy                 |
+| `persona_and_refusal.yaml` | 5-7   | Persona fidelity (3-4) + refusal quality (2-3)   |
 
 Total: ~15-20 cases.
 
@@ -164,13 +164,13 @@ All scorers implement the existing `Scorer` Protocol. Each contains a rubric pro
 
 **Rubric:**
 
-| Score | Description |
-|-------|-------------|
-| 5 | Every factual claim is directly supported by retrieved chunks |
-| 4 | Core claims supported, one minor unsupported detail |
-| 3 | Mixed — some claims supported, some not traceable to chunks |
-| 2 | Mostly unsupported, only fragments grounded |
-| 1 | Fabricated or contradicts retrieved chunks |
+| Score | Description                                                   |
+| ----- | ------------------------------------------------------------- |
+| 5     | Every factual claim is directly supported by retrieved chunks |
+| 4     | Core claims supported, one minor unsupported detail           |
+| 3     | Mixed — some claims supported, some not traceable to chunks   |
+| 2     | Mostly unsupported, only fragments grounded                   |
+| 1     | Fabricated or contradicts retrieved chunks                    |
 
 **Judge task:** For each factual claim in the answer, determine whether it can be traced to a specific retrieved chunk. Return a score (1-5) and a brief explanation.
 
@@ -182,13 +182,13 @@ All scorers implement the existing `Scorer` Protocol. Each contains a rubric pro
 
 **Rubric:**
 
-| Score | Description |
-|-------|-------------|
-| 5 | All [source:N] markers map to correct, relevant sources; no missing citations for key claims |
-| 4 | Citations correct, one minor source missing |
-| 3 | Some citations correct, some point to wrong sources or are missing |
-| 2 | Most citations incorrect or missing |
-| 1 | No citations or all incorrect |
+| Score | Description                                                                                  |
+| ----- | -------------------------------------------------------------------------------------------- |
+| 5     | All [source:N] markers map to correct, relevant sources; no missing citations for key claims |
+| 4     | Citations correct, one minor source missing                                                  |
+| 3     | Some citations correct, some point to wrong sources or are missing                           |
+| 2     | Most citations incorrect or missing                                                          |
+| 1     | No citations or all incorrect                                                                |
 
 **Judge task:** Verify each citation marker points to the source that actually contains the referenced information. Check for missing citations on key factual claims.
 
@@ -200,13 +200,13 @@ All scorers implement the existing `Scorer` Protocol. Each contains a rubric pro
 
 **Rubric:**
 
-| Score | Description |
-|-------|-------------|
-| 5 | Tone, style, and boundaries perfectly match persona files |
-| 4 | Mostly aligned, minor deviation in tone or formality |
-| 3 | Recognizable but inconsistent — shifts between persona and generic |
-| 2 | Mostly generic, occasional persona elements |
-| 1 | Completely ignores persona, generic AI assistant response |
+| Score | Description                                                        |
+| ----- | ------------------------------------------------------------------ |
+| 5     | Tone, style, and boundaries perfectly match persona files          |
+| 4     | Mostly aligned, minor deviation in tone or formality               |
+| 3     | Recognizable but inconsistent — shifts between persona and generic |
+| 2     | Mostly generic, occasional persona elements                        |
+| 1     | Completely ignores persona, generic AI assistant response          |
 
 **Judge task:** Evaluate whether the response reflects the persona's voice, style, and boundaries as defined in the persona files. Focus on the aspects indicated by `persona_tags`.
 
@@ -220,13 +220,13 @@ All scorers implement the existing `Scorer` Protocol. Each contains a rubric pro
 
 **Rubric:**
 
-| Score | Description |
-|-------|-------------|
-| 5 | Honest, helpful refusal; acknowledges gap; suggests what it can help with |
-| 4 | Correct refusal, slightly generic |
-| 3 | Refuses but awkwardly, or partially answers when should fully refuse |
-| 2 | Attempts to answer with fabricated info instead of refusing |
-| 1 | Confidently fabricates an answer on a topic outside knowledge |
+| Score | Description                                                               |
+| ----- | ------------------------------------------------------------------------- |
+| 5     | Honest, helpful refusal; acknowledges gap; suggests what it can help with |
+| 4     | Correct refusal, slightly generic                                         |
+| 3     | Refuses but awkwardly, or partially answers when should fully refuse      |
+| 2     | Attempts to answer with fabricated info instead of refusing               |
+| 1     | Confidently fabricates an answer on a topic outside knowledge             |
 
 **Judge task:** Evaluate whether the twin correctly refuses when the query is outside its knowledge, and whether the refusal is helpful and honest.
 
@@ -237,12 +237,12 @@ All scorers implement the existing `Scorer` Protocol. Each contains a rubric pro
 All 1-5 raw scores are normalized: `normalized = (raw - 1) / 4`
 
 | Raw | Normalized |
-|-----|------------|
-| 5 | 1.00 |
-| 4 | 0.75 |
-| 3 | 0.50 |
-| 2 | 0.25 |
-| 1 | 0.00 |
+| --- | ---------- |
+| 5   | 1.00       |
+| 4   | 0.75       |
+| 3   | 0.50       |
+| 2   | 0.25       |
+| 1   | 0.00       |
 
 Compatible with existing retrieval metrics (0.0-1.0 range) in reports and aggregation.
 
@@ -250,12 +250,12 @@ Compatible with existing retrieval metrics (0.0-1.0 range) in reports and aggreg
 
 Each scorer prompts the judge to return structured output:
 
-```
+```text
 Score: <1-5>
 Reasoning: <brief explanation>
 ```
 
-The scorer parses this with a simple regex. If parsing fails (malformed response), the case is marked as `error` with the raw judge response in details.
+The scorer parses this with a simple regex. If parsing fails or the judge call cannot produce a valid rubric response, the runner records a scorer-specific error in `CaseResult.details` and excludes that metric from numeric aggregation.
 
 ---
 
@@ -265,20 +265,20 @@ The scorer parses this with a simple regex. If parsing fails (malformed response
 
 `SuiteRunner` determines which scorers to apply for each case:
 
-| Case has | Calls endpoint | Scorers applied |
-|----------|---------------|-----------------|
-| `expected` only | `/eval/retrieve` | precision_at_k, recall_at_k, mrr |
-| `answer_expectations` only | `/eval/generate` | groundedness, citation_accuracy, persona_fidelity*, refusal_quality* |
-| Both | `/eval/retrieve` + `/eval/generate` | All applicable |
+| Case has                   | Calls endpoint                      | Scorers applied                                                      |
+| -------------------------- | ----------------------------------- | -------------------------------------------------------------------- |
+| `expected` only            | `/eval/retrieve`                    | precision_at_k, recall_at_k, mrr                                     |
+| `answer_expectations` only | `/eval/generate`                    | groundedness, citation_accuracy, persona_fidelity*, refusal_quality* |
+| Both                       | `/eval/retrieve` + `/eval/generate` | All applicable                                                       |
 
-*persona_fidelity runs when `persona_tags` is non-empty.
-*refusal_quality runs when `should_refuse == True`.
+_persona_fidelity runs when `persona_tags` is non-empty._
+_refusal_quality runs when `should_refuse == True`._
 
 ### 4.2 EvalClient Extension
 
 New method:
 
-```
+```text
 async def generate(query, snapshot_id) -> GenerationResult
 ```
 
@@ -286,9 +286,14 @@ Posts to `/api/admin/eval/generate`, returns full generation result. Single-turn
 
 ### 4.3 CaseResult Extension
 
-`CaseResult.details` now includes:
+`CaseResult` now includes top-level fields for:
+
 - `answer` — twin's full response (for manual review)
-- `judge_reasoning` — per-metric explanation from judge (for manual review)
+- `generation_timing_ms` — generation timing for the answer path
+- `judge_scores` — per-metric raw and normalized judge scores
+- `judge_reasoning` — per-metric explanation from judge
+
+`CaseResult.details` continues to hold supplementary artifacts such as scorer detail payloads, chunk summaries, and scorer-specific error messages.
 
 ---
 
@@ -304,7 +309,7 @@ python -m evals.compare \
 
 ### 5.2 Output
 
-```
+```text
 Metric              Baseline    Current     Delta    Zone
 ──────────────────────────────────────────────────────────
 precision_at_k      0.72        0.78        +0.06    GREEN
@@ -320,21 +325,22 @@ refusal_quality     —           0.90        (new)    GREEN
 
 Initial thresholds (calibrated after first baseline run):
 
-| Metric | Green (>) | Yellow | Red (<) |
-|--------|-----------|--------|---------|
-| precision_at_k | 0.70 | 0.50-0.70 | 0.50 |
-| recall_at_k | 0.70 | 0.50-0.70 | 0.50 |
-| mrr | 0.60 | 0.40-0.60 | 0.40 |
-| groundedness | 0.75 | 0.50-0.75 | 0.50 |
-| citation_accuracy | 0.70 | 0.50-0.70 | 0.50 |
-| persona_fidelity | 0.70 | 0.50-0.70 | 0.50 |
-| refusal_quality | 0.80 | 0.60-0.80 | 0.60 |
+| Metric            | Green (>) | Yellow    | Red (<) |
+| ----------------- | --------- | --------- | ------- |
+| precision_at_k    | 0.70      | 0.50-0.70 | 0.50    |
+| recall_at_k       | 0.70      | 0.50-0.70 | 0.50    |
+| mrr               | 0.60      | 0.40-0.60 | 0.40    |
+| groundedness      | 0.75      | 0.50-0.75 | 0.50    |
+| citation_accuracy | 0.70      | 0.50-0.70 | 0.50    |
+| persona_fidelity  | 0.70      | 0.50-0.70 | 0.50    |
+| refusal_quality   | 0.80      | 0.60-0.80 | 0.60    |
 
 Thresholds stored in `evals/config.py` — easy to update after calibration.
 
 ### 5.4 Compare Module
 
 `evals/compare.py`:
+
 - Loads two JSON reports
 - Matches metrics by name
 - Computes delta
@@ -351,12 +357,14 @@ Thresholds stored in `evals/config.py` — easy to update after calibration.
 ReportGenerator adds a new section to the Markdown report: **"Manual Review Candidates"**.
 
 For each answer quality metric, the top-3 worst performers are listed with:
+
 - Case ID and query
 - Twin's full answer
 - Judge score and reasoning
 - Retrieved chunks summary
 
 This enables the owner to:
+
 - Verify judge accuracy (calibrate trust in LLM-as-judge)
 - Identify systematic issues (e.g., persona drift, citation gaps)
 - Record agreement/disagreement in the decision document
@@ -364,6 +372,7 @@ This enables the owner to:
 ### 6.2 Extended JSON Report
 
 JSON report includes new fields in `CaseResult`:
+
 - `answer` — twin's response text
 - `generation_timing_ms` — generation time
 - `judge_scores` — per-metric raw (1-5) and normalized scores
@@ -384,30 +393,33 @@ JSON report includes new fields in `CaseResult`:
    - Copy `evals/seed_persona/` files to `persona/` (or configure persona path in eval config)
 
 3. **Run evals:**
-   ```bash
-   python -m evals.run_evals \
-       --dataset evals/datasets/ \
-       --snapshot-id <snapshot_id> \
-       --output-dir evals/reports
-   ```
+
+```bash
+ python -m evals.run_evals \
+     --dataset evals/datasets/ \
+     --snapshot-id <snapshot_id> \
+     --output-dir evals/reports
+```
 
 4. **Review report:**
    - Check Markdown report for metric summary and worst performers
    - Manual review of flagged cases
 
 5. **Promote to baseline:**
-   ```bash
-   cp evals/reports/<suite>_<timestamp>.json evals/baselines/v1_baseline.json
-   git add evals/baselines/v1_baseline.json
-   git commit -m "chore(evals): record v1 baseline"
-   ```
+
+```bash
+ cp evals/reports/<suite>_<timestamp>.json evals/baselines/v1_baseline.json
+ git add evals/baselines/v1_baseline.json
+ git commit -m "chore(evals): record v1 baseline"
+```
 
 6. **After upgrades (Phase 9), compare:**
-   ```bash
-   python -m evals.compare \
-       --baseline evals/baselines/v1_baseline.json \
-       --current evals/reports/<new_report>.json
-   ```
+
+```bash
+ python -m evals.compare \
+     --baseline evals/baselines/v1_baseline.json \
+     --current evals/reports/<new_report>.json
+```
 
 ---
 
@@ -452,13 +464,13 @@ The decision document is written manually after reviewing eval results. The eval
 
 ### New Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
+| Variable           | Default                     | Description                    |
+| ------------------ | --------------------------- | ------------------------------ |
 | `EVAL_JUDGE_MODEL` | (falls back to `LLM_MODEL`) | Model for LLM-as-judge scoring |
 
 ### EvalConfig Extension
 
-```
+```text
 EvalConfig (extended):
     + judge_model: str | None = None       # from EVAL_JUDGE_MODEL
     + persona_path: str = "persona/"       # path to persona files for persona fidelity scorer
@@ -468,7 +480,7 @@ EvalConfig (extended):
 
 ### ThresholdZone Model
 
-```
+```text
 ThresholdZone:
     green_above: float    # score > this → GREEN
     red_below: float      # score < this → RED
@@ -479,7 +491,7 @@ ThresholdZone:
 
 ## 10. File Structure (New/Modified)
 
-```
+```text
 backend/evals/
 ├── datasets/
 │   ├── retrieval_basic.yaml          # extended with more cases
@@ -528,23 +540,24 @@ docs/
 
 ### Unit Tests (CI)
 
-| Test | What it verifies |
-|------|-----------------|
-| `test_groundedness_scorer` | Rubric prompt construction, response parsing, score normalization |
-| `test_citation_accuracy_scorer` | Citation matching logic, expected_citations comparison |
-| `test_persona_fidelity_scorer` | Persona file loading, prompt assembly |
-| `test_refusal_quality_scorer` | Conditional execution (only when should_refuse=True) |
-| `test_judge_response_parsing` | Regex parsing of "Score: N / Reasoning: ..." format |
-| `test_runner_scorer_selection` | Auto-selection based on case fields |
-| `test_compare_cli` | Delta computation, zone classification, exit codes |
-| `test_dataset_loader_extended` | answer_expectations parsing, optional fields |
-| `test_report_manual_review` | Worst performers section generation |
+| Test                            | What it verifies                                                  |
+| ------------------------------- | ----------------------------------------------------------------- |
+| `test_groundedness_scorer`      | Rubric prompt construction, response parsing, score normalization |
+| `test_citation_accuracy_scorer` | Citation matching logic, expected_citations comparison            |
+| `test_persona_fidelity_scorer`  | Persona file loading, prompt assembly                             |
+| `test_refusal_quality_scorer`   | Conditional execution (only when should_refuse=True)              |
+| `test_judge_response_parsing`   | Regex parsing of "Score: N / Reasoning: ..." format               |
+| `test_runner_scorer_selection`  | Auto-selection based on case fields                               |
+| `test_compare_cli`              | Delta computation, zone classification, exit codes                |
+| `test_dataset_loader_extended`  | answer_expectations parsing, optional fields                      |
+| `test_report_manual_review`     | Worst performers section generation                               |
 
 All unit tests mock the LLM judge — no external provider dependency in CI.
 
 ### Quality Tests (Evals)
 
 Run separately, not in CI. Require:
+
 - Running backend with populated knowledge base
 - `EVAL_JUDGE_MODEL` configured (or falls back to twin model)
 - Seed knowledge ingested and snapshot published

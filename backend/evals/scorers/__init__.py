@@ -15,6 +15,7 @@ class RetrievalScorer(Protocol):
 
 
 class Scorer(RetrievalScorer, Protocol):
+    # TODO: Remove this compatibility alias after downstream imports migrate to RetrievalScorer.
     pass
 
 

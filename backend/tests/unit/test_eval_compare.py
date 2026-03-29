@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 
 def _write_report(path: Path, summary: dict[str, dict[str, float]]) -> Path:
     path.write_text(
@@ -71,7 +73,10 @@ def test_compare_reports_marks_removed_metric(tmp_path: Path) -> None:
     assert groundedness_row.zone == "MISSING"
 
 
-def test_main_returns_one_when_any_red(tmp_path: Path, capsys) -> None:
+def test_main_returns_one_when_any_red(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     from evals.compare import main
 
     baseline = _write_report(tmp_path / "baseline.json", {"recall_at_k": {"mean": 0.70}})
@@ -95,7 +100,10 @@ def test_main_returns_zero_when_no_red(tmp_path: Path) -> None:
     assert exit_code == 0
 
 
-def test_main_returns_one_when_metric_missing_in_current(tmp_path: Path, capsys) -> None:
+def test_main_returns_one_when_metric_missing_in_current(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     from evals.compare import main
 
     baseline = _write_report(tmp_path / "baseline.json", {"groundedness": {"mean": 0.85}})

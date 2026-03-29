@@ -187,6 +187,44 @@ async def test_runner_calls_generate_for_answer_expectations() -> None:
     assert result.cases[0].answer == "X is a thing."
     assert result.cases[0].judge_scores == {"groundedness": {"raw": 4, "normalized": 0.75}}
     client.generate.assert_awaited_once()
+    client.retrieve.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runner_skips_failed_answer_metric_from_scores() -> None:
+    from evals.runner import SuiteRunner
+
+    suite = EvalSuite(
+        suite="answer_test",
+        snapshot_id=uuid.uuid4(),
+        cases=[
+            EvalCase(
+                id="a-002",
+                query="Tell me about X",
+                answer_expectations=AnswerExpectations(should_refuse=False),
+            ),
+        ],
+    )
+    client = AsyncMock()
+    client.generate.return_value = GenerationResult(
+        answer="X is a thing.",
+        citations=[],
+        retrieved_chunks=[],
+        rewritten_query="Tell me about X",
+        timing_ms=100.0,
+        model="test",
+    )
+    answer_scorer = AsyncMock()
+    answer_scorer.name = "groundedness"
+    answer_scorer.score.side_effect = ValueError("judge response malformed")
+
+    runner = SuiteRunner(client=client, scorers=[], answer_scorers=[answer_scorer], top_n=5)
+    result = await runner.run(suite)
+
+    assert result.cases[0].status == "ok"
+    assert result.cases[0].scores == {}
+    assert result.cases[0].details["groundedness"] == {"error": "judge response malformed"}
+    assert result.summary == {}
 
 
 @pytest.mark.asyncio

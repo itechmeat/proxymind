@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import time
 import uuid
 from typing import Annotated
@@ -8,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+import structlog
 
 from app.api.auth import verify_admin_key
 from app.api.dependencies import (
@@ -38,7 +38,7 @@ router = APIRouter(
     tags=["admin", "eval"],
     dependencies=[Depends(verify_admin_key)],
 )
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 def _build_chunk_response(chunk: RetrievedChunk, rank: int) -> EvalChunkResponse:
@@ -76,7 +76,7 @@ async def eval_retrieve(
             top_n=body.top_n,
         )
     except Exception:
-        logger.exception("Eval retrieve failed", extra={"snapshot_id": str(body.snapshot_id)})
+        logger.exception("Eval retrieve failed", snapshot_id=str(body.snapshot_id))
         return JSONResponse(status_code=500, content={"error": "Internal server error"})
     elapsed_ms = (time.monotonic() - started_at) * 1000
 
@@ -147,5 +147,5 @@ async def eval_generate(
             model=model_name,
         )
     except Exception:
-        logger.exception("Eval generate failed", extra={"snapshot_id": str(body.snapshot_id)})
+        logger.exception("Eval generate failed", snapshot_id=str(body.snapshot_id))
         return JSONResponse(status_code=500, content={"error": "Internal server error"})

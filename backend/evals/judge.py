@@ -15,13 +15,19 @@ _JUDGE_RESPONSE_PATTERN = re.compile(
 )
 
 
+class JudgeRetryableError(RuntimeError):
+    pass
+
+
+class EmptyJudgeContentError(RuntimeError):
+    pass
+
+
 def parse_judge_response(response_text: str) -> tuple[int, str]:
     match = _JUDGE_RESPONSE_PATTERN.match(response_text.strip())
     if match is None:
         raise ValueError("Judge response did not match expected format")
     raw_score = int(match.group(1))
-    if raw_score < 1 or raw_score > 5:
-        raise ValueError("Judge score must be between 1 and 5")
     reasoning = match.group(2).strip()
     if not reasoning:
         raise ValueError("Judge reasoning must not be empty")
@@ -55,7 +61,7 @@ class EvalJudge:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=4),
-        retry=retry_if_exception_type(RuntimeError),
+        retry=retry_if_exception_type(JudgeRetryableError),
         reraise=True,
     )
     async def judge(self, prompt: str) -> str:
@@ -81,14 +87,14 @@ class EvalJudge:
             )
             choices = getattr(response, "choices", None)
             if not choices:
-                raise RuntimeError("Judge response is missing choices")
+                raise JudgeRetryableError("Judge response is missing choices")
             message = getattr(choices[0], "message", None)
             content = getattr(message, "content", None)
-        except RuntimeError:
+        except (JudgeRetryableError, EmptyJudgeContentError):
             raise
         except Exception as error:
-            raise RuntimeError(f"Judge completion failed: {error}") from error
+            raise JudgeRetryableError(f"Judge completion failed: {error}") from error
 
         if not isinstance(content, str) or not content.strip():
-            raise RuntimeError("Judge returned empty content")
+            raise EmptyJudgeContentError("Judge returned empty content")
         return content.strip()

@@ -16,49 +16,50 @@
 
 ### New Files
 
-| File | Responsibility |
-|------|---------------|
-| `backend/evals/judge.py` | EvalJudge — LLM-as-judge wrapper over LiteLLM |
-| `backend/evals/scorers/groundedness.py` | Groundedness scorer (LLM-as-judge) |
-| `backend/evals/scorers/citation_accuracy.py` | Citation accuracy scorer (LLM-as-judge) |
-| `backend/evals/scorers/persona_fidelity.py` | Persona fidelity scorer (LLM-as-judge) |
-| `backend/evals/scorers/refusal_quality.py` | Refusal quality scorer (LLM-as-judge) |
-| `backend/evals/compare.py` | Compare CLI — baseline vs current report |
-| `backend/evals/baselines/.gitkeep` | Baseline storage directory |
-| `backend/evals/seed_knowledge/guide.md` | Seed knowledge — technical guide |
-| `backend/evals/seed_knowledge/biography.md` | Seed knowledge — prototype biography |
-| `backend/evals/seed_knowledge/faq.md` | Seed knowledge — FAQ |
-| `backend/evals/seed_persona/IDENTITY.md` | Seed persona — identity |
-| `backend/evals/seed_persona/SOUL.md` | Seed persona — soul/style |
-| `backend/evals/seed_persona/BEHAVIOR.md` | Seed persona — behavior/boundaries |
-| `backend/evals/datasets/answer_quality.yaml` | Answer quality eval cases |
-| `backend/evals/datasets/persona_and_refusal.yaml` | Persona fidelity + refusal cases |
-| `backend/tests/unit/test_eval_judge.py` | Tests for EvalJudge |
-| `backend/tests/unit/test_eval_answer_scorers.py` | Tests for answer quality scorers |
-| `backend/tests/unit/test_eval_compare.py` | Tests for compare CLI |
-| `backend/tests/unit/test_eval_generate_endpoint.py` | Tests for /eval/generate endpoint |
-| `docs/eval-decision-v1.md` | Decision document template (filled after eval run) |
+| File                                                | Responsibility                                     |
+| --------------------------------------------------- | -------------------------------------------------- |
+| `backend/evals/judge.py`                            | EvalJudge — LLM-as-judge wrapper over LiteLLM      |
+| `backend/evals/scorers/groundedness.py`             | Groundedness scorer (LLM-as-judge)                 |
+| `backend/evals/scorers/citation_accuracy.py`        | Citation accuracy scorer (LLM-as-judge)            |
+| `backend/evals/scorers/persona_fidelity.py`         | Persona fidelity scorer (LLM-as-judge)             |
+| `backend/evals/scorers/refusal_quality.py`          | Refusal quality scorer (LLM-as-judge)              |
+| `backend/evals/compare.py`                          | Compare CLI — baseline vs current report           |
+| `backend/evals/baselines/.gitkeep`                  | Baseline storage directory                         |
+| `backend/evals/seed_knowledge/guide.md`             | Seed knowledge — technical guide                   |
+| `backend/evals/seed_knowledge/biography.md`         | Seed knowledge — prototype biography               |
+| `backend/evals/seed_knowledge/faq.md`               | Seed knowledge — FAQ                               |
+| `backend/evals/seed_persona/IDENTITY.md`            | Seed persona — identity                            |
+| `backend/evals/seed_persona/SOUL.md`                | Seed persona — soul/style                          |
+| `backend/evals/seed_persona/BEHAVIOR.md`            | Seed persona — behavior/boundaries                 |
+| `backend/evals/datasets/answer_quality.yaml`        | Answer quality eval cases                          |
+| `backend/evals/datasets/persona_and_refusal.yaml`   | Persona fidelity + refusal cases                   |
+| `backend/tests/unit/test_eval_judge.py`             | Tests for EvalJudge                                |
+| `backend/tests/unit/test_eval_answer_scorers.py`    | Tests for answer quality scorers                   |
+| `backend/tests/unit/test_eval_compare.py`           | Tests for compare CLI                              |
+| `backend/tests/unit/test_eval_generate_endpoint.py` | Tests for /eval/generate endpoint                  |
+| `docs/eval-decision-v1.md`                          | Decision document template (filled after eval run) |
 
 ### Modified Files
 
-| File | Changes |
-|------|---------|
-| `backend/evals/models.py` | Add `AnswerExpectations`, `GenerationResult`, extend `EvalCase` |
-| `backend/evals/config.py` | Add `judge_model`, `persona_path`, `ThresholdZone`, thresholds |
-| `backend/evals/loader.py` | Support optional `answer_expectations` in YAML |
-| `backend/evals/client.py` | Add `generate()` method |
-| `backend/evals/scorers/__init__.py` | Add `AnswerScorer` protocol, `default_answer_scorers()` |
-| `backend/evals/runner.py` | Auto-select scorers based on case fields |
-| `backend/evals/report.py` | Add manual review candidates section |
-| `backend/evals/run_evals.py` | Add `--judge-model`, `--persona-path` args |
-| `backend/app/api/admin_eval.py` | Add `/eval/generate` endpoint |
-| `backend/app/api/eval_schemas.py` | Add `EvalGenerateRequest`, `EvalGenerateResponse` |
+| File                                | Changes                                                         |
+| ----------------------------------- | --------------------------------------------------------------- |
+| `backend/evals/models.py`           | Add `AnswerExpectations`, `GenerationResult`, extend `EvalCase` |
+| `backend/evals/config.py`           | Add `judge_model`, `persona_path`, `ThresholdZone`, thresholds  |
+| `backend/evals/loader.py`           | Support optional `answer_expectations` in YAML                  |
+| `backend/evals/client.py`           | Add `generate()` method                                         |
+| `backend/evals/scorers/__init__.py` | Add `AnswerScorer` protocol, `default_answer_scorers()`         |
+| `backend/evals/runner.py`           | Auto-select scorers based on case fields                        |
+| `backend/evals/report.py`           | Add manual review candidates section                            |
+| `backend/evals/run_evals.py`        | Add `--judge-model`, `--persona-path` args                      |
+| `backend/app/api/admin_eval.py`     | Add `/eval/generate` endpoint                                   |
+| `backend/app/api/eval_schemas.py`   | Add `EvalGenerateRequest`, `EvalGenerateResponse`               |
 
 ---
 
 ## Task 1: Extend Models
 
 **Files:**
+
 - Modify: `backend/evals/models.py`
 - Test: `backend/tests/unit/test_eval_models.py`
 
@@ -229,6 +230,7 @@ Files: `backend/evals/models.py backend/tests/unit/test_eval_models.py`
 ## Task 2: Extend Config
 
 **Files:**
+
 - Modify: `backend/evals/config.py`
 - Test: `backend/tests/unit/test_eval_config.py` (create if doesn't exist)
 
@@ -378,6 +380,7 @@ Files: `backend/evals/config.py backend/tests/unit/test_eval_config.py`
 ## Task 3: EvalJudge — LLM-as-judge wrapper
 
 **Files:**
+
 - Create: `backend/evals/judge.py`
 - Test: `backend/tests/unit/test_eval_judge.py`
 
@@ -542,6 +545,7 @@ Files: `backend/evals/judge.py backend/tests/unit/test_eval_judge.py`
 ## Task 4: Groundedness Scorer
 
 **Files:**
+
 - Create: `backend/evals/scorers/groundedness.py`
 - Test: `backend/tests/unit/test_eval_answer_scorers.py`
 
@@ -761,6 +765,7 @@ Files: `backend/evals/scorers/groundedness.py backend/tests/unit/test_eval_answe
 ## Task 5: Citation Accuracy Scorer
 
 **Files:**
+
 - Create: `backend/evals/scorers/citation_accuracy.py`
 - Modify: `backend/tests/unit/test_eval_answer_scorers.py`
 
@@ -928,6 +933,7 @@ Files: `backend/evals/scorers/citation_accuracy.py backend/tests/unit/test_eval_
 ## Task 6: Persona Fidelity Scorer
 
 **Files:**
+
 - Create: `backend/evals/scorers/persona_fidelity.py`
 - Modify: `backend/tests/unit/test_eval_answer_scorers.py`
 
@@ -1129,6 +1135,7 @@ Files: `backend/evals/scorers/persona_fidelity.py backend/tests/unit/test_eval_a
 ## Task 7: Refusal Quality Scorer
 
 **Files:**
+
 - Create: `backend/evals/scorers/refusal_quality.py`
 - Modify: `backend/tests/unit/test_eval_answer_scorers.py`
 
@@ -1291,9 +1298,10 @@ Files: `backend/evals/scorers/refusal_quality.py backend/tests/unit/test_eval_an
 
 ---
 
-## Task 8: Update Scorers __init__ and EvalClient
+## Task 8: Update Scorers `__init__.py` and EvalClient
 
 **Files:**
+
 - Modify: `backend/evals/scorers/__init__.py`
 - Modify: `backend/evals/client.py`
 
@@ -1381,7 +1389,7 @@ Add method to `EvalClient` class after `retrieve()`:
             raise EvalClientError(f"Eval generate request failed: {error}") from error
 ```
 
-- [ ] **Step 4: Update scorers/__init__.py — add AnswerScorer protocol**
+- [ ] **Step 4: Update scorers/`__init__.py` — add AnswerScorer protocol**
 
 In `backend/evals/scorers/__init__.py`, add:
 
@@ -1438,6 +1446,7 @@ Files: `backend/evals/client.py backend/evals/scorers/__init__.py`
 ## Task 9: Extend Runner for answer quality scoring
 
 **Files:**
+
 - Modify: `backend/evals/runner.py`
 - Test: `backend/tests/unit/test_eval_runner.py`
 
@@ -1645,6 +1654,7 @@ Files: `backend/evals/runner.py backend/tests/unit/test_eval_runner.py`
 ## Task 10: Extend Report with Manual Review Candidates
 
 **Files:**
+
 - Modify: `backend/evals/report.py`
 - Test: `backend/tests/unit/test_eval_report.py`
 
@@ -1780,6 +1790,7 @@ Files: `backend/evals/report.py backend/tests/unit/test_eval_report.py`
 ## Task 11: Compare CLI
 
 **Files:**
+
 - Create: `backend/evals/compare.py`
 - Test: `backend/tests/unit/test_eval_compare.py`
 
@@ -2006,6 +2017,7 @@ Files: `backend/evals/compare.py backend/tests/unit/test_eval_compare.py`
 ## Task 12: Backend endpoint `/api/admin/eval/generate`
 
 **Files:**
+
 - Modify: `backend/app/api/eval_schemas.py`
 - Modify: `backend/app/api/admin_eval.py`
 - Test: `backend/tests/unit/test_eval_generate_endpoint.py`
@@ -2283,6 +2295,7 @@ Files: `backend/app/api/admin_eval.py backend/app/api/eval_schemas.py backend/te
 ## Task 13: Update run_evals.py CLI
 
 **Files:**
+
 - Modify: `backend/evals/run_evals.py`
 
 - [ ] **Step 1: Add new CLI args and wire answer scorers**
@@ -2354,6 +2367,7 @@ Files: `backend/evals/run_evals.py`
 ## Task 14: Seed Data
 
 **Files:**
+
 - Create: `backend/evals/seed_knowledge/guide.md`
 - Create: `backend/evals/seed_knowledge/biography.md`
 - Create: `backend/evals/seed_knowledge/faq.md`
@@ -2386,6 +2400,7 @@ Knowledge is organized into snapshots. A snapshot is a versioned set of document
 ## Chapter 3: Persona Configuration
 
 The twin's personality is defined by three files:
+
 - IDENTITY.md — who the twin is
 - SOUL.md — how the twin speaks
 - BEHAVIOR.md — what the twin does and doesn't discuss
@@ -2417,18 +2432,23 @@ Create `backend/evals/seed_knowledge/faq.md`:
 # Frequently Asked Questions
 
 ## Q: What formats does ProxyMind support?
+
 ProxyMind supports Markdown, PDF, DOCX, HTML, and plain text files. Images, audio, and short video can also be processed through the Gemini native path.
 
 ## Q: How does the citation system work?
+
 When the twin references information from uploaded documents, it includes source citations. These appear as numbered references in the response and link back to the original document, chapter, and page.
 
 ## Q: Can I use ProxyMind with my own LLM provider?
+
 Yes. ProxyMind uses LiteLLM for provider abstraction. You can configure any supported provider (OpenAI, Anthropic, Google, open-source models) through environment variables.
 
 ## Q: How do knowledge snapshots work?
+
 Snapshots version your knowledge base. Create a draft, upload documents to it, then publish. The twin only answers from the active published snapshot. You can roll back to any previously published snapshot.
 
 ## Q: Is ProxyMind multi-tenant?
+
 The current architecture is single-twin per instance. However, the data model includes tenant-ready fields (owner_id, agent_id) for future scaling.
 ```
 
@@ -2596,6 +2616,7 @@ Files: `backend/evals/seed_knowledge/ backend/evals/seed_persona/ backend/evals/
 ## Task 15: Extend Loader for optional expected field
 
 **Files:**
+
 - Modify: `backend/evals/loader.py` (if needed)
 - Test: `backend/tests/unit/test_eval_loader.py`
 
@@ -2653,6 +2674,7 @@ Files: `backend/tests/unit/test_eval_loader.py`
 ## Task 16: Decision Document Template
 
 **Files:**
+
 - Create: `docs/eval-decision-v1.md`
 
 - [ ] **Step 1: Create template**
@@ -2670,15 +2692,15 @@ _[One sentence: overall quality assessment and primary recommendation]_
 
 ## Baseline Metrics
 
-| Metric | Mean | Min | Max | Zone |
-|--------|------|-----|-----|------|
-| precision_at_k | | | | |
-| recall_at_k | | | | |
-| mrr | | | | |
-| groundedness | | | | |
-| citation_accuracy | | | | |
-| persona_fidelity | | | | |
-| refusal_quality | | | | |
+| Metric            | Mean | Min | Max | Zone |
+| ----------------- | ---- | --- | --- | ---- |
+| precision_at_k    |      |     |     |      |
+| recall_at_k       |      |     |     |      |
+| mrr               |      |     |     |      |
+| groundedness      |      |     |     |      |
+| citation_accuracy |      |     |     |      |
+| persona_fidelity  |      |     |     |      |
+| refusal_quality   |      |     |     |      |
 
 ## Upgrade Path Analysis
 
@@ -2788,6 +2810,10 @@ Expected: Lists all suites and cases with correct flags.
 - [ ] **Step 5: Stage and propose final commit if any fixes were needed**
 
 Stage the changes and propose a commit message to the user. Do NOT commit without explicit user permission.
+
+- [ ] **Step 6: Re-read docs/development.md and self-review the final change**
+
+Re-read `docs/development.md` and verify the completed implementation still matches the required engineering standards before marking the plan complete.
 
 Proposed message: `fix(evals): integration fixes for S8-02`
 Files: all changed files from integration fixes

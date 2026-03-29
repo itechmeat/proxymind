@@ -159,8 +159,22 @@ async def test_refusal_quality_scorer_handles_malformed_response() -> None:
         answer_expectations=AnswerExpectations(should_refuse=True),
     )
 
-    output = await scorer.score(case, _make_generation_result())
+    with pytest.raises(ValueError, match="refusal_quality judge response is invalid"):
+        await scorer.score(case, _make_generation_result())
 
-    assert output is not None
-    assert output.score == 0.0
-    assert "error" in output.details
+
+@pytest.mark.asyncio
+async def test_persona_fidelity_scorer_fails_when_persona_files_missing(tmp_path: Path) -> None:
+    from evals.judge import EvalJudge
+    from evals.scorers.persona_fidelity import PersonaFidelityScorer
+
+    judge = EvalJudge(model="test", completion_func=AsyncMock())
+    scorer = PersonaFidelityScorer(judge=judge, persona_path=tmp_path)
+    case = EvalCase(
+        id="pf-003",
+        query="Q",
+        answer_expectations=AnswerExpectations(persona_tags=["friendly"]),
+    )
+
+    with pytest.raises(FileNotFoundError, match="persona files are missing"):
+        await scorer.score(case, _make_generation_result())

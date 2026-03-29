@@ -43,10 +43,18 @@ class TestEvalConfigExtended:
         assert config.judge_model == "openai/gpt-4o"
 
     def test_default_thresholds_exist(self) -> None:
-        assert "groundedness" in DEFAULT_THRESHOLDS
-        assert "citation_accuracy" in DEFAULT_THRESHOLDS
-        assert "persona_fidelity" in DEFAULT_THRESHOLDS
-        assert "refusal_quality" in DEFAULT_THRESHOLDS
-        assert "precision_at_k" in DEFAULT_THRESHOLDS
-        assert "recall_at_k" in DEFAULT_THRESHOLDS
-        assert "mrr" in DEFAULT_THRESHOLDS
+        expected = {
+            "precision_at_k": (0.70, 0.50),
+            "recall_at_k": (0.70, 0.50),
+            "mrr": (0.60, 0.40),
+            "groundedness": (0.75, 0.50),
+            "citation_accuracy": (0.70, 0.50),
+            "persona_fidelity": (0.70, 0.50),
+            "refusal_quality": (0.80, 0.60),
+        }
+
+        for metric_name, (green_above, red_below) in expected.items():
+            assert metric_name in DEFAULT_THRESHOLDS
+            threshold = DEFAULT_THRESHOLDS[metric_name]
+            assert threshold.green_above == green_above
+            assert threshold.red_below == red_below

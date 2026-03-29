@@ -10,7 +10,7 @@ from evals.models import CaseResult, MetricSummary, SuiteResult
 if TYPE_CHECKING:
     from evals.client import EvalClient
     from evals.models import EvalSuite
-    from evals.scorers import AnswerScorer, Scorer
+    from evals.scorers import AnswerScorer, RetrievalScorer
 
 
 class SuiteRunner:
@@ -18,7 +18,7 @@ class SuiteRunner:
         self,
         *,
         client: EvalClient,
-        scorers: list[Scorer],
+        scorers: list[RetrievalScorer],
         answer_scorers: list[AnswerScorer] | None = None,
         top_n: int,
         config_summary: dict[str, Any] | None = None,
@@ -75,7 +75,11 @@ class SuiteRunner:
                         self._chunk_summary(chunk) for chunk in generation_result.retrieved_chunks
                     ]
                     for scorer in self._answer_scorers:
-                        scorer_output = await scorer.score(case, generation_result)
+                        try:
+                            scorer_output = await scorer.score(case, generation_result)
+                        except Exception as error:
+                            details[scorer.name] = {"error": str(error)}
+                            continue
                         if scorer_output is None:
                             continue
                         scores[scorer.name] = scorer_output.score
@@ -159,7 +163,8 @@ class SuiteRunner:
         return summary
 
     def _chunk_summary(self, chunk: Any) -> str:
-        snippet = chunk.text.strip().replace("\n", " ")
+        text = chunk.text if isinstance(chunk.text, str) else ""
+        snippet = text.strip().replace("\n", " ")
         if len(snippet) > 120:
             snippet = f"{snippet[:117]}..."
         return f"#{chunk.rank} source={chunk.source_id} score={chunk.score:.3f} {snippet}"

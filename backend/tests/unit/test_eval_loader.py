@@ -164,3 +164,5 @@ cases:
     assert len(suites) == 1
     assert suites[0].cases[0].expected == []
     assert suites[0].cases[0].answer_expectations is not None
+    assert suites[0].cases[0].answer_expectations.should_refuse is False
+    assert suites[0].cases[0].answer_expectations.persona_tags == ["expert"]

@@ -195,7 +195,7 @@ The `SuiteRunner` SHALL orchestrate eval execution. It SHALL accept both retriev
 | `answer_expectations` only                | `/eval/generate`                    | answer scorers (groundedness, citation_accuracy, persona_fidelity*, refusal_quality*) |
 | Both `expected` and `answer_expectations` | `/eval/retrieve` + `/eval/generate` | All applicable scorers                                                                |
 
-*persona_fidelity runs only when `persona_tags` is non-empty. *refusal_quality runs only when `should_refuse == True`.
+_persona_fidelity runs only when `persona_tags` is non-empty._ _refusal_quality runs only when `should_refuse == True`._
 
 Execution SHALL be sequential (one case at a time). The runner SHALL aggregate per-scorer metrics across all cases, computing mean, min, and max for each scorer. If an API call fails for a case, the runner SHALL mark that case with status `"error"` and continue. Error cases SHALL be counted separately. The runner SHALL produce a `SuiteResult` containing suite name, timestamp, config summary, total_cases count, errors count, per-scorer `MetricSummary`, and a list of per-case `CaseResult` objects. For answer-scored cases, `CaseResult` MAY be extended with top-level fields such as `answer`, `generation_timing_ms`, `judge_scores`, and `judge_reasoning` for simpler report rendering, while `details` SHALL continue to carry supplementary artifacts such as chunk summaries and scorer-specific detail payloads.
 

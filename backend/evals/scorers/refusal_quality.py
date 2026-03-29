@@ -40,8 +40,10 @@ class RefusalQualityScorer:
         response = await self._judge.judge(prompt)
         try:
             raw_score, reasoning = parse_judge_response(response)
-        except ValueError:
-            return ScorerOutput(score=0.0, details={"error": response})
+        except ValueError as error:
+            raise ValueError(
+                f"refusal_quality judge response is invalid: {response}"
+            ) from error
         return ScorerOutput(
             score=normalize(raw_score),
             details={"raw_score": raw_score, "reasoning": reasoning},
