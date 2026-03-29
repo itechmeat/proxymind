@@ -18,7 +18,7 @@ from app.db.models import CatalogItem, Message, Session, Source
 from app.db.models.enums import MessageRole, MessageStatus, SessionChannel, SessionStatus
 from app.persona.loader import PersonaContext
 from app.services.audit import AuditService
-from app.services.citation import Citation, CitationService, SourceInfo
+from app.services.citation import Citation, CitationService, SourceInfo, load_source_map
 from app.services.content_type import compute_content_type_spans
 from app.services.context_assembler import ContextAssembler
 from app.services.conversation_memory import ConversationMemoryService, MemoryBlock
@@ -966,50 +966,7 @@ class ChatService:
         return source_ids
 
     async def _load_source_map(self, source_ids: list[uuid.UUID]) -> dict[uuid.UUID, SourceInfo]:
-        if not source_ids:
-            return {}
-
-        rows = await self._session.execute(
-            select(
-                Source.id,
-                Source.title,
-                Source.public_url,
-                Source.source_type,
-                CatalogItem.id.label("catalog_item_id"),
-                CatalogItem.url.label("catalog_item_url"),
-                CatalogItem.name.label("catalog_item_name"),
-                CatalogItem.item_type.label("catalog_item_type"),
-                CatalogItem.is_active.label("catalog_item_is_active"),
-                CatalogItem.valid_from.label("catalog_item_valid_from"),
-                CatalogItem.valid_until.label("catalog_item_valid_until"),
-                CatalogItem.deleted_at.label("catalog_item_deleted_at"),
-            )
-            .outerjoin(CatalogItem, Source.catalog_item_id == CatalogItem.id)
-            .where(
-                Source.id.in_(source_ids),
-                Source.deleted_at.is_(None),
-            )
-        )
-        return {
-            row.id: SourceInfo(
-                id=row.id,
-                title=row.title,
-                public_url=row.public_url,
-                source_type=row.source_type.value,
-                catalog_item_url=row.catalog_item_url,
-                catalog_item_name=row.catalog_item_name,
-                catalog_item_type=(
-                    row.catalog_item_type.value if row.catalog_item_type is not None else None
-                ),
-                catalog_item_active=self._is_catalog_item_active(
-                    is_active=row.catalog_item_is_active,
-                    valid_from=row.catalog_item_valid_from,
-                    valid_until=row.catalog_item_valid_until,
-                    deleted_at=row.catalog_item_deleted_at,
-                ),
-            )
-            for row in rows
-        }
+        return await load_source_map(self._session, source_ids)
 
     @staticmethod
     def _is_catalog_item_active(

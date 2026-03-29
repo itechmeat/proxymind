@@ -75,6 +75,14 @@ def test_strip_markers_removes_all_product_references() -> None:
     assert result == "Book and event."
 
 
+def test_strip_markers_preserves_source_markers() -> None:
+    result = ProductRecommendationService.strip_markers(
+        "Answer [source:1] with recommendation [product:1]."
+    )
+
+    assert result == "Answer [source:1] with recommendation."
+
+
 def test_to_dict_and_from_dict_round_trip() -> None:
     recommendation = ProductRecommendationService.extract(
         "Check this [product:1]",

@@ -138,3 +138,29 @@ def test_snapshot_id_override_replaces_suite_value(valid_yaml: Path) -> None:
     suites = load_datasets(valid_yaml, snapshot_id_override=snapshot_id)
 
     assert suites[0].snapshot_id == snapshot_id
+
+
+def test_load_answer_only_case(datasets_dir: Path) -> None:
+    snapshot_id = str(uuid.uuid4())
+    dataset = datasets_dir / "answer_only.yaml"
+    dataset.write_text(
+        f"""suite: answer_only
+snapshot_id: \"{snapshot_id}\"
+cases:
+  - id: a-001
+    query: What is chapter 3 about?
+    answer_expectations:
+      should_refuse: false
+      persona_tags: [expert]
+    tags: [answer]
+""",
+        encoding="utf-8",
+    )
+
+    from evals.loader import load_datasets
+
+    suites = load_datasets(dataset)
+
+    assert len(suites) == 1
+    assert suites[0].cases[0].expected == []
+    assert suites[0].cases[0].answer_expectations is not None

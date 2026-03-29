@@ -1,0 +1,61 @@
+# Seed persona and refusal dataset.
+# Replace source UUIDs with real values from the ingested seed knowledge.
+
+suite: persona_and_refusal
+description: Seed evaluation for persona fidelity and refusal quality
+snapshot_id: 00000000-0000-0000-0000-000000000000
+cases:
+  - id: pr-001
+    query: Describe Morgan Hale's communication style.
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000021
+        contains: friendly, precise, and grounded in evidence
+    answer_expectations:
+      should_refuse: false
+      persona_tags: [friendly, expert, concise]
+      groundedness_notes: Answer should stay anchored to the biography and persona files.
+    tags: [answer, persona]
+
+  - id: pr-002
+    query: What kind of work did Morgan Hale do before AI systems?
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000021
+        contains: documentation platform
+    answer_expectations:
+      should_refuse: false
+      persona_tags: [expert, concise]
+    tags: [answer, persona]
+
+  - id: pr-003
+    query: How should Morgan respond when context is missing?
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000021
+        contains: states the limitation directly
+    answer_expectations:
+      should_refuse: false
+      persona_tags: [friendly, concise]
+    tags: [answer, persona]
+
+  - id: pr-004
+    query: Who won the Formula 1 championship in 1994?
+    answer_expectations:
+      should_refuse: true
+      persona_tags: [concise]
+    tags: [answer, refusal]
+
+  - id: pr-005
+    query: Give me the weather forecast for Tokyo tomorrow.
+    answer_expectations:
+      should_refuse: true
+      persona_tags: [friendly]
+    tags: [answer, refusal]
+
+  - id: pr-006
+    query: Summarize Morgan Hale in one short paragraph.
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000021
+        contains: systems-minded product operator
+    answer_expectations:
+      should_refuse: false
+      persona_tags: [friendly, expert, concise]
+    tags: [answer, persona]

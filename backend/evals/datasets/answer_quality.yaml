@@ -1,0 +1,91 @@
+# Seed answer quality dataset.
+# Placeholder UUID mapping for seed content:
+# - 00000000-0000-0000-0000-000000000011 -> evals/seed_knowledge/guide.md
+# - 00000000-0000-0000-0000-000000000012 -> evals/seed_knowledge/faq.md
+# - 00000000-0000-0000-0000-000000000021 -> evals/seed_knowledge/biography.md
+
+suite: answer_quality
+description: Seed answer quality evaluation with groundedness and citation checks
+snapshot_id: 00000000-0000-0000-0000-000000000000
+cases:
+  - id: aq-001
+    query: What are the three deployment steps in chapter 3?
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000011
+        contains: Deployment requires three steps
+    answer_expectations:
+      should_refuse: false
+      expected_citations:
+        - 00000000-0000-0000-0000-000000000011
+      groundedness_notes: Answer should describe environment configuration, starting the stack, and observability verification.
+    tags: [answer, groundedness, citation]
+
+  - id: aq-002
+    query: What does the FAQ say about snapshots?
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000012
+        contains: Snapshots freeze a specific published knowledge state
+    answer_expectations:
+      should_refuse: false
+      expected_citations:
+        - 00000000-0000-0000-0000-000000000012
+      groundedness_notes: Answer should stay close to the FAQ wording about reproducibility and stable corpus state.
+    tags: [answer, groundedness, citation]
+
+  - id: aq-003
+    query: Why are citations important in ProxyMind?
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000012
+        contains: Citations connect generated claims back to concrete sources
+    answer_expectations:
+      should_refuse: false
+      expected_citations:
+        - 00000000-0000-0000-0000-000000000012
+      groundedness_notes: Answer should mention inspectable evidence behind the response.
+    tags: [answer, groundedness, citation]
+
+  - id: aq-004
+    query: What does chapter 2 say about anchors?
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000011
+        contains: anchors later power citations
+    answer_expectations:
+      should_refuse: false
+      expected_citations:
+        - 00000000-0000-0000-0000-000000000011
+      groundedness_notes: Answer should explain that anchors support page, chapter, or timecode citations.
+    tags: [answer, groundedness, citation]
+
+  - id: aq-005
+    query: What is stored in Qdrant?
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000012
+        contains: dense and BM25 sparse vectors
+    answer_expectations:
+      should_refuse: false
+      expected_citations:
+        - 00000000-0000-0000-0000-000000000012
+      groundedness_notes: Answer should mention retrieval over chunked content.
+    tags: [answer, groundedness, citation]
+
+  - id: aq-006
+    query: What Grafana port does the guide prescribe for deployment?
+    answer_expectations:
+      should_refuse: true
+      groundedness_notes: The seed guide describes observability verification but does not provide a Grafana port. The answer must refuse instead of inventing one.
+    tags: [answer, groundedness, refusal]
+
+  - id: aq-007
+    query: How do anchors and citations work together in ProxyMind?
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000011
+        contains: Those anchors later power citations
+      - source_id: 00000000-0000-0000-0000-000000000012
+        contains: Citations connect generated claims back to concrete sources
+    answer_expectations:
+      should_refuse: false
+      expected_citations:
+        - 00000000-0000-0000-0000-000000000011
+        - 00000000-0000-0000-0000-000000000012
+      groundedness_notes: Answer should connect chunk anchors with user-visible evidence and avoid inventing extra mechanics.
+    tags: [answer, groundedness, citation]

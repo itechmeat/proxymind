@@ -86,6 +86,60 @@ def test_markdown_report(tmp_path: Path, suite_result: SuiteResult) -> None:
     assert "Worst Performers" in content
 
 
+def test_markdown_includes_manual_review_section(tmp_path: Path) -> None:
+    from evals.report import ReportGenerator
+
+    result = SuiteResult(
+        suite="answer_test",
+        timestamp="2026-03-29T12:00:00+00:00",
+        config={"base_url": "http://localhost:8000", "snapshot_id": "abc", "top_n": 5},
+        summary={"groundedness": MetricSummary(mean=0.5, min=0.0, max=1.0)},
+        total_cases=3,
+        errors=0,
+        cases=[
+            CaseResult(
+                id="a-001",
+                query="Q1",
+                status="ok",
+                scores={"groundedness": 0.25},
+                details={"retrieved_chunks_summary": ["#1 source=abc score=0.100 chunk"]},
+                answer="Bad answer here",
+                judge_scores={"groundedness": {"raw": 2, "normalized": 0.25}},
+                judge_reasoning={"groundedness": "Mostly unsupported"},
+            ),
+            CaseResult(
+                id="a-002",
+                query="Q2",
+                status="ok",
+                scores={"groundedness": 1.0},
+                details={"retrieved_chunks_summary": ["#1 source=abc score=0.900 chunk"]},
+                answer="Good answer here",
+                judge_scores={"groundedness": {"raw": 5, "normalized": 1.0}},
+                judge_reasoning={"groundedness": "Perfect"},
+            ),
+            CaseResult(
+                id="a-003",
+                query="Q3",
+                status="ok",
+                scores={"groundedness": 0.5},
+                details={"retrieved_chunks_summary": ["#1 source=abc score=0.500 chunk"]},
+                answer="Medium answer",
+                judge_scores={"groundedness": {"raw": 3, "normalized": 0.5}},
+                judge_reasoning={"groundedness": "Mixed"},
+            ),
+        ],
+    )
+
+    _, md_path = ReportGenerator(output_dir=tmp_path).generate(result)
+    content = md_path.read_text(encoding="utf-8")
+
+    assert "## Manual Review Candidates" in content
+    assert content.count("## Manual Review Candidates") == 1
+    assert "a-001" in content
+    assert "Bad answer here" in content
+    assert "Mostly unsupported" in content
+
+
 def test_markdown_report_escapes_pipe_characters(tmp_path: Path) -> None:
     from evals.report import ReportGenerator
 
