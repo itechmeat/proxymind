@@ -247,7 +247,7 @@ Phase outcome: improved retrieval and answer quality driven by data.
   - Tasks: hierarchy extraction from the normalized parsing pipeline, parent-child linking, context expansion
   - **Parallel pair:** S9-01 (Chunk enrichment) — both modify ingestion pipeline but touch different stages
 
-- [ ] **S9-03: BGE-M3 fallback**
+- [x] **S9-03: BGE-M3 fallback**
       Replace BM25 sparse with BGE-M3 sparse for languages with insufficient BM25 quality. Dense (Gemini) unchanged.
   - **Outcome:** keyword search improves for the target language
   - **Verification:** eval on target language → metrics improved vs BM25

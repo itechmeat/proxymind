@@ -42,7 +42,9 @@ The system SHALL provide a `QdrantService` at `app/services/qdrant.py` that wrap
 
 ### Requirement: Qdrant collection with named dense and BM25 sparse vectors
 
-The `ensure_collection()` method SHALL create a Qdrant collection named per the `qdrant_collection` setting (default `"proxymind_chunks"`). The collection SHALL use a **named** vector configuration with a dense vector named `"dense"` and a sparse vector named `"bm25"`. The `"dense"` vector SHALL have `size` equal to `settings.embedding_dimensions` (default 3072) and `distance` set to Cosine. The `"bm25"` sparse vector SHALL be configured with `SparseVectorParams(modifier=Modifier.IDF)`. The collection creation call SHALL include both `vectors_config` and `sparse_vectors_config`.
+The `ensure_collection()` method SHALL create a Qdrant collection named per the `qdrant_collection` setting (default `"proxymind_chunks"`). The collection SHALL use a **named** vector configuration with a dense vector named `"dense"` and a sparse vector named `"bm25"`. The `"dense"` vector SHALL have `size` equal to `settings.embedding_dimensions` (default 3072) and `distance` set to Cosine. When the active sparse backend is `bm25`, the `"bm25"` sparse vector SHALL be configured with `SparseVectorParams(modifier=Modifier.IDF)`. When the active sparse backend is `bge_m3`, the same sparse slot name SHALL be retained, but the active sparse backend metadata (`backend`, `model_name`, `contract_version`) SHALL become part of the collection reuse contract. The collection creation call SHALL include both `vectors_config` and `sparse_vectors_config`.
+
+`ensure_collection()` SHALL inspect existing indexed payload metadata page-by-page until the collection is exhausted or a mismatch is found. If the inspected points show a contract different from the requested sparse backend, if the fields are missing such that compatibility cannot be proven, or if inspected points contain inconsistent values across `sparse_backend`, `sparse_model`, and `sparse_contract_version`, the method SHALL raise `CollectionSchemaMismatchError` with a message that reindexing is required.
 
 #### Scenario: Collection created with both dense and BM25 sparse vectors
 
@@ -54,6 +56,13 @@ The `ensure_collection()` method SHALL create a Qdrant collection named per the 
 
 - **WHEN** `ensure_collection()` is called and the collection already exists with matching dense and sparse configuration
 - **THEN** the method SHALL return without error and without recreating the collection
+
+#### Scenario: Sparse backend contract mismatch requires explicit reindex
+
+- **WHEN** `ensure_collection()` is called with `sparse_backend=bge_m3`
+- **AND** the existing collection or indexed payload metadata indicates the active index contract was created for `bm25`
+- **THEN** the method SHALL raise `CollectionSchemaMismatchError`
+- **AND** the error SHALL state that sparse backend compatibility could not be proven and reindexing is required
 
 ---
 
@@ -92,7 +101,9 @@ The `ensure_collection()` method SHALL compare the existing collection's `"dense
 
 ### Requirement: Point upsert with named vector and payload
 
-The `upsert_chunks()` method SHALL accept a list of point data and upsert them to Qdrant. Each point SHALL have: `id` (chunk UUID from PostgreSQL, string format), vector dict containing `"dense"` (float vector) and `"bm25"` (`models.Document(text=point.bm25_text, model="Qdrant/bm25", options=Bm25Config(language=self.bm25_language))`), and a payload containing: `snapshot_id`, `source_id`, `chunk_id`, `document_version_id`, `agent_id`, `knowledge_base_id`, `text_content`, `chunk_index`, `token_count`, `anchor_page`, `anchor_chapter`, `anchor_section`, `anchor_timecode`, `source_type`, `language`, `status`, `enriched_summary`, `enriched_keywords`, `enriched_questions`, `enriched_text`, `enrichment_model`, `enrichment_pipeline_version`.
+The `upsert_chunks()` method SHALL accept a list of point data and upsert them to Qdrant. Each point SHALL have: `id` (chunk UUID from PostgreSQL, string format), vector dict containing `"dense"` (float vector) and `"bm25"` (either a BM25 `Document` or the external sparse provider output for `point.bm25_text`), and a payload containing: `snapshot_id`, `source_id`, `chunk_id`, `document_version_id`, `agent_id`, `knowledge_base_id`, `text_content`, `chunk_index`, `token_count`, `anchor_page`, `anchor_chapter`, `anchor_section`, `anchor_timecode`, `source_type`, `language`, `status`, `enriched_summary`, `enriched_keywords`, `enriched_questions`, `enriched_text`, `enrichment_model`, `enrichment_pipeline_version`, `parent_id`, `parent_text_content`, `parent_token_count`, `parent_anchor_page`, `parent_anchor_chapter`, `parent_anchor_section`, `parent_anchor_timecode`, `sparse_backend`, `sparse_model`, and `sparse_contract_version`.
+
+For multi-scope filtering, the current product model uses `agent_id` and `knowledge_base_id` as the required scope identifiers. This capability does not introduce separate `tenant_id` or `project_id` payload fields.
 
 **[Modified by S9-01]** The BM25 sparse vector input SHALL use the `bm25_text` property of each point instead of `text_content`. The `bm25_text` property SHALL resolve to `enriched_text` when available (non-None), falling back to `text_content` otherwise. This ensures enriched keywords and questions improve lexical search without requiring changes to the retrieval pipeline. The `text_content` payload field SHALL continue to hold the original chunk text (without enrichment artifacts) for use in LLM context during answer generation and for citation display.
 
@@ -101,7 +112,14 @@ The `upsert_chunks()` method SHALL accept a list of point data and upsert them t
 - **WHEN** `upsert_chunks()` is called with a list of points
 - **THEN** each point SHALL have a vector dict with key `"dense"` containing the float vector
 - **AND** each point SHALL have a vector dict with key `"bm25"` containing a `Document` with `model="Qdrant/bm25"`, `text=point.bm25_text`, and `options=Bm25Config(language=self.bm25_language)`
-- **AND** each point payload SHALL contain all specified fields including the 6 enrichment fields
+- **AND** each point payload SHALL contain all specified fields including the 6 enrichment fields and sparse contract metadata
+
+#### Scenario: BGE-M3 backend upserts points with external sparse payload in sparse slot
+
+- **WHEN** `upsert_chunks()` is called while the service is configured with `sparse_backend=bge_m3`
+- **THEN** each point SHALL contain `"dense"` and `"bm25"` in the vector dict
+- **AND** the `"bm25"` value SHALL be built from the external sparse provider output for `point.bm25_text`
+- **AND** the payload SHALL include `sparse_backend="bge_m3"`, `sparse_model`, and a non-empty `sparse_contract_version`
 
 #### Scenario: BM25 Document uses enriched_text when available
 
@@ -202,6 +220,25 @@ When the application starts and `ensure_collection()` runs as part of startup in
 
 ---
 
+### Requirement: Sparse backend metadata is auditable in indexed payloads
+
+Every indexed child point SHALL record the sparse backend metadata that produced its sparse representation. This metadata SHALL be carried in the point payload as `sparse_backend`, `sparse_model`, and `sparse_contract_version`.
+
+These fields SHALL be used for diagnostics, operational inspection, and provider-contract validation. They SHALL NOT be treated as user-facing content. Their absence on an existing index SHALL be treated as an inability to prove compatibility for provider-switched reuse.
+
+#### Scenario: Indexed payload records sparse backend metadata
+
+- **WHEN** a chunk is upserted to Qdrant
+- **THEN** its payload SHALL include `sparse_backend`, `sparse_model`, and `sparse_contract_version`
+
+#### Scenario: Missing sparse backend metadata blocks provider-switched reuse
+
+- **WHEN** the active sparse backend is changed
+- **AND** the existing indexed state lacks sufficient sparse metadata to prove compatibility
+- **THEN** the service SHALL fail explicitly and require reindexing
+
+---
+
 ### Requirement: Score semantics are method-specific
 
 After the introduction of hybrid search, `RetrievedChunk.score` returned by `hybrid_search()` SHALL represent an RRF rank score rather than a cosine similarity value. The field SHALL remain available to downstream consumers as retrieval metadata, but its interpretation is method-specific. The field name `score` SHALL NOT be renamed.
@@ -233,6 +270,7 @@ The `score` field returned by `dense_search()` SHALL continue to represent cosin
 The following stable behavior MUST be covered by CI tests before archive:
 
 - **QdrantService unit tests**: mock `AsyncQdrantClient`. Verify collection creation parameters (named vector "dense", sparse vector "bm25" with Modifier.IDF, correct size, Cosine distance), payload index creation for all 7 fields (snapshot_id, agent_id, knowledge_base_id, source_id, status, source_type, language), idempotent `ensure_collection`, point upsert structure (named vector with both dense and BM25 Document, payload shape), retry on connection errors.
+- **Provider-aware sparse contract tests**: verify page-by-page payload metadata validation, explicit failure on mixed sparse contracts, and explicit failure when sparse metadata is missing and compatibility cannot be proven.
 - **QdrantService.dense_search unit tests**: mock `AsyncQdrantClient`. Verify dense_search constructs correct named vector query (`"dense"`). Verify payload filter includes all three fields (snapshot_id, agent_id, knowledge_base_id). Verify score_threshold is passed to Qdrant when set. Verify score_threshold=None omits score filtering. Verify results are mapped to `RetrievedChunk` with correct fields. Verify empty result returns empty list.
 - **Dimension mismatch unit test**: mock an existing collection with size 3072, change settings to 1024, verify `CollectionSchemaMismatchError` is raised with correct message.
 - **BM25 sparse vector schema unit tests**: mock existing collection without `"bm25"` sparse vector or with wrong modifier; verify WARNING log and race-safe delete + recreate sequence. Verify 404 on delete and 409 on create are handled gracefully.

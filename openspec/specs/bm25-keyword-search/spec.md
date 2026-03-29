@@ -1,12 +1,14 @@
 ## Purpose
 
-BM25 keyword search capability for the Qdrant vector storage layer. Provides server-side BM25 tokenization via the Qdrant Document API, a `keyword_search` method on QdrantService, an Admin API endpoint for diagnostics and evals, and configurable BM25 language (Snowball stemmer).
+Keyword-search diagnostics capability for the active sparse retrieval slot in the Qdrant vector storage layer. Provides a provider-aware `keyword_search` method on `QdrantService`, an Admin API endpoint for diagnostics and evals, active sparse backend metadata in responses, and configurable BM25 language (Snowball stemmer) for the BM25 provider.
 
 ## Requirements
 
 ### Requirement: keyword_search method
 
-The `QdrantService` SHALL provide a `keyword_search()` method that queries the `"bm25"` named sparse vector using `models.Document` with `model="Qdrant/bm25"` and `options=Bm25Config(language=self.bm25_language)`. The method SHALL accept `text` (str), `snapshot_id` (UUID), `agent_id` (UUID), `knowledge_base_id` (UUID), and `limit` (int, default 10). The method SHALL apply a payload filter on `snapshot_id`, `agent_id`, and `knowledge_base_id` to scope results. The method SHALL return `list[RetrievedChunk]` with the same structure as the dense `search()` method. The method SHALL retry on transient connection errors using the same retry strategy as other QdrantService methods (3 attempts, exponential backoff).
+The `QdrantService` SHALL provide a `keyword_search()` method that queries the active sparse retrieval slot. The method SHALL accept `text` (str), `snapshot_id` (UUID), `agent_id` (UUID), `knowledge_base_id` (UUID), and `limit` (int, default 10). The active sparse backend is resolved from the `QdrantService` instance attribute `sparse_backend`, which is wired at startup from installation configuration rather than passed as a per-call argument. The method SHALL apply a payload filter on `snapshot_id`, `agent_id`, and `knowledge_base_id` to scope results. The method SHALL return `list[RetrievedChunk]` with the same structure as the dense `search()` method. The method SHALL retry on transient connection errors using the same retry strategy as other QdrantService methods (3 attempts, exponential backoff).
+
+For `bm25`, the query SHALL use `models.Document` with `model="Qdrant/bm25"` and `options=Bm25Config(language=self.bm25_language)`. For `bge_m3`, the query SHALL use the sparse indices/values returned by an injected external `SparseProvider` implementation.
 
 #### Scenario: Keyword search returns matching chunks
 
@@ -14,6 +16,12 @@ The `QdrantService` SHALL provide a `keyword_search()` method that queries the `
 - **THEN** the method SHALL query Qdrant using the `"bm25"` named sparse vector with a `Document(text="infrastructure", model="Qdrant/bm25", options=Bm25Config(language=self.bm25_language))`
 - **AND** the payload filter SHALL include conditions for `snapshot_id`, `agent_id`, and `knowledge_base_id`
 - **AND** the method SHALL return up to 5 `RetrievedChunk` results ordered by BM25 score descending
+
+#### Scenario: Keyword search uses external sparse provider when BGE-M3 is active
+
+- **WHEN** `keyword_search()` is called while the service is configured with `sparse_backend=bge_m3`
+- **THEN** the method SHALL use the external sparse provider output for the query text instead of a BM25 `Document`
+- **AND** results SHALL remain scoped by `snapshot_id`, `agent_id`, and `knowledge_base_id`
 
 #### Scenario: Keyword search returns empty list when no chunks match
 
@@ -39,14 +47,21 @@ The `QdrantService` SHALL provide a `keyword_search()` method that queries the `
 
 ### Requirement: Admin keyword search endpoint
 
-The system SHALL provide a `POST /api/admin/search/keyword` endpoint for BM25-only keyword search. The request body SHALL accept `query` (required, min_length=1), `snapshot_id` (optional, defaults to active snapshot), `agent_id` (optional, defaults to `DEFAULT_AGENT_ID`), `knowledge_base_id` (optional, defaults to `DEFAULT_KNOWLEDGE_BASE_ID`), and `limit` (optional, default 10). The response SHALL include `results` (list of objects with `chunk_id`, `source_id`, `text_content`, `score`, and a nested `anchor` object containing `page`, `chapter`, `section`, `timecode`), `query` (original query string), `language` (configured BM25 language), and `total` (number of results). If `snapshot_id` is not provided and no active snapshot exists, the endpoint SHALL return 422. Admin auth is deferred to S7-01.
+The system SHALL provide a `POST /api/admin/search/keyword` endpoint for sparse-leg diagnostics. The request body SHALL accept `query` (required, min_length=1), `snapshot_id` (optional, defaults to active snapshot), `agent_id` (optional, defaults to `DEFAULT_AGENT_ID`), `knowledge_base_id` (optional, defaults to `DEFAULT_KNOWLEDGE_BASE_ID`), and `limit` (optional, default 10). The request body SHALL NOT accept client-set `sparse_backend` or `sparse_model` fields in S9-03. The response SHALL include `results` (list of objects with `chunk_id`, `source_id`, `text_content`, `score`, and a nested `anchor` object containing `page`, `chapter`, `section`, `timecode`), `query` (original query string), `language` (active sparse-language signal, `null` under `bge_m3`), `bm25_language` (install-level BM25 language), `sparse_backend`, `sparse_model`, and `total` (number of results). `sparse_backend` and `sparse_model` are derived from the startup-wired `QdrantService`, not from request parameters or per-snapshot overrides. If `snapshot_id` is not provided and no active snapshot exists, the endpoint SHALL return 422. Admin auth is deferred to S7-01.
 
 #### Scenario: Valid keyword search returns results
 
 - **WHEN** a POST request is sent to `/api/admin/search/keyword` with `{"query": "deployment"}`
 - **THEN** the response status SHALL be 200
-- **AND** the response body SHALL contain `results` (list), `query` ("deployment"), `language` (configured BM25 language), and `total` (count of results)
+- **AND** the response body SHALL contain `results` (list), `query` ("deployment"), `language`, `bm25_language`, `sparse_backend`, `sparse_model`, and `total` (count of results)
 - **AND** each result SHALL contain a nested `anchor` object with `page`, `chapter`, `section`, and `timecode` fields
+
+#### Scenario: BGE-M3 diagnostics report configured sparse metadata
+
+- **WHEN** the endpoint is called while the service is configured with `sparse_backend=bge_m3`
+- **THEN** the response SHALL include `sparse_backend="bge_m3"` and the configured sparse model identifier
+- **AND** `language` SHALL be `null`
+- **AND** `bm25_language` SHALL still expose the install-level BM25 stemming configuration
 
 #### Scenario: Default snapshot_id uses active snapshot
 
@@ -102,7 +117,7 @@ The `bm25_language` setting (already present in `config.py`) SHALL be passed to 
 ### CI tests (deterministic, mocked external services)
 
 - **keyword_search unit tests** (`backend/tests/unit/services/test_qdrant.py`): mock `AsyncQdrantClient`; verify query uses `Document(model="Qdrant/bm25")` with correct language, filter includes `snapshot_id`/`agent_id`/`knowledge_base_id`, limit is passed; verify retry on transient errors; verify empty results return empty list.
-- **Admin keyword search endpoint tests** (`backend/tests/unit/test_admin_keyword_search.py`): valid request returns 200 with correct response structure including nested `anchor` object; default `snapshot_id` uses active snapshot; no active snapshot returns 422; default `agent_id`/`knowledge_base_id` use constants; empty query returns 422.
+- **Admin keyword search endpoint tests** (`backend/tests/unit/test_admin_keyword_search.py`): valid request returns 200 with correct response structure including nested `anchor` object, `language`, `bm25_language`, `sparse_backend`, and `sparse_model`; default `snapshot_id` uses active snapshot; no active snapshot returns 422; default `agent_id`/`knowledge_base_id` use constants; empty query returns 422.
 
 ### Integration tests (real Qdrant)
 

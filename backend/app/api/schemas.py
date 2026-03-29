@@ -114,6 +114,9 @@ class KeywordSearchResult(BaseModel):
 
 class KeywordSearchResponse(BaseModel):
     query: str
-    language: str
+    language: str | None
+    bm25_language: str
+    sparse_backend: str
+    sparse_model: str
     total: int
     results: list[KeywordSearchResult]

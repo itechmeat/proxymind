@@ -24,6 +24,10 @@ def _settings() -> SimpleNamespace:
         qdrant_url="http://localhost:6333",
         qdrant_collection="proxymind_chunks",
         bm25_language="english",
+        sparse_backend="bm25",
+        bge_m3_provider_url=None,
+        bge_m3_model_name="bge-m3",
+        bge_m3_timeout_seconds=10.0,
         retrieval_top_n=5,
         min_dense_similarity=None,
         llm_model="openai/gpt-4o",
@@ -63,6 +67,7 @@ def _settings() -> SimpleNamespace:
 def test_create_qdrant_service_passes_bm25_language(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = _settings()
     created_client: object = object()
+    created_provider: object = object()
     captured_kwargs: dict[str, object] = {}
 
     monkeypatch.setattr(
@@ -70,6 +75,7 @@ def test_create_qdrant_service_passes_bm25_language(monkeypatch: pytest.MonkeyPa
         "AsyncQdrantClient",
         lambda *, url: created_client if url == settings.qdrant_url else None,
     )
+    monkeypatch.setattr(app_main, "build_sparse_provider", lambda _settings: created_provider)
 
     def fake_qdrant_service(**kwargs: object) -> object:
         captured_kwargs.update(kwargs)
@@ -83,6 +89,7 @@ def test_create_qdrant_service_passes_bm25_language(monkeypatch: pytest.MonkeyPa
         "client": created_client,
         "collection_name": settings.qdrant_collection,
         "embedding_dimensions": settings.embedding_dimensions,
+        "sparse_provider": created_provider,
         "bm25_language": settings.bm25_language,
     }
 

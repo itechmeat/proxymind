@@ -1,6 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote_plus
 
 from pydantic import Field, SecretStr, computed_field, model_validator
@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     path_a_max_video_duration_sec: int = Field(default=120, ge=1)
     qdrant_collection: str = Field(default="proxymind_chunks", min_length=1)
     bm25_language: str = Field(default="english", min_length=1)
+    sparse_backend: Literal["bm25", "bge_m3"] = Field(default="bm25")
+    bge_m3_provider_url: str | None = Field(default=None)
+    bge_m3_model_name: str = Field(default="bge-m3", min_length=1)
+    bge_m3_timeout_seconds: float = Field(default=10.0, ge=0.1, le=60.0)
     llm_model: str = Field(default="openai/gpt-4o", min_length=1)
     llm_api_key: str | None = Field(default=None)
     llm_api_base: str | None = Field(default=None)
@@ -135,6 +139,7 @@ class Settings(BaseSettings):
             "rewrite_llm_api_base",
             "conversation_summary_model",
             "admin_api_key",
+            "bge_m3_provider_url",
         ):
             if normalized.get(field_name) == "":
                 normalized[field_name] = None
@@ -170,6 +175,8 @@ class Settings(BaseSettings):
                 "GOOGLE_CLOUD_PROJECT or GEMINI_API_KEY is required "
                 "when GOOGLE_GENAI_USE_VERTEXAI is enabled"
             )
+        if self.sparse_backend == "bge_m3" and self.bge_m3_provider_url is None:
+            raise ValueError("BGE_M3_PROVIDER_URL is required when SPARSE_BACKEND=bge_m3")
         return self
 
     @computed_field

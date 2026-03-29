@@ -1,14 +1,14 @@
 ## Purpose
 
-Hybrid retrieval capability combining dense (Gemini Embedding 2) and sparse (BM25) vector search with Reciprocal Rank Fusion via Qdrant's native RRF. Provides a single `hybrid_search` method on QdrantService and wires it into the retrieval pipeline via RetrievalService.
+Hybrid retrieval capability combining dense (Gemini Embedding 2) and the active sparse backend with Reciprocal Rank Fusion via Qdrant's native RRF. Provides a single `hybrid_search` method on QdrantService, resolves sparse behavior through an injected `SparseProvider`, and wires the result into the retrieval pipeline via RetrievalService.
 
 ## Requirements
 
 ### Requirement: hybrid_search method on QdrantService
 
-The `QdrantService` SHALL provide an `async hybrid_search()` method that performs dual-vector retrieval using Qdrant's native RRF fusion in a single round-trip. The method SHALL accept `text` (str), `vector` (list[float]), `snapshot_id` (UUID), `agent_id` (UUID), `knowledge_base_id` (UUID), `limit` (int), and `score_threshold` (float | None). The method SHALL construct a Qdrant query with two `Prefetch` legs (dense and sparse), fuse them with `RrfQuery(rrf=Rrf(k=RRF_K))`, apply a scope filter via `_build_scope_filter()`, and return `list[RetrievedChunk]`.
+The `QdrantService` SHALL provide an `async hybrid_search()` method that performs dual-vector retrieval using Qdrant's native RRF fusion in a single round-trip. The method SHALL accept `text` (str), `vector` (list[float]), `snapshot_id` (UUID), `agent_id` (UUID), `knowledge_base_id` (UUID), `limit` (int), and `score_threshold` (float | None). The active sparse backend is resolved from the `QdrantService` instance and injected `SparseProvider`, not from a per-call `sparse_backend` parameter in S9-03. The method SHALL construct a Qdrant query with two `Prefetch` legs (dense and sparse), fuse them with `RrfQuery(rrf=Rrf(k=RRF_K))`, apply a scope filter via `_build_scope_filter()`, and return `list[RetrievedChunk]`.
 
-The dense prefetch leg SHALL query the `"dense"` named vector with `filter=scope_filter`, `limit=limit * PREFETCH_MULTIPLIER`, and `score_threshold=score_threshold` (when not None). The sparse prefetch leg SHALL query the `"bm25"` named sparse vector using `_build_bm25_document(text)` with `filter=scope_filter`, `limit=limit * PREFETCH_MULTIPLIER`, and no score threshold. The final query SHALL use `RrfQuery(rrf=Rrf(k=RRF_K))` with `limit=limit` and `query_filter=scope_filter`. Results SHALL be mapped via the existing `_to_retrieved_chunk()` helper.
+The dense prefetch leg SHALL query the `"dense"` named vector with `filter=scope_filter`, `limit=limit * PREFETCH_MULTIPLIER`, and `score_threshold=score_threshold` (when not None). The sparse prefetch leg SHALL query the `"bm25"` named sparse vector using the active sparse provider with `filter=scope_filter`, `limit=limit * PREFETCH_MULTIPLIER`, and no score threshold. For `bm25`, the provider SHALL build a BM25 `Document`; for `bge_m3`, it SHALL return a sparse vector structure equivalent to `{indices: number[], values: number[]}`. Empty, malformed, or failed provider responses SHALL be treated as explicit operational errors; the system SHALL NOT silently fall back to BM25 or dense-only retrieval. The final query SHALL use `RrfQuery(rrf=Rrf(k=RRF_K))` with `limit=limit` and `query_filter=scope_filter`. Results SHALL be mapped via the existing `_to_retrieved_chunk()` helper.
 
 When `limit` is less than or equal to 0, the method SHALL short-circuit and return an empty list without querying Qdrant.
 
@@ -19,6 +19,12 @@ When `limit` is less than or equal to 0, the method SHALL short-circuit and retu
 - **AND** both Prefetch legs SHALL apply the same scope filter before fusion
 - **AND** the final query SHALL use `RrfQuery(rrf=Rrf(k=RRF_K))` with limit=5
 - **AND** the method SHALL return up to 5 `RetrievedChunk` results ordered by RRF rank score descending
+
+#### Scenario: Hybrid search uses external sparse provider when BGE-M3 is active
+
+- **WHEN** `hybrid_search()` is called while the service is configured with `sparse_backend=bge_m3`
+- **THEN** the sparse prefetch leg SHALL use the sparse indices/values returned by the injected external sparse provider
+- **AND** the final retrieval SHALL still fuse dense and sparse results with RRF
 
 #### Scenario: Dense score_threshold filters dense leg before fusion
 
@@ -147,7 +153,7 @@ The module `qdrant.py` SHALL define two module-level constants: `PREFETCH_MULTIP
 
 ### CI tests (deterministic, mocked external services)
 
-- **hybrid_search unit tests** (`backend/tests/unit/services/test_qdrant.py`): mock `AsyncQdrantClient`; verify Prefetch structure contains both dense and sparse legs with correct parameters; verify `RrfQuery(rrf=Rrf(k=60))` is used (not FusionQuery); verify scope filter is applied via `_build_scope_filter()`; verify `score_threshold` is passed to dense prefetch leg when set and omitted when None; verify `limit * PREFETCH_MULTIPLIER` is used for prefetch limits; verify results are mapped to `RetrievedChunk`; verify zero limit short-circuits.
+- **hybrid_search unit tests** (`backend/tests/unit/services/test_qdrant.py`): mock `AsyncQdrantClient`; verify Prefetch structure contains both dense and sparse legs with correct parameters for BM25 and BGE-M3; verify `RrfQuery(rrf=Rrf(k=60))` is used (not FusionQuery); verify scope filter is applied via `_build_scope_filter()`; verify `score_threshold` is passed to dense prefetch leg when set and omitted when None; verify `limit * PREFETCH_MULTIPLIER` is used for prefetch limits; verify results are mapped to `RetrievedChunk`; verify zero limit short-circuits.
 - **RetrievalService unit tests** (`backend/tests/unit/test_retrieval_service.py`): mock `hybrid_search`; verify both `text` and `vector` are passed; verify `min_dense_similarity` is passed as `score_threshold`.
 
 ### Integration tests (real Qdrant)
