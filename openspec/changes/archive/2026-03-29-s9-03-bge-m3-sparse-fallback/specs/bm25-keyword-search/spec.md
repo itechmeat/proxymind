@@ -32,7 +32,7 @@ The method SHALL keep the same retry behavior for transient Qdrant errors.
 
 ### Requirement: Admin keyword search endpoint
 
-The system SHALL provide a `POST /api/admin/search/keyword` endpoint for sparse-leg diagnostics. The request body SHALL continue accepting `query`, `snapshot_id`, `agent_id`, `knowledge_base_id`, and `limit`. The request body SHALL NOT accept client-set `sparse_backend` or `sparse_model` fields in S9-03.
+The system SHALL provide a `POST /api/admin/search/keyword` endpoint for sparse-leg diagnostics. The request body SHALL continue accepting `query`, `snapshot_id`, `agent_id`, `knowledge_base_id`, and `limit`. Requests that include client-set `sparse_backend` or `sparse_model` fields SHALL be rejected with a 422 validation error in S9-03.
 
 The response SHALL include:
 
@@ -65,6 +65,12 @@ This endpoint SHALL keep its current routing and snapshot-default behavior, but 
 - **WHEN** the endpoint is called without `snapshot_id`
 - **THEN** it SHALL continue resolving the active snapshot via SnapshotService
 - **AND** if no active snapshot exists, it SHALL continue returning 422
+
+#### Scenario: Client-supplied sparse fields are rejected
+
+- **WHEN** the endpoint request includes `sparse_backend` or `sparse_model`
+- **THEN** the endpoint SHALL return 422
+- **AND** the response SHALL describe a validation error for the forbidden field
 
 ---
 

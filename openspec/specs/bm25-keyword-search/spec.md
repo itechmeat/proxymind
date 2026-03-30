@@ -47,7 +47,7 @@ For `bm25`, the query SHALL use `models.Document` with `model="Qdrant/bm25"` and
 
 ### Requirement: Admin keyword search endpoint
 
-The system SHALL provide a `POST /api/admin/search/keyword` endpoint for sparse-leg diagnostics. The request body SHALL accept `query` (required, min_length=1), `snapshot_id` (optional, defaults to active snapshot), `agent_id` (optional, defaults to `DEFAULT_AGENT_ID`), `knowledge_base_id` (optional, defaults to `DEFAULT_KNOWLEDGE_BASE_ID`), and `limit` (optional, default 10). The request body SHALL NOT accept client-set `sparse_backend` or `sparse_model` fields in S9-03. The response SHALL include `results` (list of objects with `chunk_id`, `source_id`, `text_content`, `score`, and a nested `anchor` object containing `page`, `chapter`, `section`, `timecode`), `query` (original query string), `language` (active sparse-language signal, `null` under `bge_m3`), `bm25_language` (install-level BM25 language), `sparse_backend`, `sparse_model`, and `total` (number of results). `sparse_backend` and `sparse_model` are derived from the startup-wired `QdrantService`, not from request parameters or per-snapshot overrides. If `snapshot_id` is not provided and no active snapshot exists, the endpoint SHALL return 422. Admin auth is deferred to S7-01.
+The system SHALL provide a `POST /api/admin/search/keyword` endpoint for sparse-leg diagnostics. The request body SHALL accept `query` (required, min_length=1), `snapshot_id` (optional, defaults to active snapshot), `agent_id` (optional, defaults to `DEFAULT_AGENT_ID`), `knowledge_base_id` (optional, defaults to `DEFAULT_KNOWLEDGE_BASE_ID`), and `limit` (optional, default 10). Requests that include client-set `sparse_backend` or `sparse_model` fields SHALL be rejected with a 422 validation error in S9-03. The response SHALL include `results` (list of objects with `chunk_id`, `source_id`, `text_content`, `score`, and a nested `anchor` object containing `page`, `chapter`, `section`, `timecode`), `query` (original query string), `language` (active sparse-language signal, `null` under `bge_m3`), `bm25_language` (install-level BM25 language), `sparse_backend`, `sparse_model`, and `total` (number of results). `sparse_backend` and `sparse_model` are derived from the startup-wired `QdrantService`, not from request parameters or per-snapshot overrides. If `snapshot_id` is not provided and no active snapshot exists, the endpoint SHALL return 422. Admin auth is deferred to S7-01.
 
 #### Scenario: Valid keyword search returns results
 
@@ -83,6 +83,12 @@ The system SHALL provide a `POST /api/admin/search/keyword` endpoint for sparse-
 
 - **WHEN** a POST request is sent with `{"query": ""}`
 - **THEN** the response status SHALL be 422
+
+#### Scenario: Client-supplied sparse fields are rejected
+
+- **WHEN** a POST request includes `sparse_backend` or `sparse_model`
+- **THEN** the response status SHALL be 422
+- **AND** the response body SHALL describe a validation error for the forbidden field
 
 ---
 

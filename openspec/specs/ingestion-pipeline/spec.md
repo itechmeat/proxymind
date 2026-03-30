@@ -195,7 +195,7 @@ The existing `StorageService` SHALL provide a `download(object_key: str) -> byte
 - **AND** a Document record SHALL be created with status READY
 - **AND** a DocumentVersion record SHALL be created with `version_number=1`, `processing_path=PATH_A`, status READY
 - **AND** exactly one Chunk record SHALL be created with status INDEXED
-- **AND** vectors SHALL be upserted to Qdrant (dense + BM25)
+- **AND** vectors SHALL be upserted to Qdrant (dense + active sparse backend)
 - **AND** an EmbeddingProfile record SHALL be created with `pipeline_version="s3-04-path-a"`
 - **AND** the BackgroundTask SHALL have status COMPLETE, progress 100, and `result_metadata` populated
 
@@ -883,7 +883,13 @@ Once a Path B or Path C document has qualified for hierarchical indexing, hierar
 
 The ingestion pipeline SHALL continue producing chunk rows, enrichment data, and dense embeddings exactly as before, but sparse indexing SHALL be driven by the installation's active sparse backend.
 
-The sparse input text SHALL remain `enriched_text` when available and `text_content` otherwise. The pipeline SHALL NOT introduce a second text-selection rule for BGE-M3. The indexed sparse backend metadata SHALL be preserved with the chunk's Qdrant payload via the vector storage layer.
+The sparse input text SHALL remain `enriched_text` when available and `text_content` otherwise. The pipeline SHALL NOT introduce a second text-selection rule for BGE-M3. This installation-level rule applies to Path A, Path B, and Path C. The indexed sparse backend metadata SHALL be preserved with the chunk's Qdrant payload via the vector storage layer.
+
+#### Scenario: Path A indexes chunks using the active sparse backend
+
+- **WHEN** a Path A chunk is indexed
+- **THEN** the sparse input text SHALL be `enriched_text` when available and `text_content` otherwise
+- **AND** the indexed sparse representation SHALL be produced by the installation's active sparse provider
 
 #### Scenario: BM25 backend indexes chunks using existing sparse text selection
 

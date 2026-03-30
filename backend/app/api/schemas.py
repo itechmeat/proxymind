@@ -67,6 +67,8 @@ class TaskStatusResponse(BaseModel):
 
 
 class KeywordSearchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     query: str = Field(min_length=1, max_length=2000)
     snapshot_id: uuid.UUID | None = None
     agent_id: uuid.UUID = Field(default=DEFAULT_AGENT_ID)

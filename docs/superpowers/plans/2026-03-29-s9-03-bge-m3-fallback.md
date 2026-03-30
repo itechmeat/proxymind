@@ -669,7 +669,8 @@ Expected: FAIL because response schema and payload do not yet include sparse bac
 # backend/app/api/schemas.py
 class KeywordSearchResponse(BaseModel):
     query: str
-    language: str
+    language: str | None
+    bm25_language: str
     sparse_backend: str
     sparse_model: str
     total: int

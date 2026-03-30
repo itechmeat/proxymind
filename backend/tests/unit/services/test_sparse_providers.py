@@ -43,6 +43,33 @@ async def test_bge_m3_provider_posts_texts_to_external_endpoint() -> None:
 
 
 @pytest.mark.asyncio
+async def test_bge_m3_provider_preserves_base_url_path_prefix_for_owned_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "http://sparse/api/sparse/queries"
+        assert request.url.path == "/api/sparse/queries"
+        return httpx.Response(200, json={"indices": [1], "values": [0.5]})
+
+    transport = httpx.MockTransport(handler)
+    original_async_client = httpx.AsyncClient
+
+    def build_client(*args: object, **kwargs: object) -> httpx.AsyncClient:
+        return original_async_client(*args, transport=transport, **kwargs)
+
+    monkeypatch.setattr("app.services.sparse_providers.httpx.AsyncClient", build_client)
+
+    provider = ExternalBgeM3SparseProvider(base_url="http://sparse/api")
+    try:
+        result = await provider.build_query_representation("hello")
+    finally:
+        await provider.aclose()
+
+    assert result.indices == [1]
+    assert result.values == [0.5]
+
+
+@pytest.mark.asyncio
 async def test_bge_m3_provider_rejects_invalid_payload() -> None:
     transport = httpx.MockTransport(
         lambda _request: httpx.Response(200, json={"indices": [1], "values": [0.5, 0.7]})
@@ -60,7 +87,22 @@ async def test_bge_m3_provider_rejects_non_numeric_sparse_payload() -> None:
     )
     async with httpx.AsyncClient(transport=transport, base_url="http://sparse") as client:
         provider = ExternalBgeM3SparseProvider(base_url="http://sparse", client=client)
-        with pytest.raises(ValueError, match="numeric items"):
+        with pytest.raises(ValueError, match="non-negative integers"):
+            await provider.build_document_representation("hello")
+
+
+@pytest.mark.asyncio
+async def test_bge_m3_provider_rejects_non_finite_sparse_values() -> None:
+    transport = httpx.MockTransport(
+        lambda _request: httpx.Response(
+            200,
+            content=b'{"indices": [1], "values": [Infinity]}',
+            headers={"content-type": "application/json"},
+        )
+    )
+    async with httpx.AsyncClient(transport=transport, base_url="http://sparse") as client:
+        provider = ExternalBgeM3SparseProvider(base_url="http://sparse", client=client)
+        with pytest.raises(ValueError, match="finite numeric items"):
             await provider.build_document_representation("hello")
 
 

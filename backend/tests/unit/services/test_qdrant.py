@@ -94,8 +94,8 @@ def _scroll_result(*, payload: dict[str, object] | None = None) -> tuple[list[Si
 
 def _scroll_page(
     *payloads: dict[str, object],
-    offset: Any | None = None,
-) -> tuple[list[SimpleNamespace], Any | None]:
+    offset: object | None = None,
+) -> tuple[list[SimpleNamespace], object | None]:
     return ([SimpleNamespace(payload=payload) for payload in payloads], offset)
 
 

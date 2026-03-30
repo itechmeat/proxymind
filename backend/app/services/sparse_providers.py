@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import TYPE_CHECKING, Protocol
 
 import httpx
@@ -89,7 +90,8 @@ class ExternalBgeM3SparseProvider:
             await self._client.aclose()
 
     async def _build_sparse_vector(self, path: str, text: str) -> models.SparseVector:
-        request_url = path if self._owns_client else f"{self._base_url}{path}"
+        relative_path = path.lstrip("/")
+        request_url = relative_path if self._owns_client else f"{self._base_url}/{relative_path}"
         response = await self._client.post(request_url, json={"text": text})
         response.raise_for_status()
         payload = response.json()
@@ -99,13 +101,28 @@ class ExternalBgeM3SparseProvider:
             raise ValueError("Sparse provider response must contain list fields 'indices' and 'values'")
         if len(indices) != len(values):
             raise ValueError("Sparse provider response indices and values must have the same length")
-        try:
-            normalized_indices = [int(index) for index in indices]
-            normalized_values = [float(value) for value in values]
-        except (TypeError, ValueError) as error:
-            raise ValueError(
-                "Sparse provider response 'indices' and 'values' must contain numeric items"
-            ) from error
+        normalized_indices: list[int] = []
+        for index in indices:
+            if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+                raise ValueError(
+                    "Sparse provider response 'indices' must contain non-negative integers"
+                )
+            normalized_indices.append(index)
+
+        normalized_values: list[float] = []
+        for value in values:
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                raise ValueError(
+                    "Sparse provider response 'values' must contain finite numeric items"
+                )
+
+            normalized_value = float(value)
+            if not math.isfinite(normalized_value):
+                raise ValueError(
+                    "Sparse provider response 'values' must contain finite numeric items"
+                )
+            normalized_values.append(normalized_value)
+
         return models.SparseVector(indices=normalized_indices, values=normalized_values)
 
 

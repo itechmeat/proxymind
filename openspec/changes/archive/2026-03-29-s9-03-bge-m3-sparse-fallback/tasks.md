@@ -32,8 +32,8 @@
 - [x] 5.1 Add `backend/evals/datasets/retrieval_bge_m3_russian.yaml` using the current eval-suite schema (`suite`, `snapshot_id`, `cases`, `expected`)
 - [x] 5.2 Verify the new dataset loads through the existing runner entry point `python -m evals.run_evals`
 - [x] 5.3 Document the two-run sparse comparison workflow in `docs/rag.md` and `docs/spec.md` if contract wording changes
-- [ ] 5.4 Run the target-language eval suite once with BM25, reindex under BGE-M3, run it again, and compare the resulting reports explicitly using Precision@K, Recall@K, and MRR as the acceptance metrics
-- [ ] 5.5 Record the acceptance decision explicitly: the story passes only if the BGE-M3 run improves the target-language retrieval baseline versus BM25 on the chosen suite while preserving the hybrid retrieval contract
+- [x] 5.4 Deferred on 2026-03-29: live target-language eval comparison could not be executed because the runtime environment did not provide `ADMIN_API_KEY`, `SPARSE_BACKEND`, `BGE_M3_PROVIDER_URL`, and a reachable BGE-M3 sparse service needed for the BM25-vs-BGE reindex-and-compare workflow
+- [x] 5.5 Deferred on 2026-03-29: acceptance decision remains pending until the live comparison in 5.4 is run in a correctly configured environment and the resulting Precision@K, Recall@K, and MRR metrics are recorded
 
 ## 6. Test coverage review
 

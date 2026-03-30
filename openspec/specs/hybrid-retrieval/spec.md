@@ -42,16 +42,22 @@ When `limit` is less than or equal to 0, the method SHALL short-circuit and retu
 #### Scenario: Sparse-only results returned when dense leg is empty after threshold
 
 - **WHEN** `hybrid_search()` is called with a high `score_threshold` that filters out all dense results
-- **AND** the sparse leg returns matching chunks via BM25
-- **THEN** the method SHALL return the BM25-only hits through RRF
+- **AND** the active sparse provider returns matching chunks
+- **THEN** the method SHALL return the sparse-only hits through RRF
 - **AND** the result list SHALL NOT be empty
 
 #### Scenario: Dense-only results returned when sparse leg finds nothing
 
-- **WHEN** `hybrid_search()` is called and the sparse BM25 leg returns no matches
+- **WHEN** `hybrid_search()` is called and the active sparse provider yields no sparse matches
 - **AND** the dense leg returns matching chunks
 - **THEN** the method SHALL return the dense-only results through RRF
 - **AND** the result list SHALL NOT be empty
+
+#### Scenario: Sparse provider failures remain operational errors
+
+- **WHEN** the active sparse provider returns an empty, malformed, or failed sparse query representation
+- **THEN** `hybrid_search()` SHALL raise an operational error
+- **AND** the system SHALL NOT silently fall back to BM25-specific logic or dense-only retrieval
 
 #### Scenario: Same chunk in both legs appears once in results
 
