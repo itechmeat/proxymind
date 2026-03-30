@@ -25,6 +25,10 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
         qdrant_collection="proxymind_chunks",
         embedding_dimensions=3,
         bm25_language="english",
+        sparse_backend="bm25",
+        bge_m3_provider_url=None,
+        bge_m3_model_name="bge-m3",
+        bge_m3_timeout_seconds=10.0,
         embedding_model="gemini-embedding-2-preview",
         embedding_batch_size=16,
         enrichment_enabled=False,
@@ -64,6 +68,7 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
     storage_http_client = SimpleNamespace(aclose=AsyncMock())
     worker_redis_client = SimpleNamespace(aclose=AsyncMock())
     qdrant_client = object()
+    sparse_provider = object()
     qdrant_service = SimpleNamespace(ensure_collection=AsyncMock())
     storage_service = SimpleNamespace(ensure_storage_root=AsyncMock())
     captured_qdrant_kwargs: dict[str, object] = {}
@@ -95,6 +100,7 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
         "AsyncQdrantClient",
         lambda *, url: qdrant_client if url == settings.qdrant_url else None,
     )
+    monkeypatch.setattr(main, "build_sparse_provider", lambda _settings: sparse_provider)
 
     def fake_storage_service(http_client: httpx.AsyncClient, sources_path: str) -> object:
         assert http_client is storage_http_client
@@ -136,6 +142,7 @@ async def test_on_startup_passes_bm25_language_to_qdrant_service(
         "client": qdrant_client,
         "collection_name": settings.qdrant_collection,
         "embedding_dimensions": settings.embedding_dimensions,
+        "sparse_provider": sparse_provider,
         "bm25_language": settings.bm25_language,
     }
     qdrant_service.ensure_collection.assert_awaited_once()

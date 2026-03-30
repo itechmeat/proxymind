@@ -67,6 +67,8 @@ class TaskStatusResponse(BaseModel):
 
 
 class KeywordSearchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     query: str = Field(min_length=1, max_length=2000)
     snapshot_id: uuid.UUID | None = None
     agent_id: uuid.UUID = Field(default=DEFAULT_AGENT_ID)
@@ -114,6 +116,9 @@ class KeywordSearchResult(BaseModel):
 
 class KeywordSearchResponse(BaseModel):
     query: str
-    language: str
+    language: str | None
+    bm25_language: str
+    sparse_backend: str
+    sparse_model: str
     total: int
     results: list[KeywordSearchResult]

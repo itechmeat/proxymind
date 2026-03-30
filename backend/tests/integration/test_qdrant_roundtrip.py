@@ -14,6 +14,7 @@ from app.services.qdrant import (
     QdrantService,
     RetrievedChunk,
 )
+from app.services.sparse_providers import Bm25SparseProvider, SparseProviderMetadata
 
 
 def _point(
@@ -52,16 +53,75 @@ async def _cleanup_collection(client: AsyncQdrantClient, collection_name: str) -
         await client.delete_collection(collection_name)
 
 
+def _service(
+    *,
+    client: AsyncQdrantClient,
+    collection_name: str,
+    embedding_dimensions: int,
+) -> QdrantService:
+    return QdrantService(
+        client=client,
+        collection_name=collection_name,
+        embedding_dimensions=embedding_dimensions,
+        sparse_provider=Bm25SparseProvider(language="english"),
+        bm25_language="english",
+    )
+
+
+class _StaticSparseProvider:
+    def __init__(
+        self,
+        *,
+        backend: str,
+        model_name: str,
+        document_vector: models.SparseVector,
+        query_vector: models.SparseVector,
+    ) -> None:
+        self.metadata = SparseProviderMetadata(
+            backend=backend,
+            model_name=model_name,
+            contract_version="v1",
+        )
+        self._document_vector = document_vector
+        self._query_vector = query_vector
+
+    async def build_document_representation(self, text: str) -> models.SparseVector:
+        return self._document_vector
+
+    async def build_query_representation(self, text: str) -> models.SparseVector:
+        return self._query_vector
+
+    async def aclose(self) -> None:
+        return None
+
+
+def _bge_service(
+    *,
+    client: AsyncQdrantClient,
+    collection_name: str,
+    embedding_dimensions: int,
+    sparse_vector: models.SparseVector | None = None,
+) -> QdrantService:
+    vector = sparse_vector or models.SparseVector(indices=[1, 7], values=[0.8, 0.2])
+    return QdrantService(
+        client=client,
+        collection_name=collection_name,
+        embedding_dimensions=embedding_dimensions,
+        sparse_provider=_StaticSparseProvider(
+            backend="bge_m3",
+            model_name="bge-m3",
+            document_vector=vector,
+            query_vector=vector,
+        ),
+        bm25_language="english",
+    )
+
+
 @pytest.mark.asyncio
 async def test_qdrant_dense_search_filters_by_snapshot_id(qdrant_url: str) -> None:
     client = AsyncQdrantClient(url=qdrant_url)
     collection_name = f"test_chunks_{uuid.uuid4().hex}"
-    service = QdrantService(
-        client=client,
-        collection_name=collection_name,
-        embedding_dimensions=3,
-        bm25_language="english",
-    )
+    service = _service(client=client, collection_name=collection_name, embedding_dimensions=3)
     snapshot_id = uuid.uuid4()
     other_snapshot_id = uuid.uuid4()
     agent_id = uuid.uuid4()
@@ -141,12 +201,7 @@ async def test_qdrant_dense_search_filters_by_snapshot_id(qdrant_url: str) -> No
 async def test_qdrant_hybrid_search_returns_results(qdrant_url: str) -> None:
     client = AsyncQdrantClient(url=qdrant_url)
     collection_name = f"test_chunks_{uuid.uuid4().hex}"
-    service = QdrantService(
-        client=client,
-        collection_name=collection_name,
-        embedding_dimensions=3,
-        bm25_language="english",
-    )
+    service = _service(client=client, collection_name=collection_name, embedding_dimensions=3)
     snapshot_id = uuid.uuid4()
     agent_id = uuid.uuid4()
     knowledge_base_id = uuid.uuid4()
@@ -201,12 +256,7 @@ async def test_qdrant_hybrid_search_returns_results(qdrant_url: str) -> None:
 async def test_qdrant_roundtrip_preserves_parent_metadata(qdrant_url: str) -> None:
     client = AsyncQdrantClient(url=qdrant_url)
     collection_name = f"test_chunks_{uuid.uuid4().hex}"
-    service = QdrantService(
-        client=client,
-        collection_name=collection_name,
-        embedding_dimensions=3,
-        bm25_language="english",
-    )
+    service = _service(client=client, collection_name=collection_name, embedding_dimensions=3)
     snapshot_id = uuid.uuid4()
     agent_id = uuid.uuid4()
     knowledge_base_id = uuid.uuid4()
@@ -262,12 +312,7 @@ async def test_qdrant_roundtrip_preserves_parent_metadata(qdrant_url: str) -> No
 async def test_qdrant_hybrid_search_filters_by_snapshot_id(qdrant_url: str) -> None:
     client = AsyncQdrantClient(url=qdrant_url)
     collection_name = f"test_chunks_{uuid.uuid4().hex}"
-    service = QdrantService(
-        client=client,
-        collection_name=collection_name,
-        embedding_dimensions=3,
-        bm25_language="english",
-    )
+    service = _service(client=client, collection_name=collection_name, embedding_dimensions=3)
     snapshot_id = uuid.uuid4()
     other_snapshot_id = uuid.uuid4()
     agent_id = uuid.uuid4()
@@ -332,12 +377,7 @@ async def test_qdrant_hybrid_search_filters_by_snapshot_id(qdrant_url: str) -> N
 async def test_qdrant_hybrid_search_keyword_boost(qdrant_url: str) -> None:
     client = AsyncQdrantClient(url=qdrant_url)
     collection_name = f"test_chunks_{uuid.uuid4().hex}"
-    service = QdrantService(
-        client=client,
-        collection_name=collection_name,
-        embedding_dimensions=3,
-        bm25_language="english",
-    )
+    service = _service(client=client, collection_name=collection_name, embedding_dimensions=3)
     snapshot_id = uuid.uuid4()
     agent_id = uuid.uuid4()
     knowledge_base_id = uuid.uuid4()
@@ -400,12 +440,7 @@ async def test_qdrant_hybrid_search_keyword_boost(qdrant_url: str) -> None:
 async def test_qdrant_hybrid_search_sparse_only_results(qdrant_url: str) -> None:
     client = AsyncQdrantClient(url=qdrant_url)
     collection_name = f"test_chunks_{uuid.uuid4().hex}"
-    service = QdrantService(
-        client=client,
-        collection_name=collection_name,
-        embedding_dimensions=3,
-        bm25_language="english",
-    )
+    service = _service(client=client, collection_name=collection_name, embedding_dimensions=3)
     snapshot_id = uuid.uuid4()
     agent_id = uuid.uuid4()
     knowledge_base_id = uuid.uuid4()
@@ -446,12 +481,7 @@ async def test_qdrant_hybrid_search_sparse_only_results(qdrant_url: str) -> None
 async def test_qdrant_hybrid_search_dense_only_results(qdrant_url: str) -> None:
     client = AsyncQdrantClient(url=qdrant_url)
     collection_name = f"test_chunks_{uuid.uuid4().hex}"
-    service = QdrantService(
-        client=client,
-        collection_name=collection_name,
-        embedding_dimensions=3,
-        bm25_language="english",
-    )
+    service = _service(client=client, collection_name=collection_name, embedding_dimensions=3)
     snapshot_id = uuid.uuid4()
     agent_id = uuid.uuid4()
     knowledge_base_id = uuid.uuid4()
@@ -491,12 +521,7 @@ async def test_qdrant_hybrid_search_dense_only_results(qdrant_url: str) -> None:
 async def test_qdrant_hybrid_search_dedup_same_chunk_both_legs(qdrant_url: str) -> None:
     client = AsyncQdrantClient(url=qdrant_url)
     collection_name = f"test_chunks_{uuid.uuid4().hex}"
-    service = QdrantService(
-        client=client,
-        collection_name=collection_name,
-        embedding_dimensions=3,
-        bm25_language="english",
-    )
+    service = _service(client=client, collection_name=collection_name, embedding_dimensions=3)
     snapshot_id = uuid.uuid4()
     agent_id = uuid.uuid4()
     knowledge_base_id = uuid.uuid4()
@@ -545,18 +570,8 @@ async def test_qdrant_hybrid_search_dedup_same_chunk_both_legs(qdrant_url: str) 
 async def test_qdrant_dimension_mismatch_raises(qdrant_url: str) -> None:
     client = AsyncQdrantClient(url=qdrant_url)
     collection_name = f"test_chunks_{uuid.uuid4().hex}"
-    service_3072 = QdrantService(
-        client=client,
-        collection_name=collection_name,
-        embedding_dimensions=3072,
-        bm25_language="english",
-    )
-    service_1024 = QdrantService(
-        client=client,
-        collection_name=collection_name,
-        embedding_dimensions=1024,
-        bm25_language="english",
-    )
+    service_3072 = _service(client=client, collection_name=collection_name, embedding_dimensions=3072)
+    service_1024 = _service(client=client, collection_name=collection_name, embedding_dimensions=1024)
 
     try:
         await service_3072.ensure_collection()
@@ -571,12 +586,7 @@ async def test_qdrant_dimension_mismatch_raises(qdrant_url: str) -> None:
 async def test_qdrant_ensure_collection_is_idempotent(qdrant_url: str) -> None:
     client = AsyncQdrantClient(url=qdrant_url)
     collection_name = f"test_chunks_{uuid.uuid4().hex}"
-    service = QdrantService(
-        client=client,
-        collection_name=collection_name,
-        embedding_dimensions=3,
-        bm25_language="english",
-    )
+    service = _service(client=client, collection_name=collection_name, embedding_dimensions=3)
 
     try:
         await service.ensure_collection()
@@ -590,12 +600,7 @@ async def test_qdrant_ensure_collection_is_idempotent(qdrant_url: str) -> None:
 async def test_qdrant_keyword_search_filters_by_snapshot_id(qdrant_url: str) -> None:
     client = AsyncQdrantClient(url=qdrant_url)
     collection_name = f"test_chunks_{uuid.uuid4().hex}"
-    service = QdrantService(
-        client=client,
-        collection_name=collection_name,
-        embedding_dimensions=3,
-        bm25_language="english",
-    )
+    service = _service(client=client, collection_name=collection_name, embedding_dimensions=3)
     snapshot_id = uuid.uuid4()
     other_snapshot_id = uuid.uuid4()
     agent_id = uuid.uuid4()
@@ -657,12 +662,7 @@ async def test_qdrant_keyword_search_filters_by_snapshot_id(qdrant_url: str) -> 
 async def test_qdrant_keyword_search_applies_english_stemming(qdrant_url: str) -> None:
     client = AsyncQdrantClient(url=qdrant_url)
     collection_name = f"test_chunks_{uuid.uuid4().hex}"
-    service = QdrantService(
-        client=client,
-        collection_name=collection_name,
-        embedding_dimensions=3,
-        bm25_language="english",
-    )
+    service = _service(client=client, collection_name=collection_name, embedding_dimensions=3)
     snapshot_id = uuid.uuid4()
     agent_id = uuid.uuid4()
     knowledge_base_id = uuid.uuid4()
@@ -701,12 +701,7 @@ async def test_qdrant_keyword_search_applies_english_stemming(qdrant_url: str) -
 async def test_qdrant_ensure_collection_recreates_dense_only_schema(qdrant_url: str) -> None:
     client = AsyncQdrantClient(url=qdrant_url)
     collection_name = f"test_chunks_{uuid.uuid4().hex}"
-    service = QdrantService(
-        client=client,
-        collection_name=collection_name,
-        embedding_dimensions=3,
-        bm25_language="english",
-    )
+    service = _service(client=client, collection_name=collection_name, embedding_dimensions=3)
 
     try:
         await client.create_collection(
@@ -724,6 +719,85 @@ async def test_qdrant_ensure_collection_recreates_dense_only_schema(qdrant_url: 
             assert sparse_vectors.get(BM25_VECTOR_NAME) is not None
         else:
             assert getattr(sparse_vectors, BM25_VECTOR_NAME, None) is not None
+    finally:
+        await _cleanup_collection(client, collection_name)
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_keyword_search_supports_bge_sparse_provider(qdrant_url: str) -> None:
+    client = AsyncQdrantClient(url=qdrant_url)
+    collection_name = f"test_chunks_{uuid.uuid4().hex}"
+    service = _bge_service(client=client, collection_name=collection_name, embedding_dimensions=3)
+    snapshot_id = uuid.uuid4()
+    other_snapshot_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    knowledge_base_id = uuid.uuid4()
+    matched_chunk_id = uuid.uuid4()
+
+    try:
+        await service.ensure_collection()
+        await service.upsert_chunks(
+            [
+                _point(
+                    chunk_id=matched_chunk_id,
+                    snapshot_id=snapshot_id,
+                    agent_id=agent_id,
+                    knowledge_base_id=knowledge_base_id,
+                    vector=[1.0, 0.0, 0.0],
+                    text_content="deployment guide",
+                ),
+                _point(
+                    chunk_id=uuid.uuid4(),
+                    snapshot_id=other_snapshot_id,
+                    agent_id=agent_id,
+                    knowledge_base_id=knowledge_base_id,
+                    vector=[1.0, 0.0, 0.0],
+                    text_content="deployment guide",
+                ),
+            ]
+        )
+
+        response = await service.keyword_search(
+            text="deployment",
+            snapshot_id=snapshot_id,
+            agent_id=agent_id,
+            knowledge_base_id=knowledge_base_id,
+            limit=5,
+        )
+
+        assert [chunk.chunk_id for chunk in response] == [matched_chunk_id]
+        assert service.sparse_backend == "bge_m3"
+        assert service.sparse_model == "bge-m3"
+    finally:
+        await _cleanup_collection(client, collection_name)
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_switch_from_bm25_to_bge_requires_explicit_reindex(qdrant_url: str) -> None:
+    client = AsyncQdrantClient(url=qdrant_url)
+    collection_name = f"test_chunks_{uuid.uuid4().hex}"
+    bm25_service = _service(client=client, collection_name=collection_name, embedding_dimensions=3)
+    bge_service = _bge_service(client=client, collection_name=collection_name, embedding_dimensions=3)
+
+    try:
+        await bm25_service.ensure_collection()
+        await bm25_service.upsert_chunks(
+            [
+                _point(
+                    chunk_id=uuid.uuid4(),
+                    snapshot_id=uuid.uuid4(),
+                    agent_id=uuid.uuid4(),
+                    knowledge_base_id=uuid.uuid4(),
+                    vector=[1.0, 0.0, 0.0],
+                    text_content="deployment guide",
+                )
+            ]
+        )
+
+        with pytest.raises(CollectionSchemaMismatchError, match="Explicit reindex is required"):
+            await bge_service.ensure_collection()
     finally:
         await _cleanup_collection(client, collection_name)
         await client.close()

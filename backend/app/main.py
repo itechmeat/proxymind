@@ -22,6 +22,7 @@ from app.db import create_database_engine, create_session_factory
 from app.middleware.observability import ObservabilityMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.persona import PersonaLoader
+from app.services.sparse_providers import build_sparse_provider
 from app.services.telemetry import (
     init_telemetry,
     instrument_fastapi,
@@ -51,6 +52,7 @@ def _create_qdrant_service(settings):
         client=AsyncQdrantClient(url=settings.qdrant_url),
         collection_name=settings.qdrant_collection,
         embedding_dimensions=settings.embedding_dimensions,
+        sparse_provider=build_sparse_provider(settings),
         bm25_language=settings.bm25_language,
     )
 

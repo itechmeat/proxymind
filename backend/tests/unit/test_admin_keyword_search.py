@@ -39,6 +39,8 @@ async def test_keyword_search_endpoint_returns_results_using_active_snapshot_def
     qdrant_service = SimpleNamespace(
         keyword_search=AsyncMock(return_value=[_retrieved_chunk()]),
         bm25_language="english",
+        sparse_backend="bm25",
+        sparse_model="Qdrant/bm25",
     )
     snapshot_service = SimpleNamespace(
         get_active_snapshot=AsyncMock(return_value=SimpleNamespace(id=active_snapshot_id))
@@ -65,6 +67,9 @@ async def test_keyword_search_endpoint_returns_results_using_active_snapshot_def
     body = response.json()
     assert body["query"] == "deployment"
     assert body["language"] == "english"
+    assert body["bm25_language"] == "english"
+    assert body["sparse_backend"] == "bm25"
+    assert body["sparse_model"] == "Qdrant/bm25"
     assert body["total"] == 1
     assert body["results"][0]["text_content"] == "deployment guide"
     assert body["results"][0]["anchor"] == {
@@ -93,6 +98,8 @@ async def test_keyword_search_endpoint_returns_422_when_active_snapshot_missing(
     qdrant_service = SimpleNamespace(
         keyword_search=AsyncMock(return_value=[]),
         bm25_language="english",
+        sparse_backend="bm25",
+        sparse_model="Qdrant/bm25",
     )
     snapshot_service = SimpleNamespace(get_active_snapshot=AsyncMock(return_value=None))
     admin_app.dependency_overrides[get_qdrant_service] = lambda: qdrant_service
@@ -126,6 +133,8 @@ async def test_keyword_search_endpoint_uses_explicit_snapshot_id_without_active_
     qdrant_service = SimpleNamespace(
         keyword_search=AsyncMock(return_value=[]),
         bm25_language="english",
+        sparse_backend="bm25",
+        sparse_model="Qdrant/bm25",
     )
     snapshot_service = SimpleNamespace(get_active_snapshot=AsyncMock(return_value=None))
     admin_app.dependency_overrides[get_qdrant_service] = lambda: qdrant_service
@@ -165,6 +174,8 @@ async def test_keyword_search_endpoint_rejects_empty_query(admin_app) -> None:
     qdrant_service = SimpleNamespace(
         keyword_search=AsyncMock(return_value=[]),
         bm25_language="english",
+        sparse_backend="bm25",
+        sparse_model="Qdrant/bm25",
     )
     snapshot_service = SimpleNamespace(get_active_snapshot=AsyncMock(return_value=None))
     admin_app.dependency_overrides[get_qdrant_service] = lambda: qdrant_service
@@ -187,4 +198,36 @@ async def test_keyword_search_endpoint_rejects_empty_query(admin_app) -> None:
 
     assert response.status_code == 422
     assert response.json()["detail"][0]["type"] == "string_too_short"
+    qdrant_service.keyword_search.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_keyword_search_endpoint_rejects_client_supplied_sparse_fields(admin_app) -> None:
+    qdrant_service = SimpleNamespace(
+        keyword_search=AsyncMock(return_value=[]),
+        bm25_language="english",
+        sparse_backend="bm25",
+        sparse_model="Qdrant/bm25",
+    )
+    snapshot_service = SimpleNamespace(get_active_snapshot=AsyncMock(return_value=None))
+    admin_app.dependency_overrides[get_qdrant_service] = lambda: qdrant_service
+    admin_app.dependency_overrides[get_snapshot_service] = lambda: snapshot_service
+
+    try:
+        transport = httpx.ASGITransport(app=admin_app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+            headers=_admin_headers(admin_app),
+        ) as client:
+            response = await client.post(
+                "/api/admin/search/keyword",
+                json={"query": "deployment", "sparse_backend": "bge_m3"},
+            )
+    finally:
+        admin_app.dependency_overrides.pop(get_qdrant_service, None)
+        admin_app.dependency_overrides.pop(get_snapshot_service, None)
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["type"] == "extra_forbidden"
     qdrant_service.keyword_search.assert_not_awaited()

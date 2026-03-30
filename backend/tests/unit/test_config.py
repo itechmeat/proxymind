@@ -51,6 +51,22 @@ def test_settings_include_path_a_defaults() -> None:
     assert settings.path_a_max_video_duration_sec == 120
 
 
+def test_sparse_backend_defaults_to_bm25() -> None:
+    settings = Settings(**_base_settings())
+
+    assert settings.sparse_backend == "bm25"
+
+
+def test_sparse_backend_rejects_unknown_value() -> None:
+    with pytest.raises(ValidationError):
+        Settings(**_base_settings(), sparse_backend="bogus")
+
+
+def test_bge_m3_requires_provider_url() -> None:
+    with pytest.raises(ValidationError, match="BGE_M3_PROVIDER_URL"):
+        Settings(**_base_settings(), sparse_backend="bge_m3")
+
+
 def test_batch_config_defaults() -> None:
     settings = Settings(**_base_settings())
 
@@ -223,6 +239,7 @@ def test_empty_optional_provider_strings_are_normalized_to_none() -> None:
         rewrite_llm_api_key="",
         rewrite_llm_api_base="",
         conversation_summary_model="",
+        bge_m3_provider_url="",
     )
 
     assert settings.admin_api_key is None
@@ -233,6 +250,7 @@ def test_empty_optional_provider_strings_are_normalized_to_none() -> None:
     assert settings.rewrite_llm_api_key is None
     assert settings.rewrite_llm_api_base is None
     assert settings.conversation_summary_model is None
+    assert settings.bge_m3_provider_url is None
 
 
 def test_vertex_ai_requires_project_or_api_key() -> None:

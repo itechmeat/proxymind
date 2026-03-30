@@ -25,6 +25,7 @@ from app.services.qdrant import (
     QdrantService,
     RetrievedChunk,
 )
+from app.services.sparse_providers import SparseProviderMetadata
 
 
 def _collection_info(
@@ -42,6 +43,60 @@ def _collection_info(
             )
         )
     )
+
+
+def _bm25_document(text: str, *, language: str = "english") -> models.Document:
+    return models.Document(
+        text=text,
+        model=BM25_MODEL_NAME,
+        options=models.Bm25Config(language=language),
+    )
+
+
+def _sparse_provider(
+    *,
+    backend: str = "bm25",
+    model_name: str = BM25_MODEL_NAME,
+    contract_version: str = "v1",
+    language: str = "english",
+    document_representation: models.Document | models.SparseVector | None = None,
+    query_representation: models.Document | models.SparseVector | None = None,
+) -> SimpleNamespace:
+    async def _build_document(text: str) -> models.Document | models.SparseVector:
+        if document_representation is not None:
+            return document_representation
+        return _bm25_document(text, language=language)
+
+    async def _build_query(text: str) -> models.Document | models.SparseVector:
+        if query_representation is not None:
+            return query_representation
+        if backend == "bm25":
+            return _bm25_document(text, language=language)
+        return models.SparseVector(indices=[1], values=[1.0])
+
+    return SimpleNamespace(
+        metadata=SparseProviderMetadata(
+            backend=backend,
+            model_name=model_name,
+            contract_version=contract_version,
+        ),
+        build_document_representation=AsyncMock(side_effect=_build_document),
+        build_query_representation=AsyncMock(side_effect=_build_query),
+        aclose=AsyncMock(),
+    )
+
+
+def _scroll_result(*, payload: dict[str, object] | None = None) -> tuple[list[SimpleNamespace], None]:
+    if payload is None:
+        return ([], None)
+    return ([SimpleNamespace(payload=payload)], None)
+
+
+def _scroll_page(
+    *payloads: dict[str, object],
+    offset: object | None = None,
+) -> tuple[list[SimpleNamespace], object | None]:
+    return ([SimpleNamespace(payload=payload) for payload in payloads], offset)
 
 
 def _unexpected_response(status_code: int, message: str) -> UnexpectedResponse:
@@ -64,6 +119,7 @@ def _service(
     collection_name: str = "proxymind_chunks",
     embedding_dimensions: int = 3072,
     bm25_language: str = "english",
+    sparse_provider: SimpleNamespace | None = None,
 ) -> tuple[QdrantService, Mock]:
     logger = Mock()
     monkeypatch.setattr("app.services.qdrant.structlog.get_logger", lambda *_args: logger)
@@ -72,6 +128,7 @@ def _service(
             client=client,  # type: ignore[arg-type]
             collection_name=collection_name,
             embedding_dimensions=embedding_dimensions,
+            sparse_provider=sparse_provider or _sparse_provider(language=bm25_language),
             bm25_language=bm25_language,
         ),
         logger,
@@ -129,6 +186,8 @@ async def test_ensure_collection_creates_named_dense_and_sparse_vectors_and_inde
     client = SimpleNamespace(
         collection_exists=AsyncMock(return_value=False),
         create_collection=AsyncMock(),
+        get_collection=AsyncMock(return_value=_collection_info(3072)),
+        scroll=AsyncMock(return_value=_scroll_result()),
         create_payload_index=AsyncMock(),
     )
     service, logger = _service(
@@ -152,6 +211,9 @@ async def test_ensure_collection_creates_named_dense_and_sparse_vectors_and_inde
         "qdrant.ensure_collection",
         collection_name="proxymind_chunks",
         bm25_language="english",
+        sparse_backend="bm25",
+        sparse_model=BM25_MODEL_NAME,
+        sparse_contract_version="v1",
     )
     assert client.create_payload_index.await_count == len(PAYLOAD_INDEX_FIELDS)
 
@@ -163,6 +225,7 @@ async def test_ensure_collection_is_idempotent_for_matching_schema(
     client = SimpleNamespace(
         collection_exists=AsyncMock(return_value=True),
         get_collection=AsyncMock(return_value=_collection_info(3072)),
+        scroll=AsyncMock(return_value=_scroll_result()),
         create_collection=AsyncMock(),
         create_payload_index=AsyncMock(),
     )
@@ -186,6 +249,7 @@ async def test_ensure_collection_handles_duplicate_create_race(
             side_effect=_unexpected_response(409, "Collection already exists")
         ),
         get_collection=AsyncMock(return_value=_collection_info(3072)),
+        scroll=AsyncMock(return_value=_scroll_result()),
         create_payload_index=AsyncMock(),
     )
     service, _logger = _service(monkeypatch, client=client)
@@ -210,6 +274,7 @@ async def test_ensure_collection_recreates_collection_when_bm25_missing(
                 _collection_info(3072),
             ]
         ),
+        scroll=AsyncMock(return_value=_scroll_result()),
         delete_collection=AsyncMock(),
         create_collection=AsyncMock(),
         create_payload_index=AsyncMock(),
@@ -239,6 +304,7 @@ async def test_ensure_collection_recreates_collection_when_bm25_modifier_is_not_
                 _collection_info(3072),
             ]
         ),
+        scroll=AsyncMock(return_value=_scroll_result()),
         delete_collection=AsyncMock(),
         create_collection=AsyncMock(),
         create_payload_index=AsyncMock(),
@@ -266,6 +332,7 @@ async def test_ensure_collection_handles_delete_404_during_recreate_race(
                 _collection_info(3072),
             ]
         ),
+        scroll=AsyncMock(return_value=_scroll_result()),
         delete_collection=AsyncMock(
             side_effect=_unexpected_response(404, "Collection doesn't exist")
         ),
@@ -296,6 +363,7 @@ async def test_ensure_collection_handles_create_409_during_recreate_race(
                 _collection_info(3072),
             ]
         ),
+        scroll=AsyncMock(return_value=_scroll_result()),
         delete_collection=AsyncMock(),
         create_collection=AsyncMock(
             side_effect=_unexpected_response(409, "Collection already exists")
@@ -320,6 +388,7 @@ async def test_ensure_collection_fails_when_bm25_never_appears(
         get_collection=AsyncMock(
             return_value=_collection_info(3072, bm25_modifier=None),
         ),
+        scroll=AsyncMock(return_value=_scroll_result()),
         delete_collection=AsyncMock(),
         create_collection=AsyncMock(),
         create_payload_index=AsyncMock(),
@@ -343,6 +412,7 @@ async def test_ensure_collection_raises_on_dimension_mismatch(
     client = SimpleNamespace(
         collection_exists=AsyncMock(return_value=True),
         get_collection=AsyncMock(return_value=_collection_info(3072)),
+        scroll=AsyncMock(return_value=_scroll_result()),
         create_payload_index=AsyncMock(),
     )
     service, _logger = _service(monkeypatch, client=client, embedding_dimensions=1024)
@@ -389,6 +459,45 @@ async def test_upsert_chunks_sends_dense_and_bm25_vectors(
     assert bm25_document.model == BM25_MODEL_NAME
     assert _language_value(bm25_document.options.language) == "english"
     assert points[0].payload["text_content"] == "chunk body"
+    assert points[0].payload["sparse_backend"] == "bm25"
+    assert points[0].payload["sparse_model"] == BM25_MODEL_NAME
+
+
+@pytest.mark.asyncio
+async def test_upsert_chunks_sends_external_sparse_vectors_and_contract_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sparse_vector = models.SparseVector(indices=[1, 3], values=[0.25, 0.75])
+    provider = _sparse_provider(
+        backend="bge_m3",
+        model_name="bge-m3",
+        document_representation=sparse_vector,
+        query_representation=models.SparseVector(indices=[2], values=[1.0]),
+    )
+    client = SimpleNamespace(upsert=AsyncMock())
+    service, _logger = _service(
+        monkeypatch,
+        client=client,
+        embedding_dimensions=3,
+        sparse_provider=provider,
+    )
+    point = _point(
+        chunk_id=uuid.uuid4(),
+        snapshot_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        knowledge_base_id=uuid.uuid4(),
+        vector=[0.1, 0.2, 0.3],
+        text_content="chunk body",
+    )
+
+    await service.upsert_chunks([point])
+
+    provider.build_document_representation.assert_awaited_once_with("chunk body")
+    points = client.upsert.await_args.kwargs["points"]
+    assert points[0].vector[BM25_VECTOR_NAME] == sparse_vector
+    assert points[0].payload["sparse_backend"] == "bge_m3"
+    assert points[0].payload["sparse_model"] == "bge-m3"
+    assert points[0].payload["sparse_contract_version"] == "v1"
 
 
 def test_qdrant_chunk_point_bm25_text_prefers_enriched_text() -> None:
@@ -416,7 +525,9 @@ def test_qdrant_chunk_point_bm25_text_prefers_enriched_text() -> None:
     assert point.bm25_text == "original\n\nKeywords: search, retrieval"
 
 
-def test_build_payload_includes_enrichment_fields() -> None:
+def test_build_payload_includes_enrichment_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     point = QdrantChunkPoint(
         chunk_id=uuid.uuid4(),
         vector=[0.1, 0.2, 0.3],
@@ -443,7 +554,13 @@ def test_build_payload_includes_enrichment_fields() -> None:
         enrichment_pipeline_version="s9-01-enrichment-v1",
     )
 
-    payload = QdrantService._build_payload(point)
+    service, _logger = _service(
+        monkeypatch,
+        client=SimpleNamespace(),
+        embedding_dimensions=3,
+    )
+
+    payload = service._build_payload(point)
 
     assert payload["enriched_summary"] == "summary"
     assert payload["enriched_keywords"] == ["keyword"]
@@ -452,6 +569,9 @@ def test_build_payload_includes_enrichment_fields() -> None:
     assert payload["enrichment_model"] == "gemini-2.5-flash"
     assert payload["enrichment_pipeline_version"] == "s9-01-enrichment-v1"
     assert payload["source_type"] == SourceType.MARKDOWN.value
+    assert payload["sparse_backend"] == "bm25"
+    assert payload["sparse_model"] == BM25_MODEL_NAME
+    assert payload["sparse_contract_version"] == "v1"
 
 
 @pytest.mark.asyncio
@@ -844,6 +964,40 @@ async def test_hybrid_search_builds_correct_prefetch(
 
 
 @pytest.mark.asyncio
+async def test_hybrid_search_builds_sparse_vector_prefetch_for_bge_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sparse_query = models.SparseVector(indices=[7], values=[0.9])
+    provider = _sparse_provider(
+        backend="bge_m3",
+        model_name="bge-m3",
+        document_representation=models.SparseVector(indices=[1], values=[1.0]),
+        query_representation=sparse_query,
+    )
+    client = SimpleNamespace(query_points=AsyncMock(return_value=SimpleNamespace(points=[])))
+    service, _logger = _service(
+        monkeypatch,
+        client=client,
+        embedding_dimensions=3,
+        sparse_provider=provider,
+    )
+
+    await service.hybrid_search(
+        text="deployment",
+        vector=[0.1, 0.2, 0.3],
+        snapshot_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        knowledge_base_id=uuid.uuid4(),
+        limit=5,
+    )
+
+    provider.build_query_representation.assert_awaited_once_with("deployment")
+    sparse_prefetch = client.query_points.await_args.kwargs["prefetch"][1]
+    assert sparse_prefetch.using == BM25_VECTOR_NAME
+    assert sparse_prefetch.query == sparse_query
+
+
+@pytest.mark.asyncio
 async def test_hybrid_search_uses_rrf_query_with_explicit_k(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1096,6 +1250,39 @@ async def test_keyword_search_builds_bm25_query_with_scope_filters(
 
 
 @pytest.mark.asyncio
+async def test_keyword_search_builds_sparse_vector_query_for_bge_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sparse_query = models.SparseVector(indices=[11], values=[0.42])
+    provider = _sparse_provider(
+        backend="bge_m3",
+        model_name="bge-m3",
+        document_representation=models.SparseVector(indices=[1], values=[1.0]),
+        query_representation=sparse_query,
+    )
+    client = SimpleNamespace(query_points=AsyncMock(return_value=SimpleNamespace(points=[])))
+    service, _logger = _service(
+        monkeypatch,
+        client=client,
+        embedding_dimensions=3,
+        sparse_provider=provider,
+    )
+
+    await service.keyword_search(
+        text="deployment",
+        snapshot_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        knowledge_base_id=uuid.uuid4(),
+        limit=5,
+    )
+
+    provider.build_query_representation.assert_awaited_once_with("deployment")
+    kwargs = client.query_points.await_args.kwargs
+    assert kwargs["query"] == sparse_query
+    assert kwargs["using"] == BM25_VECTOR_NAME
+
+
+@pytest.mark.asyncio
 async def test_keyword_search_returns_empty_list_when_qdrant_finds_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1135,3 +1322,150 @@ async def test_keyword_search_retries_transient_connection_errors(
     )
 
     assert client.query_points.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_ensure_collection_requires_explicit_reindex_for_bge_without_payload_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = _sparse_provider(
+        backend="bge_m3",
+        model_name="bge-m3",
+        document_representation=models.SparseVector(indices=[1], values=[1.0]),
+        query_representation=models.SparseVector(indices=[2], values=[1.0]),
+    )
+    collection_info = SimpleNamespace(
+        config=SimpleNamespace(
+            params=SimpleNamespace(
+                vectors={DENSE_VECTOR_NAME: SimpleNamespace(size=3072)},
+                sparse_vectors={BM25_VECTOR_NAME: SimpleNamespace(modifier=None)},
+            )
+        )
+    )
+    client = SimpleNamespace(
+        collection_exists=AsyncMock(return_value=True),
+        get_collection=AsyncMock(return_value=collection_info),
+        scroll=AsyncMock(return_value=_scroll_result(payload={})),
+        create_payload_index=AsyncMock(),
+    )
+    service, _logger = _service(
+        monkeypatch,
+        client=client,
+        sparse_provider=provider,
+    )
+
+    with pytest.raises(
+        CollectionSchemaMismatchError,
+        match="compatibility could not be proven",
+    ):
+        await service.ensure_collection()
+
+
+@pytest.mark.asyncio
+async def test_ensure_collection_rejects_mixed_sparse_contract_metadata_across_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = SimpleNamespace(
+        collection_exists=AsyncMock(return_value=True),
+        get_collection=AsyncMock(return_value=_collection_info(3072)),
+        scroll=AsyncMock(
+            side_effect=[
+                _scroll_page(
+                    {
+                        "sparse_backend": "bm25",
+                        "sparse_model": BM25_MODEL_NAME,
+                        "sparse_contract_version": "v1",
+                    },
+                    offset="next-page",
+                ),
+                _scroll_page(
+                    {
+                        "sparse_backend": "bge_m3",
+                        "sparse_model": "bge-m3",
+                        "sparse_contract_version": "v1",
+                    }
+                ),
+            ]
+        ),
+        create_payload_index=AsyncMock(),
+    )
+    service, _logger = _service(monkeypatch, client=client)
+
+    with pytest.raises(
+        CollectionSchemaMismatchError,
+        match="mismatch detected across indexed payload metadata",
+    ):
+        await service.ensure_collection()
+
+    assert client.scroll.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_ensure_collection_rejects_mixed_legacy_and_annotated_sparse_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = SimpleNamespace(
+        collection_exists=AsyncMock(return_value=True),
+        get_collection=AsyncMock(return_value=_collection_info(3072)),
+        scroll=AsyncMock(
+            return_value=_scroll_page(
+                {},
+                {
+                    "sparse_backend": "bm25",
+                    "sparse_model": BM25_MODEL_NAME,
+                    "sparse_contract_version": "v1",
+                },
+            )
+        ),
+        create_payload_index=AsyncMock(),
+    )
+    service, _logger = _service(monkeypatch, client=client)
+
+    with pytest.raises(
+        CollectionSchemaMismatchError,
+        match="mixed legacy/annotated state",
+    ):
+        await service.ensure_collection()
+
+
+@pytest.mark.asyncio
+async def test_close_closes_qdrant_client_even_when_sparse_provider_close_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = _sparse_provider()
+    provider.aclose = AsyncMock(side_effect=RuntimeError("sparse close failed"))
+    client = SimpleNamespace(close=AsyncMock())
+    service, _logger = _service(
+        monkeypatch,
+        client=client,
+        sparse_provider=provider,
+    )
+
+    with pytest.raises(ExceptionGroup, match="Failed to close Qdrant service resources") as error:
+        await service.close()
+
+    client.close.assert_awaited_once()
+    assert len(error.value.exceptions) == 1
+    assert str(error.value.exceptions[0]) == "sparse close failed"
+
+
+@pytest.mark.asyncio
+async def test_close_reports_both_resource_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = _sparse_provider()
+    provider.aclose = AsyncMock(side_effect=RuntimeError("sparse close failed"))
+    client = SimpleNamespace(close=AsyncMock(side_effect=RuntimeError("client close failed")))
+    service, _logger = _service(
+        monkeypatch,
+        client=client,
+        sparse_provider=provider,
+    )
+
+    with pytest.raises(ExceptionGroup, match="Failed to close Qdrant service resources") as error:
+        await service.close()
+
+    assert [str(item) for item in error.value.exceptions] == [
+        "sparse close failed",
+        "client close failed",
+    ]

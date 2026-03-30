@@ -136,15 +136,15 @@ Hybrid scoped retrieval — the twin searches only within the allowed knowledge 
 1. Determine the active published snapshot.
 2. Prepare the search query considering recent messages (query rewriting).
 3. Obtain a dense embedding via Gemini Embedding 2 (query-oriented task type).
-4. Obtain a sparse embedding via Qdrant BM25 (`language` is configurable per installation, defaults to English).
+4. Obtain a sparse representation via the active sparse backend: Qdrant BM25 (`language` configurable per installation) or external BGE-M3 sparse output.
 5. Hybrid search in Qdrant: dense + sparse vectors, Reciprocal Rank Fusion (RRF).
 6. Apply payload filters: `agent_id`, `knowledge_base_id`, `snapshot_id`, `language`, `status`, `source_type`.
 7. Select a limited set of chunks.
 8. Pass only those to the LLM.
 
-Indexing: retrieval-oriented task type (dense) + BM25 sparse vector. Search: query-oriented task type (dense) + BM25 sparse (keyword).
+Indexing: retrieval-oriented task type (dense) + sparse representation from the active sparse backend. Search: query-oriented task type (dense) + sparse query from the same backend.
 
-Fallback: if Qdrant BM25 shows insufficient quality on evals for a given language — the sparse component is replaced with sparse output from BGE-M3 (100+ languages, validated on the MIRACL benchmark). The dense component (Gemini Embedding 2) remains unchanged.
+`SPARSE_BACKEND` is installation-level and supports `bm25` and `bge_m3`. The dense component (Gemini Embedding 2) remains unchanged. Switching the sparse backend requires explicit reindex because indexed child payloads persist `sparse_backend`, `sparse_model`, and `sparse_contract_version`, and startup validation rejects incompatible sparse contracts.
 
 Qdrant payload indexes are required on frequently filtered fields.
 
@@ -259,9 +259,9 @@ The product defaults to English, but all language-dependent components are confi
 
 - **Gemini Embedding 2** — natively supports 100+ languages.
 - **Qdrant BM25** — `language` parameter in `Bm25Config` (Snowball stemmer, stop lists). Supports English, German, French, Spanish, Italian, Portuguese, Dutch, Swedish, Norwegian, Danish, Finnish, Hungarian, Romanian, Turkish, and others.
-- **Fallback: BGE-M3** — multilingual model (100+ languages). Used only for sparse output as a BM25 replacement. The dense component (Gemini Embedding 2) remains unchanged.
+- **External BGE-M3 sparse backend** — multilingual model (100+ languages). Used only for sparse output while the dense component remains on Gemini Embedding 2.
 
-Language is set at deploy time via `.env` and applied to all language-dependent components.
+Language and sparse backend are set at deploy time via `.env` and applied to all language-dependent components. Backend selection must be validated through two-run eval comparison before rollout to an installation.
 
 ## Provider independence
 
@@ -305,13 +305,13 @@ For audit and evals: when logging a response, `snapshot_id`, `config_commit_hash
 
 ## Implementation defaults
 
-| Parameter | Default | Description |
-| --------- | ------- | ----------- |
-| `conversation_memory_budget` | 4096 tokens | Maximum tokens for conversation memory in the prompt, including summary and verbatim sliding window. |
-| `conversation_summary_ratio` | 0.3 | Soft target for summary generation length as a fraction of the memory budget. Actual summary tokens are deducted at face value. |
-| `conversation_summary_model` | same as `llm_model` | Optional separate model for conversation summarization. Falls back to the main LLM model when unset. |
-| `conversation_summary_temperature` | 0.1 | Temperature for summary generation calls in the background worker. |
-| `conversation_summary_timeout_ms` | 10000 | Timeout in milliseconds for the summary LLM call executed by the arq worker. |
+| Parameter                          | Default             | Description                                                                                                                     |
+| ---------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `conversation_memory_budget`       | 4096 tokens         | Maximum tokens for conversation memory in the prompt, including summary and verbatim sliding window.                            |
+| `conversation_summary_ratio`       | 0.3                 | Soft target for summary generation length as a fraction of the memory budget. Actual summary tokens are deducted at face value. |
+| `conversation_summary_model`       | same as `llm_model` | Optional separate model for conversation summarization. Falls back to the main LLM model when unset.                            |
+| `conversation_summary_temperature` | 0.1                 | Temperature for summary generation calls in the background worker.                                                              |
+| `conversation_summary_timeout_ms`  | 10000               | Timeout in milliseconds for the summary LLM call executed by the arq worker.                                                    |
 
 ## Testing strategy
 

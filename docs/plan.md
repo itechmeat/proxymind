@@ -250,7 +250,7 @@ Phase outcome: improved retrieval and answer quality driven by data.
 - [ ] **S9-03: BGE-M3 fallback**
       Replace BM25 sparse with BGE-M3 sparse for languages with insufficient BM25 quality. Dense (Gemini) unchanged.
   - **Outcome:** keyword search improves for the target language
-  - **Verification:** eval on target language → metrics improved vs BM25
+  - **Verification:** deferred pending a live target-language BM25-vs-BGE comparison after runtime configuration provides `ADMIN_API_KEY`, `SPARSE_BACKEND`, `BGE_M3_PROVIDER_URL`, and a reachable BGE-M3 sparse service
   - Tasks: BGE-M3 integration, sparse vector swap, reindex, language-specific eval
   - **Parallel pair:** S9-01 or S9-02 — separate embedding/vector concern, no overlap with chunking code
 

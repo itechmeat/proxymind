@@ -268,6 +268,8 @@ def admin_app(
         keyword_search=AsyncMock(return_value=[]),
         delete_chunks=AsyncMock(),
         bm25_language="english",
+        sparse_backend="bm25",
+        sparse_model="Qdrant/bm25",
     )
     return app
 

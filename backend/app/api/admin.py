@@ -862,7 +862,12 @@ async def keyword_search(
     )
     return KeywordSearchResponse(
         query=payload.query,
-        language=qdrant_service.bm25_language,
+        language=(
+            qdrant_service.bm25_language if qdrant_service.sparse_backend == "bm25" else None
+        ),
+        bm25_language=qdrant_service.bm25_language,
+        sparse_backend=qdrant_service.sparse_backend,
+        sparse_model=qdrant_service.sparse_model,
         total=len(results),
         results=[KeywordSearchResult.from_retrieved_chunk(chunk) for chunk in results],
     )

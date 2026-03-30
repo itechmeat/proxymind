@@ -126,7 +126,9 @@ Dual-vector retrieval in Qdrant:
 - **Dense vector** — Gemini Embedding 2. Semantic search.
   - **Indexing:** retrieval-oriented task type.
   - **Search:** query-oriented task type.
-- **Sparse vector** — Qdrant BM25 (`language` configurable per installation). Keyword/term matching.
+- **Sparse vector** — active installation-level sparse backend. Keyword/term matching.
+  - **`bm25`** — Qdrant BM25 with deploy-time `language` configuration.
+  - **`bge_m3`** — external sparse provider returning indices/values for the same Qdrant sparse slot.
 
 Both vectors are stored in a single Qdrant collection as named vectors.
 
@@ -272,12 +274,12 @@ These fields are persisted on the `chunks` table and copied into the Qdrant payl
 
 ### Text source matrix
 
-| Consumer           | Source                                                   |
-| ------------------ | -------------------------------------------------------- |
-| Dense embedding    | `enriched_text` when available, otherwise `text_content` |
-| BM25 sparse vector | `enriched_text` when available, otherwise `text_content` |
-| LLM answer context | original `text_content` only                             |
-| Citation display   | original `text_content` only                             |
+| Consumer              | Source                                                   |
+| --------------------- | -------------------------------------------------------- |
+| Dense embedding       | `enriched_text` when available, otherwise `text_content` |
+| Active sparse backend | `enriched_text` when available, otherwise `text_content` |
+| LLM answer context    | original `text_content` only                             |
+| Citation display      | original `text_content` only                             |
 
 ### Execution model
 
@@ -304,13 +306,16 @@ ProxyMind defaults to English, but all language-dependent components are configu
 | ------------------ | -------------------------- | ------------------------------------------------------------------------------------------ |
 | Gemini Embedding 2 | Automatic                  | 100+ languages                                                                             |
 | Qdrant BM25        | `language` in `Bm25Config` | EN, RU, DE, FR, ES, IT, PT, NL, SV, NO, DA, FI, HU, RO, TR, and others (Snowball stemmers) |
+| External BGE-M3    | `sparse_backend=bge_m3`    | 100+ languages via external sparse provider                                                |
 | Query rewriting    | Automatic (LLM)            | Any language supported by the LLM                                                          |
 | Lightweight parser | Automatic                  | Local multilingual-friendly parsing for text-native formats                                |
 | Document AI        | External fallback          | OCR and layout-aware parsing for scanned or complex PDFs                                   |
 
-The BM25 language is set at deploy time via `.env` and applies system-wide.
+`SPARSE_BACKEND` is set at deploy time via `.env` and applies system-wide. Supported values are `bm25` and `bge_m3`. The dense component stays on Gemini Embedding 2 in both modes.
 
-**Fallback: BGE-M3** — if Qdrant BM25 shows insufficient quality for a specific language on evals, the sparse component (BM25) is replaced with the sparse output of BGE-M3. The dense component (Gemini Embedding 2) **remains unchanged**. BGE-M3 can generate dense + sparse + ColBERT in a single pass, but we use only its sparse output as a BM25 replacement. This is a minimal change: only the sparse vector generation method changes during indexing; the Qdrant collection schema (named vectors) and retrieval pipeline remain the same.
+Switching `SPARSE_BACKEND` is an explicit reindex event. Child payloads persist `sparse_backend`, `sparse_model`, and `sparse_contract_version`, and startup validation rejects mixed sparse contracts until the collection is reindexed under the newly selected backend.
+
+The intended rollout workflow is two-run eval comparison: run the target-language suite under BM25, reindex under `bge_m3`, run the same suite again, and compare Precision@K, Recall@K, and MRR before accepting the backend switch.
 
 ## Implementation defaults
 
@@ -357,4 +362,4 @@ Two testing tracks (see [docs/spec.md](spec.md#testing-strategy)):
 - **CI (deterministic)** — mock retrieval results, verify citation builder, prompt assembly, snapshot filtering.
 - **Evals (on real models)** — run test conversations, manual/semi-automated assessment of answer metrics. Run separately, do not block CI.
 
-Evals determine whether further upgrade paths are needed: more advanced parent expansion strategies, chunk enrichment tuning, and BGE-M3 fallback.
+Evals determine whether further upgrade paths are needed: more advanced parent expansion strategies, chunk enrichment tuning, and whether `bge_m3` should replace BM25 for a given installation.

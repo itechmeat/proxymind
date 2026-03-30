@@ -1,0 +1,49 @@
+# Russian-language retrieval evals for sparse backend comparison.
+# The suite intentionally keeps the same seed snapshot as retrieval_basic so the
+# existing seed knowledge can be reused while measuring multilingual query behavior.
+
+suite: retrieval_bge_m3_russian
+description: Russian-language retrieval comparison suite for BM25 vs BGE-M3 sparse backends
+snapshot_id: 00000000-0000-0000-0000-000000000000
+cases:
+  - id: ru-ret-001
+    query: Какие три шага развёртывания описаны в третьей главе?
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000011
+        contains: Deployment requires three steps
+    tags: [retrieval, russian, sparse]
+
+  - id: ru-ret-002
+    query: Для чего в ingestion flow нужны якоря?
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000011
+        contains: Those anchors later power citations
+    tags: [retrieval, russian, sparse]
+
+  - id: ru-ret-003
+    query: Зачем нужны snapshots?
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000012
+        contains: Snapshots freeze a specific published knowledge state
+    tags: [retrieval, russian, sparse]
+
+  - id: ru-ret-004
+    query: Что хранит Qdrant в этой системе?
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000012
+        contains: dense and BM25 sparse vectors
+    tags: [retrieval, russian, sparse]
+
+  - id: ru-ret-005
+    query: Каким коммуникатором описывается Morgan Hale?
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000021
+        contains: friendly, precise, and grounded in evidence
+    tags: [retrieval, russian, sparse]
+
+  - id: ru-ret-006
+    query: Чем Morgan занимался до работы с AI systems?
+    expected:
+      - source_id: 00000000-0000-0000-0000-000000000021
+        contains: led operations for a documentation platform
+    tags: [retrieval, russian, sparse]

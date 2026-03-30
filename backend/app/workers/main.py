@@ -12,6 +12,7 @@ from redis.asyncio import Redis
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db import create_database_engine, create_session_factory
+from app.services.sparse_providers import build_sparse_provider
 from app.services.telemetry import init_telemetry, instrument_sqlalchemy, shutdown_telemetry
 from app.workers.observability import probe_queue_depth, update_queue_depth
 from app.workers.tasks import (
@@ -58,6 +59,7 @@ async def on_startup(ctx: dict[str, Any]) -> None:
         client=AsyncQdrantClient(url=settings.qdrant_url),
         collection_name=settings.qdrant_collection,
         embedding_dimensions=settings.embedding_dimensions,
+        sparse_provider=build_sparse_provider(settings),
         bm25_language=settings.bm25_language,
     )
     embedding_service = EmbeddingService(

@@ -12,6 +12,11 @@ from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedR
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.db.models.enums import ChunkStatus, SourceType
+from app.services.sparse_providers import (
+    SparseProvider,
+    SparseProviderMetadata,
+    sparse_backend_change_requires_reindex,
+)
 
 PAYLOAD_INDEX_FIELDS = (
     "snapshot_id",
@@ -21,12 +26,18 @@ PAYLOAD_INDEX_FIELDS = (
     "status",
     "source_type",
     "language",
+    "sparse_backend",
+    "sparse_model",
+    "sparse_contract_version",
 )
 DENSE_VECTOR_NAME = "dense"
 BM25_VECTOR_NAME = "bm25"
 BM25_MODEL_NAME = "Qdrant/bm25"
 PREFETCH_MULTIPLIER = 2
 RRF_K = 60
+SPARSE_BACKEND_PAYLOAD_KEY = "sparse_backend"
+SPARSE_MODEL_PAYLOAD_KEY = "sparse_model"
+SPARSE_CONTRACT_VERSION_PAYLOAD_KEY = "sparse_contract_version"
 
 
 class CollectionSchemaMismatchError(RuntimeError):
@@ -97,11 +108,13 @@ class QdrantService:
         client: AsyncQdrantClient,
         collection_name: str,
         embedding_dimensions: int,
+        sparse_provider: SparseProvider,
         bm25_language: str,
     ) -> None:
         self._client = client
         self._collection_name = collection_name
         self._embedding_dimensions = embedding_dimensions
+        self._sparse_provider = sparse_provider
         self._bm25_language = bm25_language
         self._logger = structlog.get_logger(__name__)
 
@@ -109,11 +122,26 @@ class QdrantService:
     def bm25_language(self) -> str:
         return self._bm25_language
 
+    @property
+    def sparse_backend(self) -> str:
+        return self._sparse_provider.metadata.backend
+
+    @property
+    def sparse_model(self) -> str:
+        return self._sparse_provider.metadata.model_name
+
+    @property
+    def sparse_contract_version(self) -> str:
+        return self._sparse_provider.metadata.contract_version
+
     async def ensure_collection(self) -> None:
         self._logger.info(
             "qdrant.ensure_collection",
             collection_name=self._collection_name,
             bm25_language=self._bm25_language,
+            sparse_backend=self.sparse_backend,
+            sparse_model=self.sparse_model,
+            sparse_contract_version=self.sparse_contract_version,
         )
         collection_info: Any | None = None
         if await self._client.collection_exists(self._collection_name):
@@ -126,27 +154,39 @@ class QdrantService:
                     raise
                 collection_info = await self._client.get_collection(self._collection_name)
 
-        if collection_info is not None:
-            existing_dimensions = self._get_dense_vector_size(collection_info)
-            if existing_dimensions != self._embedding_dimensions:
-                raise CollectionSchemaMismatchError(
-                    "Qdrant collection dimension mismatch: "
-                    f"existing={existing_dimensions}, required={self._embedding_dimensions}. "
-                    "Delete the collection and re-run ingestion to reindex."
-                )
-            if not self._has_required_bm25_sparse_vector(collection_info):
+        if collection_info is None:
+            collection_info = await self._client.get_collection(self._collection_name)
+
+        existing_dimensions = self._get_dense_vector_size(collection_info)
+        if existing_dimensions != self._embedding_dimensions:
+            raise CollectionSchemaMismatchError(
+                "Qdrant collection dimension mismatch: "
+                f"existing={existing_dimensions}, required={self._embedding_dimensions}. "
+                "Delete the collection and re-run ingestion to reindex."
+            )
+        if not self._has_required_sparse_vector(collection_info):
+            if self.sparse_backend == "bm25":
                 self._logger.warning(
-                    "qdrant.collection_bm25_schema_mismatch_recreating",
+                    "qdrant.collection_sparse_schema_mismatch_recreating",
                     collection_name=self._collection_name,
                     bm25_language=self._bm25_language,
+                    sparse_backend=self.sparse_backend,
+                    sparse_model=self.sparse_model,
+                    sparse_contract_version=self.sparse_contract_version,
                     message=(
-                        "Qdrant collection is missing the required BM25 sparse vector "
-                        "configuration and "
-                        "will be recreated. Existing vectors will be lost."
-                        " Re-ingestion is required."
+                        "Qdrant collection is missing the required sparse vector configuration "
+                        "for the active backend and will be recreated. Existing vectors will be lost. "
+                        "Re-ingestion is required."
                     ),
                 )
-                await self._recreate_collection_with_bm25()
+                await self._recreate_collection_with_required_sparse_config()
+            else:
+                raise CollectionSchemaMismatchError(
+                    "Qdrant collection sparse vector configuration does not match the active "
+                    f"sparse backend contract '{self.sparse_backend}'. Explicit reindex is required."
+                )
+
+        await self._assert_sparse_backend_contract()
 
         for field_name in PAYLOAD_INDEX_FIELDS:
             await self._client.create_payload_index(
@@ -164,7 +204,7 @@ class QdrantService:
                 id=str(chunk.chunk_id),
                 vector={
                     DENSE_VECTOR_NAME: chunk.vector,
-                    BM25_VECTOR_NAME: self._build_bm25_document(chunk.bm25_text),
+                    BM25_VECTOR_NAME: await self._build_sparse_document(chunk.bm25_text),
                 },
                 payload=self._build_payload(chunk),
             )
@@ -239,7 +279,7 @@ class QdrantService:
             prefetch=[
                 models.Prefetch(**dense_prefetch_kwargs),
                 models.Prefetch(
-                    query=self._build_bm25_document(text),
+                    query=await self._build_sparse_query(text),
                     using=BM25_VECTOR_NAME,
                     filter=scope_filter,
                     limit=limit * PREFETCH_MULTIPLIER,
@@ -263,7 +303,7 @@ class QdrantService:
     ) -> list[RetrievedChunk]:
         response = await self._search_points(
             collection_name=self._collection_name,
-            query=self._build_bm25_document(text),
+            query=await self._build_sparse_query(text),
             using=BM25_VECTOR_NAME,
             query_filter=self._build_scope_filter(
                 snapshot_id=snapshot_id,
@@ -276,10 +316,22 @@ class QdrantService:
         return [self._to_retrieved_chunk(point) for point in response.points]
 
     async def close(self) -> None:
-        await self._client.close()
+        close_errors: list[Exception] = []
 
-    @staticmethod
-    def _build_payload(chunk: QdrantChunkPoint) -> dict[str, Any]:
+        try:
+            await self._sparse_provider.aclose()
+        except Exception as error:
+            close_errors.append(error)
+
+        try:
+            await self._client.close()
+        except Exception as error:
+            close_errors.append(error)
+
+        if close_errors:
+            raise ExceptionGroup("Failed to close Qdrant service resources.", close_errors)
+
+    def _build_payload(self, chunk: QdrantChunkPoint) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "snapshot_id": str(chunk.snapshot_id),
             "source_id": str(chunk.source_id),
@@ -310,6 +362,9 @@ class QdrantService:
             "enriched_text": chunk.enriched_text,
             "enrichment_model": chunk.enrichment_model,
             "enrichment_pipeline_version": chunk.enrichment_pipeline_version,
+            SPARSE_BACKEND_PAYLOAD_KEY: self.sparse_backend,
+            SPARSE_MODEL_PAYLOAD_KEY: self.sparse_model,
+            SPARSE_CONTRACT_VERSION_PAYLOAD_KEY: self.sparse_contract_version,
         }
         if chunk.page_count is not None:
             payload["page_count"] = chunk.page_count
@@ -351,6 +406,15 @@ class QdrantService:
     async def _search_points(self, **kwargs: Any) -> models.QueryResponse:
         return await self._client.query_points(**kwargs)
 
+    @retry(
+        retry=retry_if_exception_type((httpx.TransportError, ResponseHandlingException)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=8),
+        reraise=True,
+    )
+    async def _scroll_points(self, **kwargs: Any) -> Any:
+        return await self._client.scroll(**kwargs)
+
     async def _create_collection(self) -> None:
         await self._client.create_collection(
             collection_name=self._collection_name,
@@ -361,15 +425,15 @@ class QdrantService:
                 )
             },
             sparse_vectors_config={
-                BM25_VECTOR_NAME: models.SparseVectorParams(modifier=models.Modifier.IDF)
+                BM25_VECTOR_NAME: self._required_sparse_vector_params()
             },
         )
 
-    async def _recreate_collection_with_bm25(self) -> None:
+    async def _recreate_collection_with_required_sparse_config(self) -> None:
         for _attempt in range(3):
             if await self._client.collection_exists(self._collection_name):
                 collection_info = await self._client.get_collection(self._collection_name)
-                if self._has_required_bm25_sparse_vector(collection_info):
+                if self._has_required_sparse_vector(collection_info):
                     return
                 try:
                     await self._client.delete_collection(self._collection_name)
@@ -385,19 +449,106 @@ class QdrantService:
 
             if await self._client.collection_exists(self._collection_name):
                 collection_info = await self._client.get_collection(self._collection_name)
-                if self._has_required_bm25_sparse_vector(collection_info):
+                if self._has_required_sparse_vector(collection_info):
                     return
 
         raise CollectionSchemaMismatchError(
-            "Qdrant collection recreation did not converge to the required BM25 schema."
+            "Qdrant collection recreation did not converge to the required sparse schema."
         )
 
-    def _build_bm25_document(self, text: str) -> models.Document:
-        return models.Document(
-            text=text,
-            model=BM25_MODEL_NAME,
-            options=models.Bm25Config(language=self._bm25_language),
-        )
+    async def _build_sparse_document(self, text: str) -> models.Document | models.SparseVector:
+        return await self._sparse_provider.build_document_representation(text)
+
+    async def _build_sparse_query(self, text: str) -> models.Document | models.SparseVector:
+        return await self._sparse_provider.build_query_representation(text)
+
+    def _required_sparse_vector_params(self) -> models.SparseVectorParams:
+        if self.sparse_backend == "bm25":
+            return models.SparseVectorParams(modifier=models.Modifier.IDF)
+        return models.SparseVectorParams()
+
+    async def _assert_sparse_backend_contract(self) -> None:
+        offset: Any | None = None
+        legacy_payload_detected = False
+        current_metadata: SparseProviderMetadata | None = None
+
+        while True:
+            points, offset = await self._scroll_points(
+                collection_name=self._collection_name,
+                limit=256,
+                offset=offset,
+                with_payload=[
+                    SPARSE_BACKEND_PAYLOAD_KEY,
+                    SPARSE_MODEL_PAYLOAD_KEY,
+                    SPARSE_CONTRACT_VERSION_PAYLOAD_KEY,
+                ],
+                with_vectors=False,
+            )
+            if not points:
+                break
+
+            for point in points:
+                payload = getattr(point, "payload", None) or {}
+                payload_backend = payload.get(SPARSE_BACKEND_PAYLOAD_KEY)
+                payload_model = payload.get(SPARSE_MODEL_PAYLOAD_KEY)
+                payload_contract_version = payload.get(SPARSE_CONTRACT_VERSION_PAYLOAD_KEY)
+
+                if (
+                    payload_backend is None
+                    or payload_model is None
+                    or payload_contract_version is None
+                ):
+                    legacy_payload_detected = True
+                    continue
+
+                point_metadata = SparseProviderMetadata(
+                    backend=str(payload_backend),
+                    model_name=str(payload_model),
+                    contract_version=str(payload_contract_version),
+                )
+                if current_metadata is None:
+                    current_metadata = point_metadata
+                    continue
+
+                if current_metadata != point_metadata:
+                    raise CollectionSchemaMismatchError(
+                        "Qdrant sparse backend contract mismatch detected across indexed "
+                        "payload metadata. Explicit reindex is required. "
+                        f"observed={current_metadata.backend}/{current_metadata.model_name}/"
+                        f"{current_metadata.contract_version}, "
+                        f"conflicting={point_metadata.backend}/{point_metadata.model_name}/"
+                        f"{point_metadata.contract_version}."
+                    )
+
+            if offset is None:
+                break
+
+        if current_metadata is None:
+            if legacy_payload_detected and self.sparse_backend == "bm25":
+                return
+            if legacy_payload_detected:
+                raise CollectionSchemaMismatchError(
+                    "Qdrant sparse backend compatibility could not be proven from indexed "
+                    "payload metadata. Explicit reindex is required before switching "
+                    "sparse_backend."
+                )
+            return
+
+        if legacy_payload_detected:
+            raise CollectionSchemaMismatchError(
+                "Qdrant sparse backend compatibility could not be proven because indexed "
+                "payload metadata is in a mixed legacy/annotated state. Explicit reindex is "
+                "required."
+            )
+
+        if sparse_backend_change_requires_reindex(current_metadata, self._sparse_provider.metadata):
+            raise CollectionSchemaMismatchError(
+                "Qdrant sparse backend contract mismatch detected: "
+                f"existing={current_metadata.backend}/{current_metadata.model_name}/"
+                f"{current_metadata.contract_version}, "
+                f"required={self.sparse_backend}/{self.sparse_model}/{self.sparse_contract_version}. "
+                "Explicit reindex is required."
+            )
 
     @staticmethod
     def _build_scope_filter(
@@ -530,8 +681,7 @@ class QdrantService:
             f"named vector '{DENSE_VECTOR_NAME}' is required for reindex compatibility."
         )
 
-    @staticmethod
-    def _has_required_bm25_sparse_vector(collection_info: Any) -> bool:
+    def _has_required_sparse_vector(self, collection_info: Any) -> bool:
         sparse_vectors_config = getattr(collection_info.config.params, "sparse_vectors", None)
         if sparse_vectors_config is None:
             return False
@@ -551,6 +701,8 @@ class QdrantService:
             modifier = bm25_config.get("modifier")
         else:
             modifier = getattr(bm25_config, "modifier", None)
-        return getattr(modifier, "value", modifier) == getattr(
-            models.Modifier.IDF, "value", models.Modifier.IDF
-        )
+        if self.sparse_backend == "bm25":
+            return getattr(modifier, "value", modifier) == getattr(
+                models.Modifier.IDF, "value", models.Modifier.IDF
+            )
+        return modifier is None
