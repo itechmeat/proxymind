@@ -8,6 +8,10 @@ import {
 
 let sessionCounter = 0;
 
+export function resetSessionHandlersState() {
+  sessionCounter = 0;
+}
+
 export const sessionHandlers = [
   http.post("*/api/chat/sessions", () => {
     sessionCounter += 1;

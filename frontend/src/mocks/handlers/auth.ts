@@ -25,6 +25,13 @@ let currentPassword = "MockPass123!";
 let isAuthenticated = true;
 let accessTokenCounter = 0;
 
+export function resetAuthMockState() {
+  currentUser = buildMockUser();
+  currentPassword = "MockPass123!";
+  isAuthenticated = true;
+  accessTokenCounter = 0;
+}
+
 function nextAccessToken() {
   accessTokenCounter += 1;
   return `mock-access-token-${accessTokenCounter}`;

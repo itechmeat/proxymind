@@ -1,10 +1,10 @@
-import { authHandlers } from "./auth";
-import { catalogHandlers } from "./catalog";
-import { messageHandlers } from "./messages";
-import { sessionHandlers } from "./session";
-import { snapshotHandlers } from "./snapshots";
-import { sourceHandlers } from "./sources";
-import { twinHandlers } from "./twin";
+import { authHandlers, resetAuthMockState } from "./auth";
+import { catalogHandlers, resetCatalogHandlersState } from "./catalog";
+import { messageHandlers, resetMessageHandlersState } from "./messages";
+import { resetSessionHandlersState, sessionHandlers } from "./session";
+import { resetSnapshotHandlersState, snapshotHandlers } from "./snapshots";
+import { resetSourceHandlersState, sourceHandlers } from "./sources";
+import { resetTwinHandlersState, twinHandlers } from "./twin";
 
 export const handlers = [
   ...authHandlers,
@@ -15,3 +15,13 @@ export const handlers = [
   ...catalogHandlers,
   ...sourceHandlers,
 ];
+
+export function resetMockHandlersState() {
+  resetAuthMockState();
+  resetSessionHandlersState();
+  resetMessageHandlersState();
+  resetTwinHandlersState();
+  resetSnapshotHandlersState();
+  resetCatalogHandlersState();
+  resetSourceHandlersState();
+}

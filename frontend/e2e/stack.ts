@@ -18,10 +18,7 @@ const defaultConfig: IsolatedStackConfig = {
   backendUrl: `http://127.0.0.1:${process.env.E2E_API_HOST_PORT ?? "18001"}`,
   composeFiles: ["docker-compose.yml", "docker-compose.e2e.yml"],
   frontendUrl: "http://127.0.0.1:4173",
-  projectName:
-    process.env.E2E_DOCKER_PROJECT ??
-    process.env.E2E_DOCKER_PROJECT_NAME ??
-    "proxymind-e2e",
+  projectName: process.env.E2E_DOCKER_PROJECT ?? "proxymind-e2e",
 };
 
 export function getIsolatedStackConfig(): IsolatedStackConfig {

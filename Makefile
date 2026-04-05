@@ -3,7 +3,7 @@
 DOCKER_COMPOSE ?= docker compose
 E2E_DOCKER_PROJECT ?= proxymind-e2e
 E2E_API_HOST_PORT ?= 18001
-E2E_TEST_PASSWORD ?= $(shell sed -n 's/^E2E_TEST_PASSWORD=//p' .env 2>/dev/null | head -n 1)
+E2E_TEST_PASSWORD ?= $(shell awk -F= '/^E2E_TEST_PASSWORD=/{sub(/^[^=]*=/,""); print; exit}' .env .env.example 2>/dev/null)
 E2E_DOCKER_COMPOSE ?= docker compose -p $(E2E_DOCKER_PROJECT) -f docker-compose.yml -f docker-compose.e2e.yml
 GIT_COMMIT_SHA ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 LOG_TAIL ?= 200
@@ -98,6 +98,7 @@ test-frontend-isolated: ## Run frontend Vitest suite
 	cd frontend && bun run test
 
 test-e2e-isolated: ## Run Playwright against isolated services
+	@test -n "$(E2E_TEST_PASSWORD)" || (echo 'E2E_TEST_PASSWORD is required. Set it in .env or override make E2E_TEST_PASSWORD=...' >&2; exit 1)
 	$(MAKE) e2e-seed
 	cd frontend && E2E_DOCKER_PROJECT=$(E2E_DOCKER_PROJECT) E2E_API_HOST_PORT=$(E2E_API_HOST_PORT) E2E_TEST_PASSWORD=$(E2E_TEST_PASSWORD) bun run test:e2e
 

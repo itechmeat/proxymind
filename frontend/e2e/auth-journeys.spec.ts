@@ -1,4 +1,4 @@
-import { test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 import {
   buildE2eUser,
@@ -24,10 +24,24 @@ test("end users can register, verify email, sign in, and sign out", async ({
 
   await createVerifiedUser(page, user);
   await signIn(page, user);
+  const firstSessionId = await page.evaluate(() =>
+    localStorage.getItem("proxymind_session_id"),
+  );
 
   await page.getByRole("button", { name: "Sign out" }).click();
   await expectOnSignInPage(page);
+  await expect
+    .poll(async () =>
+      page.evaluate(() => localStorage.getItem("proxymind_session_id")),
+    )
+    .toBeNull();
 
-  await page.goto("/");
-  await expectOnSignInPage(page);
+  await signIn(page, user);
+  const secondSessionId = await page.evaluate(() =>
+    localStorage.getItem("proxymind_session_id"),
+  );
+
+  expect(firstSessionId).toBeTruthy();
+  expect(secondSessionId).toBeTruthy();
+  expect(secondSessionId).not.toBe(firstSessionId);
 });

@@ -49,16 +49,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [user, setUser] = useState<AuthUser | null>(null);
+  const accessTokenRef = useRef<string | null>(null);
+  const authFlowVersionRef = useRef(0);
   const refreshPromiseRef = useRef<Promise<string | null> | null>(null);
 
-  const applyAuthenticatedState = useCallback(async (token: string) => {
-    const nextUser = await resolveUser(token);
-    setAccessToken(token);
-    setUser(nextUser);
-    setIsLoading(false);
+  const invalidatePendingAuthFlows = useCallback(() => {
+    authFlowVersionRef.current += 1;
+    return authFlowVersionRef.current;
   }, []);
 
+  const applyAuthenticatedState = useCallback(
+    async (token: string, version: number) => {
+      const nextUser = await resolveUser(token);
+      if (version !== authFlowVersionRef.current) {
+        return false;
+      }
+
+      accessTokenRef.current = token;
+      setAccessToken(token);
+      setUser(nextUser);
+      setIsLoading(false);
+      return true;
+    },
+    [],
+  );
+
   const applyUnauthenticatedState = useCallback(() => {
+    accessTokenRef.current = null;
     setAccessToken(null);
     setUser(null);
     setIsLoading(false);
@@ -70,12 +87,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     refreshPromiseRef.current = (async () => {
+      const version = authFlowVersionRef.current;
+
       try {
         const tokenResponse = await refreshUserToken();
-        await applyAuthenticatedState(tokenResponse.access_token);
-        return tokenResponse.access_token;
+        const applied = await applyAuthenticatedState(
+          tokenResponse.access_token,
+          version,
+        );
+        return applied ? tokenResponse.access_token : accessTokenRef.current;
       } catch {
-        applyUnauthenticatedState();
+        if (version === authFlowVersionRef.current) {
+          applyUnauthenticatedState();
+        }
         return null;
       } finally {
         refreshPromiseRef.current = null;
@@ -91,32 +115,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const getAccessToken = useCallback(
     async (options?: AccessTokenOptions) => {
-      if (!options?.forceRefresh && accessToken) {
-        return accessToken;
+      if (!options?.forceRefresh && accessTokenRef.current) {
+        return accessTokenRef.current;
       }
 
       return await refreshSession();
     },
-    [accessToken, refreshSession],
+    [refreshSession],
   );
 
   const signIn = useCallback(
     async (payload: SignInRequest) => {
+      const version = invalidatePendingAuthFlows();
       clearStoredSessionId();
       const tokenResponse = await signInUser(payload);
-      await applyAuthenticatedState(tokenResponse.access_token);
+      await applyAuthenticatedState(tokenResponse.access_token, version);
     },
-    [applyAuthenticatedState],
+    [applyAuthenticatedState, invalidatePendingAuthFlows],
   );
 
   const signOut = useCallback(async () => {
+    invalidatePendingAuthFlows();
+    refreshPromiseRef.current = null;
+
     try {
       await signOutUser();
     } finally {
       clearStoredSessionId();
       applyUnauthenticatedState();
     }
-  }, [applyUnauthenticatedState]);
+  }, [applyUnauthenticatedState, invalidatePendingAuthFlows]);
 
   const register = useCallback(async (payload: RegisterRequest) => {
     const response = await registerUser(payload);

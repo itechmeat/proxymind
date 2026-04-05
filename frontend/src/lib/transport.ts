@@ -84,6 +84,14 @@ async function readErrorDetail(response: Response) {
   return response.statusText || strings.requestFailed(response.status);
 }
 
+function shouldInvalidateSession(status: number, detail: string) {
+  if (status === 404) {
+    return true;
+  }
+
+  return status === 403 && detail === "Session belongs to a different user";
+}
+
 function createChunkStream(chunks: TransportChunk[]) {
   return new ReadableStream<TransportChunk>({
     start(controller) {
@@ -465,7 +473,8 @@ export class ProxyMindTransport implements ChatTransport<ChatMessage> {
           return "closed";
         }
 
-        if (response.status === 403 || response.status === 404) {
+        const detail = await readErrorDetail(response);
+        if (shouldInvalidateSession(response.status, detail)) {
           this.onSessionInvalidated?.();
         }
 
@@ -473,7 +482,6 @@ export class ProxyMindTransport implements ChatTransport<ChatMessage> {
           return "closed";
         }
 
-        const detail = await readErrorDetail(response);
         emitFailure(
           controller,
           detail,

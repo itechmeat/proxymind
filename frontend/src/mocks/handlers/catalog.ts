@@ -6,7 +6,19 @@ import {
 } from "@/mocks/data/fixtures";
 import type { CatalogItem } from "@/types/admin";
 
-const items: CatalogItem[] = [...mockCatalogItems];
+function cloneCatalogItem(item: CatalogItem): CatalogItem {
+  return { ...item };
+}
+
+function makeItems(): CatalogItem[] {
+  return mockCatalogItems.map(cloneCatalogItem);
+}
+
+let items: CatalogItem[] = makeItems();
+
+export function resetCatalogHandlersState() {
+  items = makeItems();
+}
 
 export const catalogHandlers = [
   http.get("*/api/admin/catalog", ({ request }) => {
@@ -55,14 +67,19 @@ export const catalogHandlers = [
   }),
 
   http.patch("*/api/admin/catalog/:id", async ({ params, request }) => {
-    const item = items.find((i) => i.id === params.id);
+    const index = items.findIndex((i) => i.id === params.id);
+    const item = items[index];
     if (!item) {
       return HttpResponse.json({ detail: "Not found" }, { status: 404 });
     }
 
     const body = (await request.json()) as Record<string, unknown>;
-    Object.assign(item, body, { updated_at: new Date().toISOString() });
-    return HttpResponse.json(item);
+    items[index] = {
+      ...item,
+      ...body,
+      updated_at: new Date().toISOString(),
+    };
+    return HttpResponse.json(items[index]);
   }),
 
   http.delete("*/api/admin/catalog/:id", ({ params }) => {

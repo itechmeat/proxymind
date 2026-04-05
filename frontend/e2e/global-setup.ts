@@ -74,6 +74,30 @@ export default async function globalSetup() {
     );
   }
 
+  const emailOutboxDir = runDockerCompose([
+    "exec",
+    "-T",
+    isolatedStack.apiService,
+    "sh",
+    "-lc",
+    'printf %s "$EMAIL_OUTBOX_DIR"',
+  ]);
+
+  if (!emailOutboxDir) {
+    throw new Error(
+      "Playwright auth e2e requires EMAIL_OUTBOX_DIR to be configured for the isolated API stack.",
+    );
+  }
+
+  runDockerCompose([
+    "exec",
+    "-T",
+    isolatedStack.apiService,
+    "sh",
+    "-lc",
+    'rm -rf "$EMAIL_OUTBOX_DIR" && mkdir -p "$EMAIL_OUTBOX_DIR"',
+  ]);
+
   runDockerCompose([
     "exec",
     "-T",

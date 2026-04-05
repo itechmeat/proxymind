@@ -59,7 +59,7 @@ The system SHALL expose `POST /api/auth/verify-email` accepting a `token` (strin
 
 ### Requirement: Sign-in via POST /api/auth/sign-in
 
-The system SHALL expose `POST /api/auth/sign-in` accepting `email` (string) and `password` (string). The system SHALL look up the user by email, verify the password against the stored argon2id hash using timing-safe comparison, check that `status=active` (email verified and not blocked), and on success return 200 with a JSON body containing `access_token` (JWT) and `token_type: "bearer"`. The response SHALL also set an httpOnly cookie named `refresh_token` with `Secure` (derived from `FRONTEND_URL` scheme), `SameSite=Lax`, `Path=/api/auth`, and 7-day max-age. The refresh token SHALL be stored as SHA-256 hash in `user_refresh_tokens`. On invalid credentials, the endpoint SHALL return 401. On unverified email (`status=pending`), the endpoint SHALL return 403. On blocked user (`status=blocked`), the endpoint SHALL return 403.
+The system SHALL expose `POST /api/auth/sign-in` accepting `email` (string) and `password` (string). The system SHALL look up the user by email, verify the password against the stored argon2id hash using timing-safe comparison, check that `status=active` (email verified and not blocked), and on success return 200 with a JSON body containing `access_token` (JWT) and `token_type: "bearer"`. The response SHALL also set an httpOnly cookie named `refresh_token` with `Secure` controlled by `AUTH_COOKIE_SECURE`, `SameSite=Lax`, `Path=/api/auth`, and 7-day max-age. The refresh token SHALL be stored as SHA-256 hash in `user_refresh_tokens`. On invalid credentials, the endpoint SHALL return 401. On unverified email (`status=pending`), the endpoint SHALL return 403. On blocked user (`status=blocked`), the endpoint SHALL return 403.
 
 #### Scenario: Successful sign-in
 
@@ -179,42 +179,42 @@ The system SHALL expose `POST /api/auth/reset-password` accepting `token` (strin
 
 ---
 
-### Requirement: User profile via GET /api/auth/me
+### Requirement: Current user via GET /api/users/me
 
-The system SHALL expose `GET /api/auth/me` requiring authentication (`get_current_user` dependency). The endpoint SHALL return 200 with the current user's data including `id`, `email`, `status`, `email_verified_at`, `created_at`, and nested `profile` object containing `display_name` and `avatar_url`.
+The system SHALL expose `GET /api/users/me` requiring authentication (`get_current_user` dependency). The endpoint SHALL return 200 with the current user's data including `id`, `email`, `status`, `email_verified_at`, `created_at`, and nested `profile` object containing `display_name` and `avatar_url`.
 
 #### Scenario: Authenticated user retrieves profile
 
-- **WHEN** `GET /api/auth/me` is called with a valid access token
+- **WHEN** `GET /api/users/me` is called with a valid access token
 - **THEN** the response SHALL be 200 with the user's data and profile
 
-#### Scenario: Unauthenticated request to /api/auth/me
+#### Scenario: Unauthenticated request to /api/users/me
 
-- **WHEN** `GET /api/auth/me` is called without a valid access token
+- **WHEN** `GET /api/users/me` is called without a valid access token
 - **THEN** the response SHALL be 401
 
 ---
 
-### Requirement: Profile update via PATCH /api/auth/me
+### Requirement: Profile update via PATCH /api/profile
 
-The system SHALL expose `PATCH /api/auth/me` requiring authentication. The endpoint SHALL accept optional `display_name` (string) and `avatar_url` (string) fields. Only provided fields SHALL be updated. The endpoint SHALL return 200 with the updated user data and profile.
+The system SHALL expose `PATCH /api/profile` requiring authentication. The endpoint SHALL accept optional `display_name` (string) and `avatar_url` (string) fields. Only provided fields SHALL be updated. The endpoint SHALL return 200 with the updated user data and profile.
 
 #### Scenario: Update display_name
 
-- **WHEN** `PATCH /api/auth/me` is called with `{"display_name": "Bob"}` by an authenticated user
+- **WHEN** `PATCH /api/profile` is called with `{"display_name": "Bob"}` by an authenticated user
 - **THEN** the response SHALL be 200
 - **AND** the user's `user_profiles.display_name` SHALL be updated to "Bob"
 
-#### Scenario: Unauthenticated request to PATCH /api/auth/me
+#### Scenario: Unauthenticated request to PATCH /api/profile
 
-- **WHEN** `PATCH /api/auth/me` is called without a valid access token
+- **WHEN** `PATCH /api/profile` is called without a valid access token
 - **THEN** the response SHALL be 401
 
 ---
 
 ### Requirement: Guest whitelist (no auth required)
 
-The following routes SHALL NOT require authentication: all `/api/auth/*` endpoints except `GET /api/auth/me` and `PATCH /api/auth/me`, `/health`, and `/ready`. All other `/api/chat/*` and `/api/auth/me` endpoints SHALL require a valid JWT access token.
+The following routes SHALL NOT require authentication: all `/api/auth/*` endpoints, `/health`, and `/ready`. `GET /api/users/me`, `PATCH /api/profile`, and all `/api/chat/*` endpoints SHALL require a valid JWT access token.
 
 #### Scenario: Auth endpoints accessible without token
 
@@ -261,7 +261,7 @@ The JWT access token SHALL use HS256 algorithm, be signed with `JWT_SECRET_KEY` 
 
 ### Requirement: Refresh token lifecycle
 
-Refresh tokens SHALL be generated using `secrets.token_urlsafe(32)`. The raw token SHALL be transported via httpOnly cookie or request body. Only the SHA-256 hash SHALL be stored in `user_refresh_tokens`. Refresh tokens SHALL have a 7-day TTL. On each refresh, the old token SHALL be deleted and a new one created (rotation). The httpOnly cookie SHALL use `Secure` flag derived from `FRONTEND_URL` scheme (`https://` implies `Secure=True`, `http://` implies `Secure=False`), `SameSite=Lax`, and `Path=/api/auth`.
+Refresh tokens SHALL be generated using `secrets.token_urlsafe(32)`. The raw token SHALL be transported via httpOnly cookie or request body. Only the SHA-256 hash SHALL be stored in `user_refresh_tokens`. Refresh tokens SHALL have a 7-day TTL. On each refresh, the old token SHALL be deleted and a new one created (rotation). The httpOnly cookie SHALL use `Secure` flag controlled by `AUTH_COOKIE_SECURE`, `SameSite=Lax`, and `Path=/api/auth`.
 
 #### Scenario: Refresh token rotation
 
@@ -318,13 +318,14 @@ The system SHALL create four new tables: `users` (id UUID PK, email VARCHAR(255)
 
 ### Requirement: Pluggable email service
 
-The system SHALL define an `EmailSender` protocol with method `async send(to: str, subject: str, html_body: str) -> None`. Two implementations SHALL be provided: `ConsoleEmailSender` (logs email content via structlog, used in dev/test) and `ResendEmailSender` (sends via Resend API, used in production). The active implementation SHALL be selected via `EMAIL_BACKEND` environment variable (`console` or `resend`). Additional configuration: `RESEND_API_KEY` (required for resend backend), `EMAIL_FROM` (sender address), `FRONTEND_URL` (for constructing email links). Email templates for verification and password reset SHALL be plain HTML strings in code.
+The system SHALL define an `EmailSender` protocol with method `async send(to: str, subject: str, html_body: str) -> None`. Two implementations SHALL be provided: `ConsoleEmailSender` (logs delivery metadata via structlog and MAY persist raw messages to `EMAIL_OUTBOX_DIR` in dev/test) and `ResendEmailSender` (sends via Resend API, used in production). The active implementation SHALL be selected via `EMAIL_BACKEND` environment variable (`console` or `resend`). Additional configuration: `RESEND_API_KEY` (required for resend backend), `EMAIL_FROM` (sender address), `FRONTEND_URL` (for constructing email links), `AUTH_COOKIE_SECURE` (refresh cookie Secure flag), and optional `EMAIL_OUTBOX_DIR` (console mail outbox for test automation). Email templates for verification and password reset SHALL be plain HTML strings in code.
 
 #### Scenario: Console email backend in development
 
 - **WHEN** `EMAIL_BACKEND=console`
 - **THEN** the `ConsoleEmailSender` SHALL be used
-- **AND** email content SHALL be logged via structlog instead of being sent
+- **AND** delivery metadata SHALL be logged via structlog instead of sending the email
+- **AND** if `EMAIL_OUTBOX_DIR` is configured, the raw email payload SHALL be written there for test automation
 
 #### Scenario: Resend email backend in production
 

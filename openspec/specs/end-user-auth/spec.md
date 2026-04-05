@@ -59,7 +59,7 @@ The system SHALL expose `POST /api/auth/verify-email` accepting a `token` (strin
 
 ### Requirement: Sign-in via POST /api/auth/sign-in
 
-The system SHALL expose `POST /api/auth/sign-in` accepting `email` (string) and `password` (string). The system SHALL look up the user by email, verify the password against the stored argon2id hash using timing-safe comparison, check that `status=active` (email verified and not blocked), and on success return 200 with a JSON body containing `access_token` (JWT) and `token_type: "bearer"`. The response SHALL also set an httpOnly cookie named `refresh_token` with `Secure` (derived from `FRONTEND_URL` scheme), `SameSite=Lax`, `Path=/api/auth`, and 7-day max-age. The refresh token SHALL be stored as SHA-256 hash in `user_refresh_tokens`. On invalid credentials, the endpoint SHALL return 401. On unverified email (`status=pending`), the endpoint SHALL return 403. On blocked user (`status=blocked`), the endpoint SHALL return 403.
+The system SHALL expose `POST /api/auth/sign-in` accepting `email` (string) and `password` (string). The system SHALL look up the user by email, verify the password against the stored argon2id hash using timing-safe comparison, check that `status=active` (email verified and not blocked), and on success return 200 with a JSON body containing `access_token` (JWT) and `token_type: "bearer"`. The response SHALL also set an httpOnly cookie named `refresh_token` with `Secure` controlled by `AUTH_COOKIE_SECURE`, `SameSite=Lax`, `Path=/api/auth`, and 7-day max-age. The refresh token SHALL be stored as SHA-256 hash in `user_refresh_tokens`. On invalid credentials, the endpoint SHALL return 401. On unverified email (`status=pending`), the endpoint SHALL return 403. On blocked user (`status=blocked`), the endpoint SHALL return 403.
 
 #### Scenario: Successful sign-in
 
@@ -261,7 +261,7 @@ The JWT access token SHALL use HS256 algorithm, be signed with `JWT_SECRET_KEY` 
 
 ### Requirement: Refresh token lifecycle
 
-Refresh tokens SHALL be generated using `secrets.token_urlsafe(32)`. The raw token SHALL be transported via httpOnly cookie or request body. Only the SHA-256 hash SHALL be stored in `user_refresh_tokens`. Refresh tokens SHALL have a 7-day TTL. On each refresh, the old token SHALL be deleted and a new one created (rotation). The httpOnly cookie SHALL use `Secure` flag derived from `FRONTEND_URL` scheme (`https://` implies `Secure=True`, `http://` implies `Secure=False`), `SameSite=Lax`, and `Path=/api/auth`.
+Refresh tokens SHALL be generated using `secrets.token_urlsafe(32)`. The raw token SHALL be transported via httpOnly cookie or request body. Only the SHA-256 hash SHALL be stored in `user_refresh_tokens`. Refresh tokens SHALL have a 7-day TTL. On each refresh, the old token SHALL be deleted and a new one created (rotation). The httpOnly cookie SHALL use `Secure` flag controlled by `AUTH_COOKIE_SECURE`, `SameSite=Lax`, and `Path=/api/auth`.
 
 #### Scenario: Refresh token rotation
 
@@ -318,13 +318,14 @@ The system SHALL create four new tables: `users` (id UUID PK, email VARCHAR(255)
 
 ### Requirement: Pluggable email service
 
-The system SHALL define an `EmailSender` protocol with method `async send(to: str, subject: str, html_body: str) -> None`. Two implementations SHALL be provided: `ConsoleEmailSender` (logs email content via structlog, used in dev/test) and `ResendEmailSender` (sends via Resend API, used in production). The active implementation SHALL be selected via `EMAIL_BACKEND` environment variable (`console` or `resend`). Additional configuration: `RESEND_API_KEY` (required for resend backend), `EMAIL_FROM` (sender address), `FRONTEND_URL` (for constructing email links). Email templates for verification and password reset SHALL be plain HTML strings in code.
+The system SHALL define an `EmailSender` protocol with method `async send(to: str, subject: str, html_body: str) -> None`. Two implementations SHALL be provided: `ConsoleEmailSender` (logs delivery metadata via structlog and MAY persist raw messages to `EMAIL_OUTBOX_DIR` in dev/test) and `ResendEmailSender` (sends via Resend API, used in production). The active implementation SHALL be selected via `EMAIL_BACKEND` environment variable (`console` or `resend`). Additional configuration: `RESEND_API_KEY` (required for resend backend), `EMAIL_FROM` (sender address), `FRONTEND_URL` (for constructing email links), `AUTH_COOKIE_SECURE` (refresh cookie Secure flag), and optional `EMAIL_OUTBOX_DIR` (console mail outbox for test automation). Email templates for verification and password reset SHALL be plain HTML strings in code.
 
 #### Scenario: Console email backend in development
 
 - **WHEN** `EMAIL_BACKEND=console`
 - **THEN** the `ConsoleEmailSender` SHALL be used
-- **AND** email content SHALL be logged via structlog instead of being sent
+- **AND** delivery metadata SHALL be logged via structlog instead of sending the email
+- **AND** if `EMAIL_OUTBOX_DIR` is configured, the raw email payload SHALL be written there for test automation
 
 #### Scenario: Resend email backend in production
 

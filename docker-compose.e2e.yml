@@ -93,7 +93,9 @@ services:
       SEAWEEDFS_FILER_PORT: "8888"
       SEAWEEDFS_SOURCES_PATH: /sources-e2e
       FRONTEND_URL: http://127.0.0.1:4173
+      AUTH_COOKIE_SECURE: "false"
       EMAIL_BACKEND: console
+      EMAIL_OUTBOX_DIR: /tmp/proxymind-email-outbox
       JWT_SECRET_KEY: test-jwt-secret-key-with-32-plus-chars
       PERSONA_DIR: /app/persona
       CONFIG_DIR: /app/config
@@ -153,6 +155,10 @@ services:
       SEAWEEDFS_HOST: seaweedfs-e2e
       SEAWEEDFS_FILER_PORT: "8888"
       SEAWEEDFS_SOURCES_PATH: /sources-test-e2e
+      FRONTEND_URL: http://127.0.0.1:4173
+      AUTH_COOKIE_SECURE: "false"
+      EMAIL_BACKEND: console
+      EMAIL_OUTBOX_DIR: /tmp/proxymind-email-outbox
       JWT_SECRET_KEY: test-jwt-secret-key-with-32-plus-chars
       OTEL_ENABLED: "false"
     volumes:

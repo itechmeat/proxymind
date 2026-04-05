@@ -230,4 +230,23 @@ describe("Auth pages", () => {
     await user.click(submitButton);
     expect(resetPasswordMock).toHaveBeenCalledTimes(1);
   });
+
+  it("announces auth feedback through a live region", async () => {
+    const user = userEvent.setup();
+    forgotPasswordMock.mockResolvedValueOnce("Reset link sent.");
+
+    renderWithRouter("/auth/forgot-password", <ForgotPasswordPage />);
+
+    await user.type(
+      screen.getByLabelText(strings.emailLabel),
+      "user@example.com",
+    );
+    await user.click(
+      screen.getByRole("button", { name: strings.sendResetLink }),
+    );
+
+    const status = await screen.findByRole("status");
+    expect(status).toHaveAttribute("aria-live", "polite");
+    expect(status).toHaveAttribute("aria-atomic", "true");
+  });
 });

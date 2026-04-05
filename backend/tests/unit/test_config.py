@@ -81,6 +81,22 @@ def test_jwt_secret_key_rejects_placeholder_values() -> None:
         Settings(**settings)
 
 
+def test_jwt_secret_key_is_stripped_before_storage() -> None:
+    settings_data = _base_settings()
+    settings_data["jwt_secret_key"] = "  test-jwt-secret-key-with-32-plus-chars  "
+    settings = Settings(**settings_data)
+
+    assert settings.jwt_secret_key.get_secret_value() == "test-jwt-secret-key-with-32-plus-chars"
+
+
+def test_auth_cookie_secure_defaults_false_and_allows_override() -> None:
+    default_settings = Settings(**_base_settings())
+    secure_settings = Settings(**_base_settings(), auth_cookie_secure=True)
+
+    assert default_settings.auth_cookie_secure is False
+    assert secure_settings.auth_cookie_secure is True
+
+
 def test_sparse_backend_rejects_unknown_value() -> None:
     with pytest.raises(ValidationError):
         Settings(**_base_settings(), sparse_backend="bogus")

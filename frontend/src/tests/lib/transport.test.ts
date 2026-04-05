@@ -323,6 +323,87 @@ describe("ProxyMindTransport", () => {
     ]);
   });
 
+  it("does not invalidate the session for non-ownership HTTP 403 errors", async () => {
+    const onSessionInvalidated = vi.fn();
+    const generateId = vi
+      .fn<() => string>()
+      .mockReturnValueOnce("assistant-local")
+      .mockReturnValueOnce("idempotency-key")
+      .mockReturnValueOnce("text-part-id");
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ detail: "User account is blocked" }, 403),
+    );
+
+    const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
+      sessionId: "session-1",
+      fetch: fetchMock,
+      generateId,
+      onSessionInvalidated,
+    });
+
+    const chunks = await readChunks(
+      await transport.sendMessages({
+        trigger: "submit-message",
+        chatId: "chat-1",
+        messageId: undefined,
+        messages: [createUserMessage("Hello")],
+        abortSignal: undefined,
+      }),
+    );
+
+    expect(onSessionInvalidated).not.toHaveBeenCalled();
+    expect(chunks).toEqual([
+      {
+        type: "start",
+        messageId: "assistant-local",
+        messageMetadata: {
+          state: "failed",
+          errorDetail: "User account is blocked",
+          httpStatus: 403,
+        },
+      },
+      {
+        type: "error",
+        errorText: "User account is blocked",
+      },
+    ]);
+  });
+
+  it("invalidates the session for ownership HTTP 403 errors", async () => {
+    const onSessionInvalidated = vi.fn();
+    const generateId = vi
+      .fn<() => string>()
+      .mockReturnValueOnce("assistant-local")
+      .mockReturnValueOnce("idempotency-key")
+      .mockReturnValueOnce("text-part-id");
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ detail: "Session belongs to a different user" }, 403),
+    );
+
+    const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
+      sessionId: "session-1",
+      fetch: fetchMock,
+      generateId,
+      onSessionInvalidated,
+    });
+
+    await readChunks(
+      await transport.sendMessages({
+        trigger: "submit-message",
+        chatId: "chat-1",
+        messageId: undefined,
+        messages: [createUserMessage("Hello")],
+        abortSignal: undefined,
+      }),
+    );
+
+    expect(onSessionInvalidated).toHaveBeenCalledTimes(1);
+  });
+
   it("surfaces network failures as a connection-lost error stream", async () => {
     const generateId = vi
       .fn<() => string>()

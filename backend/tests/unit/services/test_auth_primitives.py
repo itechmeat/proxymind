@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 import uuid
 
 import pytest
 from pydantic import SecretStr
+from structlog.testing import capture_logs
 
 from app.services.email import (
     ConsoleEmailSender,
@@ -65,6 +68,7 @@ def test_build_email_sender_returns_console_sender_for_console_backend() -> None
         SimpleNamespace(
             email_backend="console",
             email_from="noreply@example.com",
+            email_outbox_dir=None,
             resend_api_key=None,
         )
     )
@@ -78,13 +82,57 @@ def test_build_email_sender_requires_api_key_for_resend_backend() -> None:
             SimpleNamespace(
                 email_backend="resend",
                 email_from="noreply@example.com",
+                email_outbox_dir=None,
                 resend_api_key=None,
             )
         )
 
 
 @pytest.mark.asyncio
-async def test_resend_email_sender_uses_resend_client(
+async def test_console_email_sender_logs_metadata_only_and_writes_outbox(
+    tmp_path: Path,
+) -> None:
+    sender = ConsoleEmailSender(
+        email_from="noreply@example.com",
+        outbox_dir=tmp_path,
+    )
+
+    with capture_logs() as logs:
+        await sender.send(
+            to="user@example.com",
+            subject="Verify your account",
+            html_body=(
+                '<a href="http://localhost:5173/auth/verify-email?token=secret-token">'
+                "Verify"
+                "</a>"
+            ),
+        )
+
+    assert len(logs) == 1
+    log_entry = logs[0]
+    assert log_entry["event"] == "email.console.sent"
+    assert log_entry["to"] == "user@example.com"
+    assert log_entry["subject"] == "Verify your account"
+    assert "html_body" not in log_entry
+    assert "secret-token" not in json.dumps(log_entry)
+
+    outbox_files = sorted(tmp_path.glob("*.json"))
+    assert len(outbox_files) == 1
+
+    payload = json.loads(outbox_files[0].read_text())
+    assert payload["to"] == "user@example.com"
+    assert payload["subject"] == "Verify your account"
+    assert payload["html_body"].startswith('<a href="http://localhost:5173/auth/verify-email')
+    assert payload["links"] == [
+        {
+            "route_path": "/auth/verify-email",
+            "token": "secret-token",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_resend_email_sender_serializes_api_key_assignment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
@@ -128,6 +176,7 @@ def test_build_email_sender_returns_resend_sender_when_configured() -> None:
         SimpleNamespace(
             email_backend="resend",
             email_from="noreply@example.com",
+            email_outbox_dir=None,
             resend_api_key=SecretStr("resend-test-key"),
         )
     )

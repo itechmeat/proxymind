@@ -69,7 +69,10 @@ function StatusCallout({
 
   return (
     <div
+      aria-atomic="true"
+      aria-live={tone === "error" ? "assertive" : "polite"}
       className={`rounded-2xl border px-4 py-3 text-sm leading-6 ${className}`}
+      role={tone === "error" ? "alert" : "status"}
     >
       {detail}
     </div>

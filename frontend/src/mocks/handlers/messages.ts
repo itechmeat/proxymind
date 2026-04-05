@@ -16,6 +16,10 @@ function randomInt(min: number, max: number): number {
 
 let responseIndex = 0;
 
+export function resetMessageHandlersState() {
+  responseIndex = 0;
+}
+
 export const messageHandlers = [
   http.post("*/api/chat/messages", async () => {
     const messageId = crypto.randomUUID();

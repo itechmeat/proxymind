@@ -3,7 +3,19 @@ import { HttpResponse, http } from "msw";
 import { mockSnapshots } from "@/mocks/data/fixtures";
 import type { SnapshotResponse } from "@/types/admin";
 
-const snapshots: SnapshotResponse[] = [...mockSnapshots];
+function cloneSnapshot(snapshot: SnapshotResponse): SnapshotResponse {
+  return { ...snapshot };
+}
+
+function makeSnapshots(): SnapshotResponse[] {
+  return mockSnapshots.map(cloneSnapshot);
+}
+
+let snapshots: SnapshotResponse[] = makeSnapshots();
+
+export function resetSnapshotHandlersState() {
+  snapshots = makeSnapshots();
+}
 
 function findSnapshot(id: string) {
   return snapshots.find((s) => s.id === id);

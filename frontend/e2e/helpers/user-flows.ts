@@ -11,13 +11,22 @@ const repoRoot = path.resolve(
   "../../..",
 );
 const isolatedStack = getIsolatedStackConfig();
-const emailLogLookback = "15m";
 const tokenWaitTimeoutMs = 20_000;
 
 export interface E2eUser {
   displayName: string;
   email: string;
   password: string;
+}
+
+interface EmailOutboxEntry {
+  html_body: string;
+  links: Array<{
+    route_path: string;
+    token: string;
+  }>;
+  subject: string;
+  to: string;
 }
 
 let cachedAdminApiKey: string | null = null;
@@ -54,10 +63,6 @@ function slugify(value: string) {
     .slice(0, 24);
 }
 
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 export function buildE2eUser(testInfo: TestInfo, scope: string): E2eUser {
   const id = `${slugify(scope)}-${testInfo.workerIndex}-${randomUUID().slice(0, 8)}`;
 
@@ -90,36 +95,54 @@ export async function registerUser(page: Page, user: E2eUser) {
   ).toBeVisible();
 }
 
+function readEmailOutboxEntries(): EmailOutboxEntry[] {
+  const raw = runDockerCompose([
+    "exec",
+    "-T",
+    isolatedStack.apiService,
+    "python",
+    "-c",
+    [
+      "import os, pathlib",
+      'outbox = os.environ.get("EMAIL_OUTBOX_DIR")',
+      "path = pathlib.Path(outbox) if outbox else None",
+      "entries = sorted(path.glob('*.json')) if path and path.exists() else []",
+      "for entry in entries:",
+      "    print(entry.read_text())",
+    ].join("\n"),
+  ]);
+
+  if (!raw) {
+    return [];
+  }
+
+  return raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as EmailOutboxEntry);
+}
+
 async function waitForToken(email: string, routePath: string) {
   const deadline = Date.now() + tokenWaitTimeoutMs;
-  const tokenPattern = new RegExp(
-    `${escapeRegExp(routePath)}\\?token=([A-Za-z0-9_-]+)`,
-  );
 
   while (Date.now() < deadline) {
-    const logs = runDockerCompose([
-      "logs",
-      isolatedStack.apiService,
-      `--since=${emailLogLookback}`,
-    ]);
+    const entry = readEmailOutboxEntries()
+      .reverse()
+      .find((candidate) => candidate.to === email);
+    const link = entry?.links.find(
+      (candidate) => candidate.route_path === routePath,
+    );
 
-    const entry = logs
-      .split("\n")
-      .filter((line) => line.includes(email) && line.includes(routePath))
-      .at(-1);
-
-    if (entry) {
-      const match = entry.match(tokenPattern);
-      if (match?.[1]) {
-        return match[1];
-      }
+    if (link?.token) {
+      return link.token;
     }
 
     await sleep(1_000);
   }
 
   throw new Error(
-    `Token for ${routePath} and ${email} was not found in API logs.`,
+    `Token for ${routePath} and ${email} was not found in the email outbox.`,
   );
 }
 

@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
+import uuid
+from pathlib import Path
 from typing import Protocol
+from urllib.parse import parse_qs, urlparse
+
+import re
 
 import structlog
 
@@ -17,17 +23,69 @@ class EmailSender(Protocol):
 
 
 class ConsoleEmailSender:
-    def __init__(self, *, email_from: str) -> None:
+    def __init__(self, *, email_from: str, outbox_dir: Path | None = None) -> None:
         self._email_from = email_from
+        self._outbox_dir = outbox_dir
 
     async def send(self, *, to: str, subject: str, html_body: str) -> None:
+        links = self._extract_links(html_body)
+        outbox_file: Path | None = None
+        if self._outbox_dir is not None:
+            outbox_file = await asyncio.to_thread(
+                self._write_outbox_entry,
+                to=to,
+                subject=subject,
+                html_body=html_body,
+                links=links,
+            )
+
         logger.info(
             "email.console.sent",
             email_from=self._email_from,
             to=to,
             subject=subject,
-            html_body=html_body,
+            links=[{"route_path": link["route_path"]} for link in links],
+            outbox_file=str(outbox_file) if outbox_file is not None else None,
         )
+
+    def _write_outbox_entry(
+        self,
+        *,
+        to: str,
+        subject: str,
+        html_body: str,
+        links: list[dict[str, str]],
+    ) -> Path:
+        assert self._outbox_dir is not None
+        self._outbox_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "email_from": self._email_from,
+            "to": to,
+            "subject": subject,
+            "html_body": html_body,
+            "links": links,
+        }
+        outbox_file = self._outbox_dir / f"{uuid.uuid4()}.json"
+        outbox_file.write_text(json.dumps(payload), encoding="utf-8")
+        return outbox_file
+
+    @staticmethod
+    def _extract_links(html_body: str) -> list[dict[str, str]]:
+        links: list[dict[str, str]] = []
+
+        for url in re.findall(r'href=["\']([^"\']+)["\']', html_body):
+            parsed = urlparse(url)
+            token = parse_qs(parsed.query).get("token", [None])[0]
+            if not parsed.path or token is None:
+                continue
+            links.append(
+                {
+                    "route_path": parsed.path,
+                    "token": token,
+                }
+            )
+
+        return links
 
 
 class ResendEmailSender:
@@ -36,7 +94,7 @@ class ResendEmailSender:
         self._email_from = email_from
 
     async def send(self, *, to: str, subject: str, html_body: str) -> None:
-        params: resend.Emails.SendParams = {
+        params = {
             "from": self._email_from,
             "to": [to],
             "subject": subject,
@@ -62,4 +120,8 @@ def build_email_sender(settings: Settings) -> EmailSender:
             email_from=settings.email_from,
         )
 
-    return ConsoleEmailSender(email_from=settings.email_from)
+    email_outbox_dir = getattr(settings, "email_outbox_dir", None)
+    return ConsoleEmailSender(
+        email_from=settings.email_from,
+        outbox_dir=Path(email_outbox_dir) if email_outbox_dir else None,
+    )

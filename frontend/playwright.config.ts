@@ -35,7 +35,7 @@ export default defineConfig({
       VITE_ADMIN_MODE: "true",
       VITE_API_URL: isolatedStack.backendUrl,
     },
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: process.env.PLAYWRIGHT_REUSE_SERVER === "1",
     timeout: 120_000,
     url: `${isolatedStack.frontendUrl}/auth/sign-in`,
   },

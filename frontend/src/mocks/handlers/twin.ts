@@ -2,7 +2,15 @@ import { HttpResponse, http } from "msw";
 
 import { mockTwinProfile } from "@/mocks/data/fixtures";
 
-let currentProfile = { ...mockTwinProfile };
+function buildCurrentProfile() {
+  return { ...mockTwinProfile };
+}
+
+let currentProfile = buildCurrentProfile();
+
+export function resetTwinHandlersState() {
+  currentProfile = buildCurrentProfile();
+}
 
 export const twinHandlers = [
   http.get("*/api/chat/twin", () => {
@@ -10,7 +18,16 @@ export const twinHandlers = [
   }),
 
   http.get("*/api/chat/twin/avatar", () => {
-    return new HttpResponse(null, { status: 404 });
+    if (!currentProfile.has_avatar) {
+      return new HttpResponse(null, { status: 404 });
+    }
+
+    return new HttpResponse(null, {
+      status: 200,
+      headers: {
+        "Content-Type": "image/png",
+      },
+    });
   }),
 
   http.put("*/api/admin/agent/profile", async ({ request }) => {

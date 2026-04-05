@@ -3,7 +3,19 @@ import { HttpResponse, http } from "msw";
 import { mockSources } from "@/mocks/data/fixtures";
 import type { SourceListItem } from "@/types/admin";
 
-const sources: SourceListItem[] = [...mockSources];
+function cloneSource(source: SourceListItem): SourceListItem {
+  return { ...source };
+}
+
+function makeSources(): SourceListItem[] {
+  return mockSources.map(cloneSource);
+}
+
+let sources: SourceListItem[] = makeSources();
+
+export function resetSourceHandlersState() {
+  sources = makeSources();
+}
 
 export const sourceHandlers = [
   http.get("*/api/admin/sources", () => {
@@ -14,10 +26,15 @@ export const sourceHandlers = [
     const newId = crypto.randomUUID();
     const formData = await request.formData();
     const metadataRaw = formData.get("metadata");
-    const metadata =
-      typeof metadataRaw === "string"
-        ? (JSON.parse(metadataRaw) as Record<string, unknown>)
-        : {};
+    let metadata: Record<string, unknown> = {};
+
+    if (typeof metadataRaw === "string") {
+      try {
+        metadata = JSON.parse(metadataRaw) as Record<string, unknown>;
+      } catch {
+        metadata = {};
+      }
+    }
     const file = formData.get("file");
     const filename = file instanceof File ? file.name : `${newId}.bin`;
 

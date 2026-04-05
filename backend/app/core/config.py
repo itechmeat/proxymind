@@ -115,8 +115,10 @@ class Settings(BaseSettings):
     jwt_secret_key: SecretStr = Field(...)
     jwt_access_token_expire_minutes: int = Field(default=15, ge=1)
     jwt_refresh_token_expire_days: int = Field(default=7, ge=1)
+    auth_cookie_secure: bool = Field(default=False)
     email_backend: Literal["console", "resend"] = Field(default="console")
     resend_api_key: SecretStr | None = Field(default=None)
+    email_outbox_dir: str | None = Field(default=None)
     email_from: str = Field(default="ProxyMind <noreply@example.com>", min_length=1)
     frontend_url: str = Field(default="http://localhost:5173", min_length=1)
     trusted_proxy_depth: int = Field(default=1, ge=1)
@@ -160,6 +162,7 @@ class Settings(BaseSettings):
             "admin_api_key",
             "bge_m3_provider_url",
             "resend_api_key",
+            "email_outbox_dir",
         ):
             if normalized.get(field_name) == "":
                 normalized[field_name] = None
@@ -167,13 +170,18 @@ class Settings(BaseSettings):
 
     @field_validator("jwt_secret_key", mode="before")
     @classmethod
-    def validate_jwt_secret_key(cls, value: Any) -> Any:
+    def normalize_jwt_secret_key(cls, value: Any) -> Any:
         if value is None:
             return value
 
-        raw_value = (
+        return (
             value.get_secret_value() if isinstance(value, SecretStr) else str(value)
         ).strip()
+
+    @field_validator("jwt_secret_key")
+    @classmethod
+    def validate_jwt_secret_key(cls, value: SecretStr) -> SecretStr:
+        raw_value = value.get_secret_value()
         if raw_value in JWT_SECRET_PLACEHOLDERS:
             raise ValueError(
                 "JWT_SECRET_KEY must be set to a non-placeholder secret before startup"
@@ -251,7 +259,7 @@ class Settings(BaseSettings):
     @computed_field
     @property
     def cookie_secure(self) -> bool:
-        return self.frontend_url.strip().lower().startswith("https://")
+        return self.auth_cookie_secure
 
 
 @lru_cache

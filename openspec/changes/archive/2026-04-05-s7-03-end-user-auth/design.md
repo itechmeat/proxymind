@@ -43,7 +43,7 @@ The system adds four new database tables (`users`, `user_profiles`, `user_tokens
 
 ### D2: Pluggable Email with Resend
 
-**Chosen:** Protocol abstraction (`EmailSender`) with two implementations -- `ConsoleEmailSender` (dev/test) and `ResendEmailSender` (prod). Switched via `EMAIL_BACKEND` env var.
+**Chosen:** Protocol abstraction (`EmailSender`) with two implementations -- `ConsoleEmailSender` (dev/test metadata logging plus optional outbox persistence) and `ResendEmailSender` (prod). Switched via `EMAIL_BACKEND` env var.
 
 **Alternatives considered:**
 - **Real email via SMTP** -- external SMTP dependency, more complex configuration.
@@ -155,7 +155,7 @@ sequenceDiagram
     A->>PG: Store refresh token hash
     A-->>F: 200 {access_token, token_type} + Set-Cookie: refresh_token
     F->>F: Store access token in memory
-    F->>A: GET /api/auth/me (Authorization: Bearer)
+    F->>A: GET /api/users/me (Authorization: Bearer)
     A-->>F: 200 {id, email, display_name, status, ...}
     F-->>U: Redirect to chat
 ```
@@ -180,7 +180,7 @@ sequenceDiagram
         A->>PG: Store new refresh token hash
         A-->>F: 200 {access_token, token_type} + Set-Cookie: new refresh_token
         F->>F: Store new access token in memory
-        F->>A: GET /api/auth/me (Authorization: Bearer)
+        F->>A: GET /api/users/me (Authorization: Bearer)
         A-->>F: 200 {id, email, display_name, status, ...}
     else Token expired or not found
         A-->>F: 401 Unauthorized
@@ -194,7 +194,8 @@ sequenceDiagram
 The `get_current_user` FastAPI dependency is applied at **router level** on the chat router. It extracts the JWT from the `Authorization: Bearer` header, decodes it (PyJWT, HS256), loads the user from PostgreSQL, and verifies status. Returns the `User` object on success, raises 401 for invalid/expired token or missing/inactive user, and raises 403 for blocked users (so the transport does not attempt infinite refresh loops — 401 is retry-able, 403 is terminal).
 
 - `chat_router`: `dependencies=[Depends(get_current_user)]`
-- `auth_router`: no auth dependency (public, except `GET/PATCH /api/auth/me`)
+- `auth_router`: no auth dependency (public)
+- `users_router` / `profile_router`: protected current-user and profile routes
 - `admin_router`: `verify_admin_key` (unchanged)
 - `health_router`, `metrics_router`: no changes
 
@@ -222,7 +223,7 @@ No new frontend dependencies. Uses existing React Router and Radix UI.
 - Timing-safe comparison (`secrets.compare_digest`) for all token verifications.
 - Email enumeration protection: `/register` and `/forgot-password` always return 200 with generic message.
 - CORS updated with `credentials: true` for cookie transmission.
-- Refresh cookie: `httpOnly`, `SameSite=Lax`, `Secure` flag derived from `FRONTEND_URL` scheme.
+- Refresh cookie: `httpOnly`, `SameSite=Lax`, `Secure` flag controlled by `AUTH_COOKIE_SECURE`.
 - Cleanup arq job runs every 6 hours to purge expired tokens from `user_tokens` and `user_refresh_tokens`, and used `user_tokens` (with `used_at IS NOT NULL`) older than 24 hours.
 
 ## Risks / Trade-offs

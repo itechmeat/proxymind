@@ -448,7 +448,7 @@ async def chat_client(
     create_user,
     make_user_auth_headers,
 ) -> httpx.AsyncClient:
-    user = await create_user(email="chat-user@example.com")
+    user = await create_user()
     transport = httpx.ASGITransport(app=chat_app)
     async with httpx.AsyncClient(
         transport=transport,

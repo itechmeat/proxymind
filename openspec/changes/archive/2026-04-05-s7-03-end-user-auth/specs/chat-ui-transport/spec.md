@@ -5,7 +5,7 @@
 The transport SHALL handle HTTP error responses from the backend as follows:
 
 - **HTTP 401** (unauthorized): Attempt a silent token refresh via `AuthProvider.getAccessToken()`. If refresh succeeds, retry the original request with the new access token. If refresh fails, surface an authentication error to the UI and redirect to `/auth/sign-in`.
-- **HTTP 403** (forbidden / session ownership): Surface the error to the UI. Trigger session re-creation via the session hook (the current session belongs to a different user).
+- **HTTP 403** (forbidden): Surface the error to the UI. Trigger session re-creation via the session hook only when the backend detail indicates session ownership (`"Session belongs to a different user"`). Other 403 responses SHALL remain terminal UI errors and SHALL NOT invalidate the session.
 - **HTTP 409** (concurrent stream or idempotency conflict): Surface the error to the UI. This SHALL NOT be silently ignored.
 - **HTTP 422** (no active snapshot): Surface a "knowledge not ready" error to the UI.
 - **HTTP 404** (session not found): Trigger session re-creation via the session hook.
@@ -30,6 +30,12 @@ The transport SHALL handle HTTP error responses from the backend as follows:
 - **THEN** the transport SHALL surface an error to the UI
 - **AND** the session hook SHALL clear the stored session and create a new one
 
+#### Scenario: Non-ownership HTTP 403 stays terminal
+
+- **WHEN** the backend responds with HTTP 403 for a reason other than session ownership
+- **THEN** the transport SHALL surface the error to the UI
+- **AND** the current session SHALL remain intact
+
 #### Scenario: HTTP 409 surfaced as error
 
 - **WHEN** the backend responds with HTTP 409 and body `{"detail": "Concurrent stream active"}`
@@ -50,7 +56,7 @@ The transport SHALL handle HTTP error responses from the backend as follows:
 
 ### Requirement: Authentication header on SSE requests
 
-The transport SHALL include an `Authorization: Bearer <access_token>` header on all fetch requests to `POST /api/chat/messages`. The access token SHALL be provided via the transport options at construction time. Since the transport uses `fetch()` (not `EventSource`), custom headers are natively supported — the token SHALL NOT be passed as a query parameter.
+The transport SHALL include an `Authorization: Bearer <access_token>` header on all fetch requests to `POST /api/chat/messages`. The access token SHALL be retrieved at request time via the transport's `getAccessToken()` option so silent refresh can update the value between sends. Since the transport uses `fetch()` (not `EventSource`), custom headers are natively supported — the token SHALL NOT be passed as a query parameter.
 
 #### Scenario: SSE request includes auth header
 

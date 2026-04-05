@@ -100,7 +100,7 @@ The system SHALL require authentication via the `get_current_user` dependency on
 
 ### Requirement: visitor_id renamed to user_id in sessions table
 
-The `sessions` table column `visitor_id` SHALL be renamed to `user_id`. A foreign key `sessions.user_id -> users(id) ON DELETE SET NULL` SHALL be added. The `user_id` column SHALL remain nullable (for future channel connectors using `external_user_id`). The `external_user_id` and `channel_connector` columns SHALL remain unchanged.
+The `sessions` table column `visitor_id` SHALL be renamed to `user_id`. A foreign key `sessions.user_id -> users(id) ON DELETE SET NULL` SHALL be added. The `user_id` column SHALL remain nullable (for future channel connectors using `external_user_id`). The `external_user_id` and `channel_connector` columns SHALL remain unchanged. Existing non-`NULL` legacy `visitor_id` values that do not correspond to `users.id` SHALL be set to `NULL` before the foreign key is added.
 
 #### Scenario: Column renamed in migration
 
@@ -113,3 +113,9 @@ The `sessions` table column `visitor_id` SHALL be renamed to `user_id`. A foreig
 - **WHEN** the migration runs on a database with existing sessions that have `visitor_id=NULL`
 - **THEN** those sessions SHALL have `user_id=NULL` after migration
 - **AND** no data loss SHALL occur
+
+#### Scenario: Existing sessions with legacy visitor_id values are nulled before FK creation
+
+- **WHEN** the migration runs on a database with existing sessions that have legacy non-`NULL` `visitor_id` values
+- **THEN** unmatched values SHALL be set to `NULL` before the foreign key is created
+- **AND** the migration SHALL complete without violating `sessions.user_id -> users.id`

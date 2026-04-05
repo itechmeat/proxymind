@@ -283,7 +283,7 @@ get_current_user(token: str = Depends(oauth2_scheme)) -> User
 - Generation: `secrets.token_urlsafe(32)`
 - Storage: SHA-256 hash in `user_refresh_tokens` table
 - TTL: 7 days
-- Transport: httpOnly cookie (`refresh_token`, Secure, SameSite=Lax) OR request body
+- Transport: httpOnly cookie (`refresh_token`, Secure via `AUTH_COOKIE_SECURE`, SameSite=Lax) OR request body
 - Rotation: on each refresh, old token is deleted, new one is created
 
 ### Email Verification Token
@@ -311,7 +311,7 @@ Protocol: EmailSender
   async send(to: str, subject: str, html_body: str) -> None
 
 Implementations:
-  ConsoleEmailSender  — logs to structlog (dev/test)
+  ConsoleEmailSender  — logs delivery metadata and can persist to an outbox dir (dev/test)
   ResendEmailSender   — sends via Resend API (prod)
 ```
 
@@ -411,8 +411,8 @@ Replaces the current `AuthDialog` modal flow. Separate from end-user auth pages.
 7. **SameSite=Lax** for refresh cookie — CSRF protection while allowing navigation
 8. **Cleanup job:** periodic cleanup of expired tokens from `user_tokens` and
    `user_refresh_tokens` (arq background task, runs every 6 hours)
-9. **Refresh cookie `Secure` flag:** derive from `FRONTEND_URL` scheme — `https://` → `Secure=True`,
-   `http://` → `Secure=False` (dev only). Never hardcode
+9. **Refresh cookie `Secure` flag:** drive it explicitly via `AUTH_COOKIE_SECURE`.
+   Development defaults to `false`; production deployments should set it to `true`.
 10. **User-scoped session persistence:** clear stored `proxymind_session_id` on logout; on login,
     start fresh session for the new user to prevent cross-user session access (403)
 

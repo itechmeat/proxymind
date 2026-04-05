@@ -6,7 +6,6 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { useAppTranslation } from "@/lib/i18n";
 import { getInitials } from "@/lib/identity";
-import { strings } from "@/lib/strings";
 
 import "./ChatHeader.css";
 
@@ -57,7 +56,7 @@ export function ChatHeader({
             ) : null}
           </Avatar>
           <div>
-            <p className="chat-header__status">{strings.headerStatus}</p>
+            <p className="chat-header__status">{t("common.chatStatus")}</p>
             <h1 className="chat-header__name">{name}</h1>
           </div>
         </div>
@@ -72,12 +71,12 @@ export function ChatHeader({
             {onSignOut ? (
               <Button onClick={onSignOut} type="button" variant="outline">
                 <LogOut size={16} />
-                {strings.signOutAction}
+                {t("common.signOut")}
               </Button>
             ) : null}
             {showSettingsButton ? (
               <Button
-                aria-label={strings.profileSettings}
+                aria-label={t("common.profileSettings")}
                 onClick={onOpenSettings}
                 size="icon-sm"
                 type="button"
