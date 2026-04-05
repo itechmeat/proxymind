@@ -48,10 +48,15 @@ export interface ProxyMindTransportOptions {
   api?: string;
   fetch?: typeof fetch;
   generateId?: () => string;
+  getAccessToken: (options?: {
+    forceRefresh?: boolean;
+  }) => Promise<string | null>;
+  onAuthFailure?: () => void;
   onCitations?: (payload: {
     messageId: string;
     citations: CitationResponse[];
   }) => void;
+  onSessionInvalidated?: () => void;
 }
 
 function getMessageText(message: ChatMessage | undefined) {
@@ -150,21 +155,30 @@ export class ProxyMindTransport implements ChatTransport<ChatMessage> {
   private readonly api: string;
   private readonly fetchImpl: typeof fetch;
   private readonly generateId: () => string;
+  private readonly getAccessToken: ProxyMindTransportOptions["getAccessToken"];
+  private readonly onAuthFailure?: ProxyMindTransportOptions["onAuthFailure"];
   private readonly onCitations?: ProxyMindTransportOptions["onCitations"];
+  private readonly onSessionInvalidated?: ProxyMindTransportOptions["onSessionInvalidated"];
   private readonly sessionId: string;
 
   constructor({
     sessionId,
     api = "/api/chat/messages",
-    fetch: fetchImpl = globalThis.fetch,
+    fetch: fetchImpl = globalThis.fetch.bind(globalThis),
     generateId = () => crypto.randomUUID(),
+    getAccessToken,
+    onAuthFailure,
     onCitations,
+    onSessionInvalidated,
   }: ProxyMindTransportOptions) {
     this.sessionId = sessionId;
     this.api = api;
     this.fetchImpl = fetchImpl;
     this.generateId = generateId;
+    this.getAccessToken = getAccessToken;
+    this.onAuthFailure = onAuthFailure;
     this.onCitations = onCitations;
+    this.onSessionInvalidated = onSessionInvalidated;
   }
 
   sendMessages: ChatTransport<ChatMessage>["sendMessages"] = async ({
@@ -354,11 +368,23 @@ export class ProxyMindTransport implements ChatTransport<ChatMessage> {
       }
     };
 
+    const emitAuthFailure = (
+      controller: ReadableStreamDefaultController<TransportChunk>,
+      detail: string = strings.authenticationRequired,
+    ) => {
+      this.onAuthFailure?.();
+      emitFailure(controller, detail, getHttpErrorMetadata(detail, 401));
+    };
+
     const attemptStream = async ({
+      accessToken,
+      allowUnauthorizedRetry,
       controller,
       replayBaseline,
       emitImmediateFailures,
     }: {
+      accessToken: string | null;
+      allowUnauthorizedRetry: boolean;
       controller: ReadableStreamDefaultController<TransportChunk>;
       replayBaseline: string | null;
       emitImmediateFailures: boolean;
@@ -372,10 +398,19 @@ export class ProxyMindTransport implements ChatTransport<ChatMessage> {
               buffer: "",
             };
 
+      if (!accessToken) {
+        if (emitImmediateFailures) {
+          emitAuthFailure(controller);
+          return "error";
+        }
+        return "closed";
+      }
+
       try {
         response = await this.fetchImpl(buildApiUrl(this.api), {
           method: "POST",
           headers: {
+            Authorization: `Bearer ${accessToken}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -397,7 +432,43 @@ export class ProxyMindTransport implements ChatTransport<ChatMessage> {
         return "closed";
       }
 
+      if (response.status === 401 && allowUnauthorizedRetry) {
+        const refreshedAccessToken = await this.getAccessToken({
+          forceRefresh: true,
+        });
+
+        if (!refreshedAccessToken) {
+          if (emitImmediateFailures) {
+            emitAuthFailure(controller);
+            return "error";
+          }
+
+          return "closed";
+        }
+
+        return await attemptStream({
+          accessToken: refreshedAccessToken,
+          allowUnauthorizedRetry: false,
+          controller,
+          replayBaseline,
+          emitImmediateFailures,
+        });
+      }
+
       if (!response.ok) {
+        if (response.status === 401) {
+          if (emitImmediateFailures) {
+            emitAuthFailure(controller, await readErrorDetail(response));
+            return "error";
+          }
+
+          return "closed";
+        }
+
+        if (response.status === 403 || response.status === 404) {
+          this.onSessionInvalidated?.();
+        }
+
         if (!emitImmediateFailures) {
           return "closed";
         }
@@ -436,7 +507,10 @@ export class ProxyMindTransport implements ChatTransport<ChatMessage> {
     return new ReadableStream<TransportChunk>({
       start: async (controller) => {
         try {
+          const accessToken = await this.getAccessToken();
           const firstAttempt = await attemptStream({
+            accessToken,
+            allowUnauthorizedRetry: true,
             controller,
             replayBaseline: null,
             emitImmediateFailures: true,
@@ -447,6 +521,8 @@ export class ProxyMindTransport implements ChatTransport<ChatMessage> {
           }
 
           const retryAttempt = await attemptStream({
+            accessToken: await this.getAccessToken(),
+            allowUnauthorizedRetry: true,
             controller,
             replayBaseline: accumulatedText,
             emitImmediateFailures: false,

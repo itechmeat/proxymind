@@ -38,7 +38,11 @@ class Session(PrimaryKeyMixin, TenantMixin, TimestampMixin, Base):
         server_default=text(f"'{SessionChannel.WEB.value}'"),
     )
     channel_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
-    visitor_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     external_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     channel_connector: Mapped[str | None] = mapped_column(String(255), nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)

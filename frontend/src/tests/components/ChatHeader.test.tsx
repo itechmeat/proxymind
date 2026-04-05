@@ -40,7 +40,9 @@ describe("ChatHeader", () => {
   });
 
   it("shows the settings button when admin mode is enabled", () => {
-    renderHeader(<ChatHeader adminMode name="ProxyMind" />);
+    renderHeader(
+      <ChatHeader adminMode name="ProxyMind" onOpenSettings={() => {}} />,
+    );
 
     expect(
       screen.getByRole("button", { name: strings.profileSettings }),
@@ -69,5 +71,19 @@ describe("ChatHeader", () => {
     expect(
       screen.queryByRole("link", { name: translate("admin.link") }),
     ).toBeNull();
+  });
+
+  it("hides the settings button when no handler is available", () => {
+    renderHeader(
+      <ChatHeader
+        canOpenSettings
+        name="ProxyMind"
+        onOpenSettings={undefined}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: strings.profileSettings }),
+    ).not.toBeInTheDocument();
   });
 });

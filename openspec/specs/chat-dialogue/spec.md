@@ -4,30 +4,36 @@ Chat session lifecycle, message send/receive, retrieval-augmented response gener
 
 ### Requirement: Session creation via POST /api/chat/sessions
 
-The system SHALL provide a `POST /api/chat/sessions` endpoint that creates a new chat session. The endpoint SHALL accept an optional `channel` field (default `"web"`). The session SHALL be created with `agent_id` set to `DEFAULT_AGENT_ID`. The `snapshot_id` SHALL be set to the currently active snapshot at creation time, or `null` if no active snapshot exists. The endpoint SHALL return 201 Created with the session data. No authentication SHALL be required.
+The system SHALL provide a `POST /api/chat/sessions` endpoint that creates a new chat session. The endpoint SHALL require authentication via the `get_current_user` dependency. The endpoint SHALL accept an optional `channel` field (default `"web"`). The session SHALL be created with `agent_id` set to `DEFAULT_AGENT_ID` and `user_id` set to the authenticated user's `id`. The `snapshot_id` SHALL be set to the currently active snapshot at creation time, or `null` if no active snapshot exists. The endpoint SHALL return 201 Created with the session data. Unauthenticated requests SHALL receive 401.
 
-#### Scenario: Create session with active snapshot
+#### Scenario: Create session with authenticated user
 
-- **WHEN** `POST /api/chat/sessions` is called with `{"channel": "web"}` and an active snapshot exists
+- **WHEN** `POST /api/chat/sessions` is called with a valid access token and `{"channel": "web"}` and an active snapshot exists
 - **THEN** the response SHALL be 201
+- **AND** the session's `user_id` SHALL be set to the authenticated user's `id`
 - **AND** the response SHALL contain `id` (UUID), `snapshot_id` (UUID of the active snapshot), `channel` ("web"), `status` ("active"), `message_count` (0), and `created_at`
+
+#### Scenario: Create session without authentication
+
+- **WHEN** `POST /api/chat/sessions` is called without a valid access token
+- **THEN** the response SHALL be 401
 
 #### Scenario: Create session without active snapshot
 
-- **WHEN** `POST /api/chat/sessions` is called and no active snapshot exists
+- **WHEN** `POST /api/chat/sessions` is called with a valid access token and no active snapshot exists
 - **THEN** the response SHALL be 201
 - **AND** `snapshot_id` SHALL be `null`
 
 #### Scenario: Create session with default channel
 
-- **WHEN** `POST /api/chat/sessions` is called with an empty body
+- **WHEN** `POST /api/chat/sessions` is called with a valid access token and an empty body
 - **THEN** the response SHALL be 201 with `channel` set to `"web"`
 
 ---
 
 ### Requirement: Message send via POST /api/chat/messages
 
-The system SHALL provide a `POST /api/chat/messages` endpoint that accepts `session_id` (UUID), `text` (non-empty string), and an optional `idempotency_key` (string, client-generated) in the `SendMessageRequest`. The endpoint SHALL save the user message with `role=user`, `status=received`, and `idempotency_key` (when provided), then perform query rewriting, then build a conversation memory block from session history, then perform retrieval against the session's active snapshot, then assemble a prompt using `ContextAssembler.assemble()` with the retrieval chunks, original user query, source map, and memory block, and stream the assistant's response as SSE (`text/event-stream; charset=utf-8`) with status 200. After the response completes successfully, if the memory block indicates `needs_summary_update=True`, the system SHALL enqueue a `generate_session_summary` arq task.
+The system SHALL provide a `POST /api/chat/messages` endpoint that accepts `session_id` (UUID), `text` (non-empty string), and an optional `idempotency_key` (string, client-generated) in the `SendMessageRequest`. The endpoint SHALL require authentication via the `get_current_user` dependency. Before processing the message, the system SHALL verify that `session.user_id == current_user.id`. If the session belongs to a different user, the endpoint SHALL return 403 Forbidden. The endpoint SHALL save the user message with `role=user`, `status=received`, and `idempotency_key` (when provided), then perform query rewriting, then build a conversation memory block from session history, then perform retrieval against the session's active snapshot, then assemble a prompt using `ContextAssembler.assemble()` with the retrieval chunks, original user query, source map, and memory block, and stream the assistant's response as SSE (`text/event-stream; charset=utf-8`) with status 200. After the response completes successfully, if the memory block indicates `needs_summary_update=True`, the system SHALL enqueue a `generate_session_summary` arq task.
 
 After the user message is persisted, the system SHALL load conversation history for the session, then call `QueryRewriteService.rewrite()` with the user's query text and the loaded history. The retrieval step SHALL use the rewritten query (or the original query if rewriting was skipped or failed). After query rewriting and before retrieval, the system SHALL build a `MemoryBlock` by calling `ConversationMemoryService.build_memory_block()` with the session and the loaded history (excluding the current user message). The prompt assembly step SHALL call `ContextAssembler.assemble(chunks=retrieved_chunks, query=original_query, source_map=source_map, memory_block=memory_block)` -- using the original user query text, not the rewritten query, and including the memory block. When rewriting produces a different query, the `rewritten_query` column on the user message SHALL be updated with the rewritten text.
 
@@ -48,6 +54,16 @@ On every response -- both the LLM-generated response path (`chat.assistant_compl
 - **WHEN** `POST /api/chat/messages` is called with a valid `session_id` and `text`, and the session has an active snapshot with indexed chunks
 - **THEN** the response SHALL be 200 with `Content-Type: text/event-stream; charset=utf-8`
 - **AND** the SSE stream SHALL emit `meta` (with `message_id`, `session_id`, `snapshot_id`), then one or more `token` events, then `done` (with `token_count_prompt`, `token_count_completion`, `model_name`, `retrieved_chunks_count`)
+
+#### Scenario: Unauthenticated message send
+
+- **WHEN** `POST /api/chat/messages` is called without a valid access token
+- **THEN** the response SHALL be 401
+
+#### Scenario: Message send to another user's session
+
+- **WHEN** `POST /api/chat/messages` is called with a valid access token but a `session_id` belonging to a different user
+- **THEN** the response SHALL be 403 Forbidden
 
 #### Scenario: ContextAssembler called with memory_block
 
@@ -491,7 +507,7 @@ When retrieval returns fewer chunks than `min_retrieved_chunks` (configurable, d
 
 ### Requirement: Session history via GET /api/chat/sessions/:id
 
-The system SHALL provide a `GET /api/chat/sessions/{session_id}` endpoint that returns the session with its ordered message history. Messages SHALL be ordered by `created_at` ascending. The response SHALL include `id`, `status`, `channel`, `snapshot_id`, `message_count`, `created_at`, and a `messages` array. Each message in the array SHALL be represented by the `MessageInHistory` schema and SHALL include `id`, `role`, `content`, `status`, `model_name` (for assistant messages), `created_at`, and a `citations` field (`list[CitationResponse] | None`).
+The system SHALL provide a `GET /api/chat/sessions/{session_id}` endpoint that returns the session with its ordered message history. The endpoint SHALL require authentication via the `get_current_user` dependency. Before returning the session, the system SHALL verify that `session.user_id == current_user.id`. If the session belongs to a different user, the endpoint SHALL return 403 Forbidden. Messages SHALL be ordered by `created_at` ascending. The response SHALL include `id`, `status`, `channel`, `snapshot_id`, `message_count`, `created_at`, and a `messages` array. Each message in the array SHALL be represented by the `MessageInHistory` schema and SHALL include `id`, `role`, `content`, `status`, `model_name` (for assistant messages), `created_at`, and a `citations` field (`list[CitationResponse] | None`).
 
 `CitationResponse` SHALL contain the following fields:
 
@@ -541,10 +557,54 @@ For user messages, the `citations` field SHALL be `null` (citations are not appl
 - **WHEN** `GET /api/chat/sessions/{session_id}` is called for a session with no messages
 - **THEN** the response SHALL be 200 with `messages` as an empty array and `message_count` of 0
 
+#### Scenario: Unauthenticated session read
+
+- **WHEN** `GET /api/chat/sessions/{session_id}` is called without a valid access token
+- **THEN** the response SHALL be 401
+
+#### Scenario: Reading another user's session
+
+- **WHEN** `GET /api/chat/sessions/{session_id}` is called with a valid access token but the session belongs to a different user
+- **THEN** the response SHALL be 403 Forbidden
+
 #### Scenario: Get non-existent session returns 404
 
 - **WHEN** `GET /api/chat/sessions/{session_id}` is called with a UUID that does not match any session
 - **THEN** the response SHALL be 404 with detail "Session not found"
+
+---
+
+### Requirement: Session list filtered by authenticated user
+
+The system SHALL require authentication via the `get_current_user` dependency on `GET /api/chat/sessions`. The endpoint SHALL return only sessions where `user_id == current_user.id`. A user SHALL NOT be able to see sessions belonging to other users.
+
+#### Scenario: User sees only their own sessions
+
+- **WHEN** `GET /api/chat/sessions` is called with a valid access token
+- **THEN** the response SHALL contain only sessions where `user_id` matches the authenticated user's `id`
+
+#### Scenario: Unauthenticated session list
+
+- **WHEN** `GET /api/chat/sessions` is called without a valid access token
+- **THEN** the response SHALL be 401
+
+---
+
+### Requirement: visitor_id renamed to user_id in sessions table
+
+The `sessions` table column `visitor_id` SHALL be renamed to `user_id`. A foreign key `sessions.user_id -> users(id) ON DELETE SET NULL` SHALL be added. The `user_id` column SHALL remain nullable (for future channel connectors using `external_user_id`). The `external_user_id` and `channel_connector` columns SHALL remain unchanged.
+
+#### Scenario: Column renamed in migration
+
+- **WHEN** the migration is applied
+- **THEN** the `sessions` table SHALL have a `user_id` column instead of `visitor_id`
+- **AND** a foreign key to `users(id)` with `ON DELETE SET NULL` SHALL exist
+
+#### Scenario: Existing sessions with NULL visitor_id migrate cleanly
+
+- **WHEN** the migration runs on a database with existing sessions that have `visitor_id=NULL`
+- **THEN** those sessions SHALL have `user_id=NULL` after migration
+- **AND** no data loss SHALL occur
 
 ---
 

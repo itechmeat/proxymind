@@ -1,3 +1,4 @@
+from app.db.models.auth import User, UserProfile, UserRefreshToken, UserToken
 from app.db.models.background_task import BackgroundTask
 from app.db.models.core import Agent, CatalogItem
 from app.db.models.dialogue import Message, Session
@@ -27,4 +28,8 @@ __all__ = [
     "Message",
     "Session",
     "Source",
+    "User",
+    "UserProfile",
+    "UserRefreshToken",
+    "UserToken",
 ]

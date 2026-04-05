@@ -1,15 +1,24 @@
 import { useChat } from "@ai-sdk/react";
-import { type ReactNode, useEffect, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { ChatHeader } from "@/components/ChatHeader";
 import { ChatInput } from "@/components/ChatInput";
 import { MessageList } from "@/components/MessageList";
 import { ProfileEditModal } from "@/components/ProfileEditModal";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/hooks/useAuth";
 import { useSession } from "@/hooks/useSession";
+import { useUserAuth } from "@/hooks/useUserAuth";
 import {
-  buildApiUrl,
+  type BlobUrlHandle,
   deleteTwinAvatar,
+  getTwinAvatarUrl,
   getTwinProfile,
   updateTwinProfile,
   uploadTwinAvatar,
@@ -23,6 +32,7 @@ import type { ChatMessage, TwinProfile } from "@/types/chat";
 import "./ChatPage.css";
 
 interface DisplayTwinProfile {
+  avatarRevoke?: () => void;
   avatarUrl?: string;
   hasAvatar: boolean;
   name: string;
@@ -30,8 +40,10 @@ interface DisplayTwinProfile {
 
 interface ChatPageFrameProps {
   body: ReactNode;
+  canOpenProfileSettings?: boolean;
   footer?: ReactNode;
   onOpenProfileSettings?: () => void;
+  onSignOut?: () => void;
   profile: DisplayTwinProfile;
 }
 
@@ -47,16 +59,12 @@ function resolveFallbackProfile(): DisplayTwinProfile {
 }
 
 function resolveApiProfile(
-  profile: TwinProfile | null,
-): DisplayTwinProfile | null {
-  if (!profile?.name?.trim()) {
-    return null;
-  }
-
+  profile: TwinProfile,
+  avatarHandle?: BlobUrlHandle,
+): DisplayTwinProfile {
   return {
-    avatarUrl: profile.has_avatar
-      ? buildApiUrl("/api/chat/twin/avatar")
-      : undefined,
+    avatarRevoke: avatarHandle?.revoke,
+    avatarUrl: avatarHandle?.url,
     hasAvatar: profile.has_avatar,
     name: profile.name.trim(),
   };
@@ -64,8 +72,10 @@ function resolveApiProfile(
 
 function ChatPageFrame({
   body,
+  canOpenProfileSettings,
   footer,
   onOpenProfileSettings,
+  onSignOut,
   profile,
 }: ChatPageFrameProps) {
   return (
@@ -83,8 +93,10 @@ function ChatPageFrame({
         <ChatHeader
           adminMode={appConfig.adminMode}
           avatarUrl={profile.avatarUrl}
+          canOpenSettings={canOpenProfileSettings}
           name={profile.name}
           onOpenSettings={onOpenProfileSettings}
+          onSignOut={onSignOut}
         />
         <div className="chat-page__body">{body}</div>
         {footer}
@@ -94,9 +106,14 @@ function ChatPageFrame({
 }
 
 function ChatPageLoading({
+  canOpenProfileSettings,
   onOpenProfileSettings,
+  onSignOut,
   profile,
-}: Pick<ChatPageFrameProps, "onOpenProfileSettings" | "profile">) {
+}: Pick<
+  ChatPageFrameProps,
+  "canOpenProfileSettings" | "onOpenProfileSettings" | "onSignOut" | "profile"
+>) {
   return (
     <ChatPageFrame
       body={
@@ -106,23 +123,29 @@ function ChatPageLoading({
           <div className="chat-page__loading-card chat-page__loading-card--narrow" />
         </div>
       }
+      canOpenProfileSettings={canOpenProfileSettings}
       onOpenProfileSettings={onOpenProfileSettings}
+      onSignOut={onSignOut}
       profile={profile}
     />
   );
 }
 
 interface ChatPageErrorProps {
+  canOpenProfileSettings?: boolean;
   detail: string;
   onRetry: () => void;
   onOpenProfileSettings?: () => void;
+  onSignOut?: () => void;
   profile: DisplayTwinProfile;
 }
 
 function ChatPageError({
+  canOpenProfileSettings,
   detail,
   onOpenProfileSettings,
   onRetry,
+  onSignOut,
   profile,
 }: ChatPageErrorProps) {
   return (
@@ -138,7 +161,9 @@ function ChatPageError({
           </Button>
         </div>
       }
+      canOpenProfileSettings={canOpenProfileSettings}
       onOpenProfileSettings={onOpenProfileSettings}
+      onSignOut={onSignOut}
       profile={profile}
     />
   );
@@ -177,21 +202,33 @@ function findRetryTarget(
 }
 
 interface ChatPageInnerProps {
+  canOpenProfileSettings?: boolean;
   initialMessages: ChatMessage[];
+  onAuthFailure: () => void;
   onOpenProfileSettings?: () => void;
+  onSignOut?: () => void;
+  onSessionInvalidated: () => void;
   profile: DisplayTwinProfile;
   sessionId: string;
 }
 
 function ChatPageInner({
+  canOpenProfileSettings,
   initialMessages,
+  onAuthFailure,
   onOpenProfileSettings,
+  onSignOut,
+  onSessionInvalidated,
   profile,
   sessionId,
 }: ChatPageInnerProps) {
+  const { getAccessToken } = useUserAuth();
   const [transport] = useState(
     () =>
       new ProxyMindTransport({
+        getAccessToken,
+        onAuthFailure,
+        onSessionInvalidated,
         sessionId,
       }),
   );
@@ -233,20 +270,28 @@ function ChatPageInner({
           twinName={profile.name}
         />
       }
+      canOpenProfileSettings={canOpenProfileSettings}
       footer={<ChatInput onSend={(text) => handleSend(text)} status={status} />}
       onOpenProfileSettings={onOpenProfileSettings}
+      onSignOut={onSignOut}
       profile={profile}
     />
   );
 }
 
 interface ChatPageLoaderProps {
+  canOpenProfileSettings?: boolean;
+  onAuthFailure: () => void;
   onOpenProfileSettings?: () => void;
+  onSignOut?: () => void;
   profile: DisplayTwinProfile;
 }
 
 function ChatPageLoader({
+  canOpenProfileSettings,
+  onAuthFailure,
   onOpenProfileSettings,
+  onSignOut,
   profile,
 }: ChatPageLoaderProps) {
   const { createNewSession, error, initialMessages, isLoading, sessionId } =
@@ -255,7 +300,9 @@ function ChatPageLoader({
   if (isLoading) {
     return (
       <ChatPageLoading
+        canOpenProfileSettings={canOpenProfileSettings}
         onOpenProfileSettings={onOpenProfileSettings}
+        onSignOut={onSignOut}
         profile={profile}
       />
     );
@@ -264,11 +311,13 @@ function ChatPageLoader({
   if (error || !sessionId) {
     return (
       <ChatPageError
+        canOpenProfileSettings={canOpenProfileSettings}
         detail={error ?? strings.sessionUnavailable}
         onOpenProfileSettings={onOpenProfileSettings}
         onRetry={() => {
           void createNewSession();
         }}
+        onSignOut={onSignOut}
         profile={profile}
       />
     );
@@ -276,9 +325,15 @@ function ChatPageLoader({
 
   return (
     <ChatPageInner
+      canOpenProfileSettings={canOpenProfileSettings}
       initialMessages={initialMessages}
       key={sessionId}
+      onAuthFailure={onAuthFailure}
       onOpenProfileSettings={onOpenProfileSettings}
+      onSignOut={onSignOut}
+      onSessionInvalidated={() => {
+        void createNewSession();
+      }}
       profile={profile}
       sessionId={sessionId}
     />
@@ -286,21 +341,74 @@ function ChatPageLoader({
 }
 
 export function ChatPage() {
+  const { getAccessToken, signOut } = useUserAuth();
+  const { isAuthenticated: isAdminAuthenticated } = useAuth();
   const [profile, setProfile] = useState<DisplayTwinProfile>(
     resolveFallbackProfile,
   );
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const avatarRevokeRef = useRef<(() => void) | null>(
+    profile.avatarRevoke ?? null,
+  );
+  const canManageTwin = appConfig.adminMode && isAdminAuthenticated;
+
+  useEffect(() => {
+    if (
+      avatarRevokeRef.current &&
+      avatarRevokeRef.current !== profile.avatarRevoke
+    ) {
+      avatarRevokeRef.current();
+    }
+    avatarRevokeRef.current = profile.avatarRevoke ?? null;
+  }, [profile.avatarRevoke]);
+
+  useEffect(() => {
+    return () => {
+      avatarRevokeRef.current?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!canManageTwin && profileModalOpen) {
+      setProfileModalOpen(false);
+    }
+  }, [canManageTwin, profileModalOpen]);
+
+  const loadProtectedProfile = useCallback(async () => {
+    const accessToken = await getAccessToken();
+    if (!accessToken) {
+      return resolveFallbackProfile();
+    }
+
+    const apiProfile = await getTwinProfile(accessToken);
+    if (!apiProfile.name?.trim()) {
+      return resolveFallbackProfile();
+    }
+
+    let avatarHandle: BlobUrlHandle | undefined;
+    if (apiProfile.has_avatar) {
+      try {
+        avatarHandle = await getTwinAvatarUrl(accessToken);
+      } catch {
+        avatarHandle = undefined;
+      }
+    }
+
+    return resolveApiProfile(apiProfile, avatarHandle);
+  }, [getAccessToken]);
 
   useEffect(() => {
     let active = true;
 
     const loadProfile = async () => {
       try {
-        const apiProfile = resolveApiProfile(await getTwinProfile());
-        if (active && apiProfile) {
-          setProfile(apiProfile);
+        const nextProfile = await loadProtectedProfile();
+        if (!active) {
+          nextProfile.avatarRevoke?.();
           return;
         }
+        setProfile(nextProfile);
+        return;
       } catch {
         // Fall back to environment defaults when the public profile endpoint is unavailable.
       }
@@ -315,48 +423,49 @@ export function ChatPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [loadProtectedProfile]);
 
   return (
     <>
       <ChatPageLoader
-        onOpenProfileSettings={() => {
-          setProfileModalOpen(true);
+        canOpenProfileSettings={canManageTwin}
+        onAuthFailure={() => {
+          void signOut();
+        }}
+        onOpenProfileSettings={
+          canManageTwin
+            ? () => {
+                setProfileModalOpen(true);
+              }
+            : undefined
+        }
+        onSignOut={() => {
+          void signOut();
         }}
         profile={profile}
       />
 
-      <ProfileEditModal
-        avatarUrl={profile.avatarUrl}
-        hasAvatar={profile.hasAvatar}
-        name={profile.name}
-        onOpenChange={setProfileModalOpen}
-        onRemoveAvatar={async () => {
-          const response = await deleteTwinAvatar();
-          setProfile((currentProfile) => ({
-            ...currentProfile,
-            avatarUrl: undefined,
-            hasAvatar: response.has_avatar,
-          }));
-        }}
-        onSave={async (name) => {
-          const nextProfile = resolveApiProfile(await updateTwinProfile(name));
-          if (nextProfile) {
-            setProfile(nextProfile);
-          }
-        }}
-        onUploadAvatar={async (file) => {
-          const response = await uploadTwinAvatar(file);
-          setProfile((currentProfile) => ({
-            ...currentProfile,
-            avatarUrl: response.has_avatar
-              ? buildApiUrl("/api/chat/twin/avatar")
-              : undefined,
-            hasAvatar: response.has_avatar,
-          }));
-        }}
-        open={profileModalOpen}
-      />
+      {canManageTwin ? (
+        <ProfileEditModal
+          avatarUrl={profile.avatarUrl}
+          hasAvatar={profile.hasAvatar}
+          name={profile.name}
+          onOpenChange={setProfileModalOpen}
+          onRemoveAvatar={async () => {
+            await deleteTwinAvatar();
+            setProfile(await loadProtectedProfile());
+          }}
+          onSave={async (name) => {
+            await updateTwinProfile(name);
+            setProfile(await loadProtectedProfile());
+          }}
+          onUploadAvatar={async (file) => {
+            await uploadTwinAvatar(file);
+            setProfile(await loadProtectedProfile());
+          }}
+          open={profileModalOpen}
+        />
+      ) : null}
     </>
   );
 }

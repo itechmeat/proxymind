@@ -1,0 +1,175 @@
+services:
+  postgres-e2e:
+    image: postgres:18
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: proxymind_e2e
+    volumes:
+      - postgres-e2e-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  qdrant-e2e:
+    image: qdrant/qdrant:v1.17.0
+    volumes:
+      - qdrant-e2e-data:/qdrant/storage
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bash",
+          "-lc",
+          "exec 3<>/dev/tcp/127.0.0.1/6333 && printf 'GET /readyz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && timeout 5 grep -q '200 OK' <&3",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  seaweedfs-e2e:
+    image: chrislusf/seaweedfs:latest
+    command: server -filer -dir=/data -master.port=9333 -filer.port=8888 -volume.port=9340
+    volumes:
+      - seaweedfs-e2e-data:/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:9333/cluster/healthz || exit 1",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  redis-e2e:
+    image: redis:8.6.1
+    volumes:
+      - redis-e2e-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis-test-e2e:
+    image: redis:8.6.1
+    volumes:
+      - redis-test-e2e-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  api-e2e:
+    build:
+      context: ./backend
+      target: runtime
+      args:
+        GIT_COMMIT_SHA: ${GIT_COMMIT_SHA:-}
+    entrypoint:
+      - /app/entrypoint.sh
+    env_file:
+      - .env
+      - ./backend/.env
+    environment:
+      POSTGRES_HOST: postgres-e2e
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: proxymind_e2e
+      REDIS_HOST: redis-e2e
+      REDIS_PORT: "6379"
+      QDRANT_HOST: qdrant-e2e
+      QDRANT_PORT: "6333"
+      QDRANT_COLLECTION: proxymind_chunks_e2e_api
+      SEAWEEDFS_HOST: seaweedfs-e2e
+      SEAWEEDFS_FILER_PORT: "8888"
+      SEAWEEDFS_SOURCES_PATH: /sources-e2e
+      FRONTEND_URL: http://127.0.0.1:4173
+      EMAIL_BACKEND: console
+      JWT_SECRET_KEY: test-jwt-secret-key-with-32-plus-chars
+      PERSONA_DIR: /app/persona
+      CONFIG_DIR: /app/config
+      OTEL_ENABLED: "false"
+      OTEL_SERVICE_NAME: proxymind-api-e2e
+      OTEL_ENVIRONMENT: docker-compose-e2e
+    ports:
+      - "${E2E_API_HOST_PORT:-18001}:8000"
+    volumes:
+      - ./persona:/app/persona:ro
+      - ./config:/app/config:ro
+    depends_on:
+      postgres-e2e:
+        condition: service_healthy
+      qdrant-e2e:
+        condition: service_healthy
+      seaweedfs-e2e:
+        condition: service_healthy
+      redis-e2e:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://127.0.0.1:8000/ready'')"',
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  backend-test-e2e:
+    build:
+      context: ./backend
+      target: test-runtime
+    entrypoint:
+      - sleep
+      - infinity
+    working_dir: /workspace/backend
+    env_file:
+      - .env
+      - ./backend/.env
+    environment:
+      PERSONA_DIR: /workspace/persona
+      CONFIG_DIR: /workspace/config
+      PYTEST_USE_EXISTING_POSTGRES: "1"
+      POSTGRES_HOST: postgres-e2e
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: test_proxymind_e2e
+      REDIS_HOST: redis-test-e2e
+      REDIS_PORT: "6379"
+      PYTEST_USE_EXISTING_QDRANT: "1"
+      QDRANT_HOST: qdrant-e2e
+      QDRANT_PORT: "6333"
+      QDRANT_URL: http://qdrant-e2e:6333
+      QDRANT_COLLECTION: proxymind_chunks_e2e_test
+      SEAWEEDFS_HOST: seaweedfs-e2e
+      SEAWEEDFS_FILER_PORT: "8888"
+      SEAWEEDFS_SOURCES_PATH: /sources-test-e2e
+      JWT_SECRET_KEY: test-jwt-secret-key-with-32-plus-chars
+      OTEL_ENABLED: "false"
+    volumes:
+      - ./:/workspace
+    depends_on:
+      postgres-e2e:
+        condition: service_healthy
+      qdrant-e2e:
+        condition: service_healthy
+      seaweedfs-e2e:
+        condition: service_healthy
+      redis-test-e2e:
+        condition: service_healthy
+
+volumes:
+  postgres-e2e-data:
+  qdrant-e2e-data:
+  seaweedfs-e2e-data:
+  redis-e2e-data:
+  redis-test-e2e-data:

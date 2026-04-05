@@ -212,8 +212,11 @@ export function useSources({
   }, [catalogRefreshIntervalMs, pushToast, refreshCatalogItems]);
 
   useEffect(() => {
-    const refreshCatalogOnFocus = () => {
-      if (document.visibilityState === "hidden") {
+    const refreshCatalogOnFocus = (event: Event) => {
+      if (
+        event.type === "visibilitychange" &&
+        document.visibilityState === "hidden"
+      ) {
         return;
       }
 

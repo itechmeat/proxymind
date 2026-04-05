@@ -2,7 +2,7 @@
 
 Initial focus — chat-first digital twin. The plan is built in vertical slices: each phase ends with a working and verifiable result. After phase 2, you can already upload a document and get an answer.
 
-> **Security ordering note:** The Chat API is public from S2-04, and Admin API endpoints are added throughout Phases 2–5, but API security (S7-01: auth + rate limiting) is in Phase 7. This is acceptable for local development but MUST be resolved before any production deployment. Rate limiting and admin auth are baseline security per `docs/development.md` and `docs/architecture.md`, not late hardening. For production readiness, implement S7-01 before exposing the instance to untrusted traffic.
+> **Security ordering note:** Early stories expose the Chat API publicly for local development, but this is not the target production posture. Admin API endpoints are added throughout Phases 2–5, while baseline API security begins in Phase 7. Public chat access MUST be removed before any production deployment. For production readiness, implement S7-03 in addition to S7-01 before exposing the instance to untrusted traffic. Rate limiting, admin auth, and authenticated visitor access are baseline security per `docs/development.md` and `docs/architecture.md`, not late hardening.
 
 ## Testing Strategy
 
@@ -200,7 +200,7 @@ Phase outcome: full commercial layer — catalog, recommendations, citation inte
 Phase outcome: the product is secured, observable, and auditable.
 
 - [x] **S7-01: API security — auth + rate limiting**
-      Admin API: API key (`Authorization: Bearer`), key from `.env`. Chat API: Redis-based rate limiting, configurable limits. Chat API remains public.
+      Admin API: API key (`Authorization: Bearer`), key from `.env`. Chat API: Redis-based rate limiting, configurable limits. Public chat in this story is local-development-only and is superseded by S7-03.
   - **Outcome:** admin endpoints protected; chat protected from abuse
   - **Verification:** admin without key → 401; with key → 200; exceed rate limit → 429; after cooldown → ok
   - Tasks: auth middleware, key config, error responses, rate limit middleware, Redis counters, keep admin auth isolated from future visitor identity for channel connectors
@@ -212,6 +212,12 @@ Phase outcome: the product is secured, observable, and auditable.
   - **Verification:** conversation → audit records with full data; dashboard with metrics; end-to-end request trace
   - Tasks: audit service, log schema, config hash injection, metrics middleware, Grafana provisioning, OTel instrumentation
   - **Parallel pair:** S6-02 (Catalog UI) — infra vs frontend, zero file overlap
+
+- [x] **S7-03: End-user authentication + authenticated chat API**
+      Website/app chat MUST be available only to an authenticated end user. All visitor-facing chat endpoints that create, read, or stream dialogue state MUST require authenticated user context, including session creation, message send, session history, and any twin-interaction endpoints currently exposed under the chat surface. Guest access MUST be restricted to authentication endpoints and narrow operational endpoints such as `/health` and `/ready`. The standard end-user auth flow is email-based: sign-in, registration, and password recovery/reset. Admin authentication MUST remain separate from end-user authentication and future external channel identity, and the frontend MUST expose it as a separate token-based admin page.
+  - **Outcome:** chat is private by default; authenticated users can talk to the twin; guests can only authenticate and access basic health endpoints; the frontend provides user auth pages and a separate admin token page
+  - **Verification:** guest `POST /api/chat/messages` → 401/403; guest `POST /api/chat/sessions` → 401/403; guest `GET /api/chat/sessions/:id` → 401/403; unauthenticated user opening chat UI is redirected to sign-in; authenticated user can register/sign in, create a session, send a message, and read session history; password recovery flow is reachable; admin token page authorizes admin UI separately; guest access still works for `/api/auth/*`, `/health`, and `/ready`
+  - Tasks: end-user email auth flow, visitor auth/session model, auth middleware/dependencies for visitor endpoints, protect chat/twin endpoints, explicit guest allowlist, frontend pages for sign-in/registration/password recovery, separate admin token page, deliberate choice of shared vs split user/admin frontend auth components, tests for guest vs authenticated access, docs alignment for public vs private API surfaces
 
 ### Phase 8: Evals and Quality
 

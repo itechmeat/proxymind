@@ -7,6 +7,12 @@ import type { ChatMessage } from "@/types/chat";
 
 const fetchMock = vi.fn<typeof fetch>();
 
+function createAccessTokenGetter(accessToken = "access-token") {
+  return vi
+    .fn<(options?: { forceRefresh?: boolean }) => Promise<string | null>>()
+    .mockResolvedValue(accessToken);
+}
+
 function createUserMessage(text: string, id = "user-1"): ChatMessage {
   return {
     id,
@@ -84,6 +90,7 @@ describe("ProxyMindTransport", () => {
     );
 
     const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
       sessionId: "session-1",
       fetch: fetchMock,
       generateId,
@@ -103,6 +110,10 @@ describe("ProxyMindTransport", () => {
     const body = JSON.parse(String(request[1]?.body));
 
     expect(request[0]).toBe(buildApiUrl("/api/chat/messages"));
+    expect(request[1]?.headers).toEqual({
+      Authorization: "Bearer access-token",
+      "Content-Type": "application/json",
+    });
     expect(body).toEqual({
       session_id: "session-1",
       text: "Hello",
@@ -190,6 +201,7 @@ describe("ProxyMindTransport", () => {
       );
 
     const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
       sessionId: "session-1",
       fetch: fetchMock,
       generateId,
@@ -233,6 +245,7 @@ describe("ProxyMindTransport", () => {
     );
 
     const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
       sessionId: "session-1",
       fetch: fetchMock,
       generateId,
@@ -277,6 +290,7 @@ describe("ProxyMindTransport", () => {
     );
 
     const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
       sessionId: "session-1",
       fetch: fetchMock,
       generateId,
@@ -319,6 +333,7 @@ describe("ProxyMindTransport", () => {
     fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
 
     const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
       sessionId: "session-1",
       fetch: fetchMock,
       generateId,
@@ -367,6 +382,7 @@ describe("ProxyMindTransport", () => {
     );
 
     const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
       sessionId: "session-1",
       fetch: fetchMock,
       generateId,
@@ -433,6 +449,7 @@ describe("ProxyMindTransport", () => {
       );
 
     const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
       sessionId: "session-1",
       fetch: fetchMock,
       generateId,
@@ -512,6 +529,7 @@ describe("ProxyMindTransport", () => {
       );
 
     const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
       sessionId: "session-1",
       fetch: fetchMock,
       generateId,
@@ -582,6 +600,7 @@ describe("ProxyMindTransport", () => {
       );
 
     const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
       sessionId: "session-1",
       fetch: fetchMock,
       generateId,

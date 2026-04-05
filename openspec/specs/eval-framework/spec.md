@@ -1,6 +1,6 @@
 # eval-framework
 
-Eval runner infrastructure: YAML dataset format, Pydantic-validated loader, pluggable scorer protocol, suite runner, report generator, and CLI entry point. Runs separately from CI in the `backend-test` container against a live stack via HTTP API.
+Eval runner infrastructure: YAML dataset format, Pydantic-validated loader, pluggable scorer protocol, suite runner, report generator, and CLI entry point. Runs separately from CI in the isolated `backend-test-e2e` runner against the isolated `api-e2e` stack via HTTP API.
 
 ## ADDED Requirements
 

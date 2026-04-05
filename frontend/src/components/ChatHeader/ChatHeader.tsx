@@ -1,4 +1,4 @@
-import { Settings } from "lucide-react";
+import { LogOut, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 
@@ -13,19 +13,25 @@ import "./ChatHeader.css";
 interface ChatHeaderProps {
   adminMode?: boolean;
   avatarUrl?: string;
+  canOpenSettings?: boolean;
   name: string;
   onOpenSettings?: () => void;
+  onSignOut?: () => void;
 }
 
 export function ChatHeader({
   adminMode = false,
   avatarUrl,
+  canOpenSettings = adminMode,
   name,
   onOpenSettings,
+  onSignOut,
 }: ChatHeaderProps) {
   const { t } = useAppTranslation();
   const initials = getInitials(name);
   const [showAvatarImage, setShowAvatarImage] = useState(Boolean(avatarUrl));
+  const showSettingsButton = Boolean(canOpenSettings && onOpenSettings);
+  const showActions = adminMode || showSettingsButton || Boolean(onSignOut);
 
   useEffect(() => {
     setShowAvatarImage(Boolean(avatarUrl));
@@ -56,20 +62,30 @@ export function ChatHeader({
           </div>
         </div>
 
-        {adminMode ? (
+        {showActions ? (
           <div className="chat-header__actions">
-            <Button asChild type="button" variant="outline">
-              <Link to="/admin">{t("admin.link")}</Link>
-            </Button>
-            <Button
-              aria-label={strings.profileSettings}
-              onClick={onOpenSettings}
-              size="icon-sm"
-              type="button"
-              variant="outline"
-            >
-              <Settings size={18} />
-            </Button>
+            {adminMode ? (
+              <Button asChild type="button" variant="outline">
+                <Link to="/admin">{t("admin.link")}</Link>
+              </Button>
+            ) : null}
+            {onSignOut ? (
+              <Button onClick={onSignOut} type="button" variant="outline">
+                <LogOut size={16} />
+                {strings.signOutAction}
+              </Button>
+            ) : null}
+            {showSettingsButton ? (
+              <Button
+                aria-label={strings.profileSettings}
+                onClick={onOpenSettings}
+                size="icon-sm"
+                type="button"
+                variant="outline"
+              >
+                <Settings size={18} />
+              </Button>
+            ) : null}
           </div>
         ) : null}
       </div>

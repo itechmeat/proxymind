@@ -4,7 +4,9 @@ import re
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import httpx
 import pytest
+from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -60,7 +62,7 @@ async def restore_twin_profile(
 
 @pytest.mark.asyncio
 async def test_get_twin_profile_returns_name_and_avatar_state(
-    profile_client,
+    user_profile_client,
     session_factory: async_sessionmaker[AsyncSession],
     restore_twin_profile,
 ) -> None:
@@ -70,7 +72,7 @@ async def test_get_twin_profile_returns_name_and_avatar_state(
         avatar_url="agents/00000000-0000-0000-0000-000000000001/avatar/test.png",
     )
 
-    response = await profile_client.get("/api/chat/twin")
+    response = await user_profile_client.get("/api/chat/twin")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -242,20 +244,20 @@ async def test_upload_avatar_logs_warning_when_previous_avatar_cleanup_fails(
 
 @pytest.mark.asyncio
 async def test_get_avatar_returns_404_when_missing(
-    profile_client,
+    user_profile_client,
     session_factory: async_sessionmaker[AsyncSession],
     restore_twin_profile,
 ) -> None:
     await _update_agent(session_factory, avatar_url=None)
 
-    response = await profile_client.get("/api/chat/twin/avatar")
+    response = await user_profile_client.get("/api/chat/twin/avatar")
 
     assert response.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_get_avatar_returns_bytes_and_content_type(
-    profile_client,
+    user_profile_client,
     session_factory: async_sessionmaker[AsyncSession],
     mock_storage_service: SimpleNamespace,
     restore_twin_profile,
@@ -266,7 +268,7 @@ async def test_get_avatar_returns_bytes_and_content_type(
     )
     mock_storage_service.download.return_value = b"png-avatar"
 
-    response = await profile_client.get("/api/chat/twin/avatar")
+    response = await user_profile_client.get("/api/chat/twin/avatar")
 
     assert response.status_code == 200
     assert response.content == b"png-avatar"
@@ -274,6 +276,24 @@ async def test_get_avatar_returns_bytes_and_content_type(
     mock_storage_service.download.assert_awaited_once_with(
         "agents/00000000-0000-0000-0000-000000000001/avatar/test.png"
     )
+
+
+@pytest.mark.asyncio
+async def test_guest_cannot_access_twin_profile(profile_app: FastAPI) -> None:
+    transport = httpx.ASGITransport(app=profile_app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/api/chat/twin")
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_guest_cannot_access_twin_avatar(profile_app: FastAPI) -> None:
+    transport = httpx.ASGITransport(app=profile_app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/api/chat/twin/avatar")
+
+    assert response.status_code == 401
 
 
 @pytest.mark.asyncio

@@ -219,7 +219,7 @@ def test_eval_config_snapshot_id_validated():
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-docker compose run --rm backend-test python -m pytest tests/unit/test_eval_models.py -v
+make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_eval_models.py -v"
 ```
 
 Expected: FAIL — `ModuleNotFoundError: No module named 'evals'`
@@ -351,7 +351,7 @@ class EvalConfig(BaseModel):
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-docker compose run --rm backend-test python -m pytest tests/unit/test_eval_models.py -v
+make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_eval_models.py -v"
 ```
 
 Expected: all PASS
@@ -472,7 +472,7 @@ def test_filter_by_tags_no_match_drops_suite(valid_yaml: Path):
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-docker compose run --rm backend-test python -m pytest tests/unit/test_eval_loader.py -v
+make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_eval_loader.py -v"
 ```
 
 Expected: FAIL — `ModuleNotFoundError: No module named 'evals.loader'`
@@ -540,7 +540,7 @@ def load_datasets(
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-docker compose run --rm backend-test python -m pytest tests/unit/test_eval_loader.py -v
+make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_eval_loader.py -v"
 ```
 
 Expected: all PASS
@@ -784,7 +784,7 @@ class TestMRR:
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-docker compose run --rm backend-test python -m pytest tests/unit/test_eval_scorers.py -v
+make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_eval_scorers.py -v"
 ```
 
 Expected: FAIL — `ModuleNotFoundError: No module named 'evals.scorers'`
@@ -933,7 +933,7 @@ class MRRScorer:
 - [ ] **Step 7: Run tests to verify they pass**
 
 ```bash
-docker compose run --rm backend-test python -m pytest tests/unit/test_eval_scorers.py -v
+make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_eval_scorers.py -v"
 ```
 
 Expected: all PASS
@@ -1069,7 +1069,7 @@ async def test_retrieve_empty_query(app: FastAPI, client: AsyncClient):
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-docker compose run --rm backend-test python -m pytest tests/unit/test_admin_eval_api.py -v
+make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_admin_eval_api.py -v"
 ```
 
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.api.admin_eval'`
@@ -1173,7 +1173,7 @@ app.include_router(admin_eval_router)
 - [ ] **Step 6: Run tests to verify they pass**
 
 ```bash
-docker compose run --rm backend-test python -m pytest tests/unit/test_admin_eval_api.py -v
+make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_admin_eval_api.py -v"
 ```
 
 Expected: all PASS
@@ -1277,7 +1277,7 @@ async def test_retrieve_api_error(config: EvalConfig):
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-docker compose run --rm backend-test python -m pytest tests/unit/test_eval_client.py -v
+make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_eval_client.py -v"
 ```
 
 Expected: FAIL — `ModuleNotFoundError: No module named 'evals.client'`
@@ -1339,7 +1339,7 @@ class EvalClient:
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-docker compose run --rm backend-test python -m pytest tests/unit/test_eval_client.py -v
+make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_eval_client.py -v"
 ```
 
 Expected: all PASS
@@ -1463,7 +1463,7 @@ async def test_runner_handles_api_error():
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-docker compose run --rm backend-test python -m pytest tests/unit/test_eval_runner.py -v
+make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_eval_runner.py -v"
 ```
 
 Expected: FAIL — `ModuleNotFoundError: No module named 'evals.runner'`
@@ -1582,7 +1582,7 @@ class SuiteRunner:
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-docker compose run --rm backend-test python -m pytest tests/unit/test_eval_runner.py -v
+make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_eval_runner.py -v"
 ```
 
 Expected: all PASS
@@ -1731,7 +1731,7 @@ def test_report_with_errors(tmp_path: Path):
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-docker compose run --rm backend-test python -m pytest tests/unit/test_eval_report.py -v
+make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_eval_report.py -v"
 ```
 
 Expected: FAIL — `ModuleNotFoundError: No module named 'evals.report'`
@@ -1825,7 +1825,7 @@ class ReportGenerator:
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-docker compose run --rm backend-test python -m pytest tests/unit/test_eval_report.py -v
+make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_eval_report.py -v"
 ```
 
 Expected: all PASS
@@ -1982,7 +1982,7 @@ Create `backend/evals/datasets/retrieval_basic.yaml`:
 
 ```yaml
 # Seed eval dataset — replace UUIDs with real values from your knowledge base.
-# Run: docker compose run --rm backend-test python -m evals.run_evals
+# Run: make evals-isolated
 
 suite: retrieval_basic
 description: "Basic retrieval quality smoke test"
@@ -1999,7 +1999,7 @@ cases:
 - [ ] **Step 3: Verify CLI parses correctly**
 
 ```bash
-docker compose run --rm backend-test python -m evals.run_evals --help
+make evals-isolated EVAL_ARGS="--help"
 ```
 
 Expected: help output with all options listed
@@ -2018,7 +2018,7 @@ git commit -m "feat(evals): add CLI entry point and seed dataset"
 - [ ] **Step 1: Run all eval-related tests together**
 
 ```bash
-docker compose run --rm backend-test python -m pytest tests/unit/test_eval_models.py tests/unit/test_eval_loader.py tests/unit/test_eval_scorers.py tests/unit/test_eval_runner.py tests/unit/test_eval_report.py tests/unit/test_eval_client.py tests/unit/test_admin_eval_api.py -v
+make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_eval_models.py tests/unit/test_eval_loader.py tests/unit/test_eval_scorers.py tests/unit/test_eval_runner.py tests/unit/test_eval_report.py tests/unit/test_eval_client.py tests/unit/test_admin_eval_api.py -v"
 ```
 
 Expected: all PASS
@@ -2026,7 +2026,7 @@ Expected: all PASS
 - [ ] **Step 2: Run full test suite to check for regressions**
 
 ```bash
-docker compose run --rm backend-test python -m pytest tests/ -v --timeout=60
+make backend-exec-isolated BACKEND_CMD="python -m pytest tests/ -v --timeout=60"
 ```
 
 Expected: all existing tests still PASS, new eval tests PASS
@@ -2034,7 +2034,7 @@ Expected: all existing tests still PASS, new eval tests PASS
 - [ ] **Step 3: Run ruff lint**
 
 ```bash
-docker compose run --rm backend-test python -m ruff check evals/ app/api/admin_eval.py app/api/eval_schemas.py
+make backend-exec-isolated BACKEND_CMD="python -m ruff check evals/ app/api/admin_eval.py app/api/eval_schemas.py"
 ```
 
 Expected: no lint errors

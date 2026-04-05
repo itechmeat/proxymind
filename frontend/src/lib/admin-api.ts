@@ -1,3 +1,4 @@
+import { getAdminKey } from "@/hooks/useAuth";
 import { buildApiUrl, parseJsonResponse } from "@/lib/api";
 import type {
   CatalogItem,
@@ -17,11 +18,32 @@ import type {
   SourceUploadResponse,
 } from "@/types/admin";
 
+function authHeaders(): Record<string, string> {
+  const key = getAdminKey();
+  if (!key) {
+    return {};
+  }
+  return { Authorization: `Bearer ${key}` };
+}
+
+export async function validateAdminKey(key: string): Promise<void> {
+  const response = await fetch(buildApiUrl("/api/admin/auth/me"), {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${key}`,
+    },
+  });
+
+  await parseJsonResponse<{ ok: boolean }>(response);
+}
+
 export async function getSources(): Promise<SourceListItem[]> {
   const response = await fetch(buildApiUrl("/api/admin/sources"), {
     method: "GET",
     headers: {
       Accept: "application/json",
+      ...authHeaders(),
     },
   });
 
@@ -38,6 +60,7 @@ export async function uploadSource(
 
   const response = await fetch(buildApiUrl("/api/admin/sources"), {
     method: "POST",
+    headers: authHeaders(),
     body: formData,
   });
 
@@ -53,6 +76,7 @@ export async function deleteSource(
       method: "DELETE",
       headers: {
         Accept: "application/json",
+        ...authHeaders(),
       },
     },
   );
@@ -68,6 +92,7 @@ export async function getSnapshots(
     method: "GET",
     headers: {
       Accept: "application/json",
+      ...authHeaders(),
     },
   });
 
@@ -79,6 +104,7 @@ export async function createSnapshot(): Promise<SnapshotResponse> {
     method: "POST",
     headers: {
       Accept: "application/json",
+      ...authHeaders(),
     },
   });
 
@@ -98,6 +124,7 @@ export async function publishSnapshot(
       method: "POST",
       headers: {
         Accept: "application/json",
+        ...authHeaders(),
       },
     },
   );
@@ -116,6 +143,7 @@ export async function activateSnapshot(
       method: "POST",
       headers: {
         Accept: "application/json",
+        ...authHeaders(),
       },
     },
   );
@@ -134,6 +162,7 @@ export async function rollbackSnapshot(
       method: "POST",
       headers: {
         Accept: "application/json",
+        ...authHeaders(),
       },
     },
   );
@@ -156,6 +185,7 @@ export async function testDraftSnapshot(
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
+        ...authHeaders(),
       },
       body: JSON.stringify({
         top_n: payload.top_n ?? 5,
@@ -182,6 +212,7 @@ export async function getCatalogItems(
     method: "GET",
     headers: {
       Accept: "application/json",
+      ...authHeaders(),
     },
   });
 
@@ -197,6 +228,7 @@ export async function getCatalogItem(
       method: "GET",
       headers: {
         Accept: "application/json",
+        ...authHeaders(),
       },
     },
   );
@@ -212,6 +244,7 @@ export async function createCatalogItem(
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
+      ...authHeaders(),
     },
     body: JSON.stringify(data),
   });
@@ -230,6 +263,7 @@ export async function updateCatalogItem(
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
+        ...authHeaders(),
       },
       body: JSON.stringify(data),
     },
@@ -247,6 +281,7 @@ export async function deleteCatalogItem(
       method: "DELETE",
       headers: {
         Accept: "application/json",
+        ...authHeaders(),
       },
     },
   );
@@ -265,6 +300,7 @@ export async function updateSource(
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
+        ...authHeaders(),
       },
       body: JSON.stringify(data),
     },

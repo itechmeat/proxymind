@@ -1,10 +1,11 @@
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, LogOut } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, Outlet } from "react-router";
+import { Link, Outlet, useNavigate } from "react-router";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { TabsLink, TabsList } from "@/components/ui/tabs";
+import { useAuth } from "@/hooks/useAuth";
 import { ToastProvider } from "@/hooks/useToast";
 import { getTwinProfile } from "@/lib/api";
 import { appConfig } from "@/lib/config";
@@ -40,6 +41,8 @@ function resolveApiProfile(
 
 export function AdminPage() {
   const { t } = useAppTranslation();
+  const { logout } = useAuth();
+  const navigate = useNavigate();
   const [profile, setProfile] = useState<DisplayTwinProfile>(
     resolveFallbackProfile,
   );
@@ -79,6 +82,17 @@ export function AdminPage() {
                     <ArrowLeft className="size-4" />
                     Chat
                   </Link>
+                </Button>
+                <Button
+                  onClick={() => {
+                    logout();
+                    navigate("/");
+                  }}
+                  type="button"
+                  variant="outline"
+                >
+                  <LogOut className="size-4" />
+                  {t("admin.signOut")}
                 </Button>
 
                 <div>

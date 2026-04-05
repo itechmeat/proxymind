@@ -14,6 +14,7 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx_sse import aconnect_sse
+from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -156,6 +157,8 @@ def rewriting_chat_app(
     app = FastAPI()
     app.include_router(chat_router)
     app.state.settings = SimpleNamespace(
+        jwt_access_token_expire_minutes=15,
+        jwt_secret_key=SecretStr("test-jwt-secret-key-with-32-plus-chars"),
         min_retrieved_chunks=1,
         max_citations_per_response=5,
         retrieval_context_budget=4096,
@@ -188,9 +191,18 @@ def rewriting_chat_app(
 
 
 @pytest_asyncio.fixture
-async def rewriting_chat_client(rewriting_chat_app) -> httpx.AsyncClient:
+async def rewriting_chat_client(
+    rewriting_chat_app,
+    create_user,
+    make_user_auth_headers,
+) -> httpx.AsyncClient:
+    user = await create_user()
     transport = httpx.ASGITransport(app=rewriting_chat_app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+        headers=make_user_auth_headers(user),
+    ) as client:
         yield client
 
 
@@ -570,12 +582,19 @@ async def test_sse_returns_500_and_persists_failed_on_retrieval_error(
     chat_app,
     session_factory: async_sessionmaker[AsyncSession],
     mock_retrieval_service,
+    create_user,
+    make_user_auth_headers,
 ) -> None:
     await _create_snapshot(session_factory, status=SnapshotStatus.ACTIVE)
     mock_retrieval_service.search.side_effect = RetrievalError("Retrieval failed")
+    user = await create_user()
 
     transport = httpx.ASGITransport(app=chat_app, raise_app_exceptions=False)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+        headers=make_user_auth_headers(user),
+    ) as client:
         session_resp = await client.post("/api/chat/sessions", json={})
         session_id = session_resp.json()["id"]
         response = await client.post(
@@ -826,6 +845,8 @@ async def test_sse_emits_timeout_error_and_persists_failed(
     mock_retrieval_service,
     mock_llm_service,
     sample_retrieved_chunk,
+    create_user,
+    make_user_auth_headers,
 ) -> None:
     await _create_snapshot(session_factory, status=SnapshotStatus.ACTIVE)
     chat_app.state.settings.sse_heartbeat_interval_seconds = 10
@@ -837,9 +858,14 @@ async def test_sse_emits_timeout_error_and_persists_failed(
         yield LLMToken(content="late")
 
     mock_llm_service.stream = AsyncMock(side_effect=hanging_stream)
+    user = await create_user()
 
     transport = httpx.ASGITransport(app=chat_app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+        headers=make_user_auth_headers(user),
+    ) as client:
         session_id = (await client.post("/api/chat/sessions", json={})).json()["id"]
         async with aconnect_sse(
             client,
@@ -870,6 +896,8 @@ async def test_sse_emits_heartbeat_before_tokens(
     mock_retrieval_service,
     mock_llm_service,
     sample_retrieved_chunk,
+    create_user,
+    make_user_auth_headers,
 ) -> None:
     await _create_snapshot(session_factory, status=SnapshotStatus.ACTIVE)
     chat_app.state.settings.sse_heartbeat_interval_seconds = 1
@@ -886,9 +914,14 @@ async def test_sse_emits_heartbeat_before_tokens(
         )
 
     mock_llm_service.stream = AsyncMock(side_effect=slow_first_token)
+    user = await create_user()
 
     transport = httpx.ASGITransport(app=chat_app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+        headers=make_user_auth_headers(user),
+    ) as client:
         session_id = (await client.post("/api/chat/sessions", json={})).json()["id"]
 
         async with client.stream(
@@ -913,6 +946,8 @@ async def test_sse_saves_partial_on_early_disconnect(
     mock_retrieval_service,
     mock_llm_service,
     sample_retrieved_chunk,
+    create_user,
+    make_user_auth_headers,
 ) -> None:
     await _create_snapshot(session_factory, status=SnapshotStatus.ACTIVE)
     chat_app.state.settings.sse_heartbeat_interval_seconds = 1
@@ -935,9 +970,14 @@ async def test_sse_saves_partial_on_early_disconnect(
         )
 
     mock_llm_service.stream = AsyncMock(side_effect=slow_stream)
+    user = await create_user()
 
     transport = httpx.ASGITransport(app=chat_app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+        headers=make_user_auth_headers(user),
+    ) as client:
         session_resp = await client.post("/api/chat/sessions", json={})
         session_id = session_resp.json()["id"]
 

@@ -1,3 +1,4 @@
+import { getAdminKey } from "@/hooks/useAuth";
 import { appConfig } from "@/lib/config";
 import { strings } from "@/lib/strings";
 import type {
@@ -15,6 +16,11 @@ export class ApiError extends Error {
     this.name = "ApiError";
     this.status = status;
   }
+}
+
+export interface BlobUrlHandle {
+  revoke: () => void;
+  url: string;
 }
 
 export function buildApiUrl(pathname: string) {
@@ -46,11 +52,24 @@ export async function parseJsonResponse<T>(response: Response): Promise<T> {
   throw new ApiError(response.status, detail);
 }
 
-export async function createSession(): Promise<SessionResponse> {
+function endUserAuthHeaders(accessToken?: string): Record<string, string> {
+  if (!accessToken) {
+    return {};
+  }
+
+  return {
+    Authorization: `Bearer ${accessToken}`,
+  };
+}
+
+export async function createSession(
+  accessToken: string,
+): Promise<SessionResponse> {
   const response = await fetch(buildApiUrl("/api/chat/sessions"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...endUserAuthHeaders(accessToken),
     },
     body: JSON.stringify({ channel: "web" }),
   });
@@ -60,6 +79,7 @@ export async function createSession(): Promise<SessionResponse> {
 
 export async function getSession(
   sessionId: string,
+  accessToken: string,
 ): Promise<SessionWithMessagesResponse> {
   const response = await fetch(
     buildApiUrl(`/api/chat/sessions/${encodeURIComponent(sessionId)}`),
@@ -67,6 +87,7 @@ export async function getSession(
       method: "GET",
       headers: {
         Accept: "application/json",
+        ...endUserAuthHeaders(accessToken),
       },
     },
   );
@@ -74,15 +95,50 @@ export async function getSession(
   return parseJsonResponse<SessionWithMessagesResponse>(response);
 }
 
-export async function getTwinProfile(): Promise<TwinProfile> {
+export async function getTwinProfile(
+  accessToken?: string,
+): Promise<TwinProfile> {
   const response = await fetch(buildApiUrl("/api/chat/twin"), {
     method: "GET",
     headers: {
       Accept: "application/json",
+      ...endUserAuthHeaders(accessToken),
     },
   });
 
   return parseJsonResponse<TwinProfile>(response);
+}
+
+export async function getTwinAvatarUrl(
+  accessToken: string,
+): Promise<BlobUrlHandle> {
+  const response = await fetch(buildApiUrl("/api/chat/twin/avatar"), {
+    method: "GET",
+    headers: {
+      ...endUserAuthHeaders(accessToken),
+    },
+  });
+
+  if (!response.ok) {
+    await parseJsonResponse<never>(response);
+  }
+
+  const avatarBlob = await response.blob();
+  const url = URL.createObjectURL(avatarBlob);
+  return {
+    url,
+    revoke: () => {
+      URL.revokeObjectURL(url);
+    },
+  };
+}
+
+function adminAuthHeaders(): Record<string, string> {
+  const key = getAdminKey();
+  if (!key) {
+    return {};
+  }
+  return { Authorization: `Bearer ${key}` };
 }
 
 export async function updateTwinProfile(name: string): Promise<TwinProfile> {
@@ -90,6 +146,7 @@ export async function updateTwinProfile(name: string): Promise<TwinProfile> {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
+      ...adminAuthHeaders(),
     },
     body: JSON.stringify({ name }),
   });
@@ -105,6 +162,7 @@ export async function uploadTwinAvatar(
 
   const response = await fetch(buildApiUrl("/api/admin/agent/avatar"), {
     method: "POST",
+    headers: adminAuthHeaders(),
     body: formData,
   });
 
@@ -116,6 +174,7 @@ export async function deleteTwinAvatar(): Promise<AvatarUploadResponse> {
     method: "DELETE",
     headers: {
       Accept: "application/json",
+      ...adminAuthHeaders(),
     },
   });
 

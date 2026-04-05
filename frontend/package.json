@@ -6,10 +6,14 @@
   "scripts": {
     "check": "tsc -b",
     "dev": "vite",
+    "dev:mock": "vite --mode mock --port 5174",
     "build": "tsc -b && vite build",
     "lint": "biome check .",
     "format": "biome format --write .",
     "preview": "vite preview",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:install": "playwright install chromium",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -35,6 +39,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.7",
+    "@playwright/test": "^1.59.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
@@ -43,8 +48,14 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "happy-dom": "^20.8.8",
+    "msw": "^2.12.14",
     "typescript": "~5.9.3",
     "vite": "^8.0.0",
     "vitest": "^4.1.1"
+  },
+  "msw": {
+    "workerDirectory": [
+      "public"
+    ]
   }
 }

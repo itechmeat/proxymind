@@ -56,6 +56,11 @@
       "sourceType": "github",
       "computedHash": "1baf227ca684fc8ef9f4b12ca08dd145aaf56c46002dec2bc3f29acdf9aef7be"
     },
+    "msw": {
+      "source": "pproenca/dot-skills",
+      "sourceType": "github",
+      "computedHash": "c432eaa96c11e729a6d305988c79bf944d6a741bc55e6a51ba5fae8d6031f976"
+    },
     "next-best-practices": {
       "source": "vercel-labs/next-skills",
       "sourceType": "github",

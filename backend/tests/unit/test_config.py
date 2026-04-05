@@ -6,6 +6,12 @@ from pydantic import ValidationError
 from app.core.config import Settings
 
 
+@pytest.fixture(autouse=True)
+def clear_document_ai_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DOCUMENT_AI_PROJECT_ID", "")
+    monkeypatch.setenv("DOCUMENT_AI_PROCESSOR_ID", "")
+
+
 def _base_settings() -> dict[str, object]:
     return {
         "postgres_host": "localhost",
@@ -19,6 +25,7 @@ def _base_settings() -> dict[str, object]:
         "qdrant_port": 6333,
         "seaweedfs_host": "localhost",
         "seaweedfs_filer_port": 8888,
+        "jwt_secret_key": "test-jwt-secret-key-with-32-plus-chars",
     }
 
 
@@ -55,6 +62,23 @@ def test_sparse_backend_defaults_to_bm25() -> None:
     settings = Settings(**_base_settings())
 
     assert settings.sparse_backend == "bm25"
+
+
+def test_jwt_secret_key_rejects_values_shorter_than_32_chars() -> None:
+    settings = _base_settings()
+    settings["jwt_secret_key"] = "too-short-secret"
+    with pytest.raises(ValidationError, match="JWT_SECRET_KEY must be at least 32 characters long"):
+        Settings(**settings)
+
+
+def test_jwt_secret_key_rejects_placeholder_values() -> None:
+    settings = _base_settings()
+    settings["jwt_secret_key"] = "replace-with-64-hex-characters-minimum"
+    with pytest.raises(
+        ValidationError,
+        match="JWT_SECRET_KEY must be set to a non-placeholder secret",
+    ):
+        Settings(**settings)
 
 
 def test_sparse_backend_rejects_unknown_value() -> None:
@@ -253,7 +277,9 @@ def test_empty_optional_provider_strings_are_normalized_to_none() -> None:
     assert settings.bge_m3_provider_url is None
 
 
-def test_vertex_ai_requires_project_or_api_key() -> None:
+def test_vertex_ai_requires_project_or_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
     with pytest.raises(
         ValidationError,
         match=(
@@ -261,7 +287,7 @@ def test_vertex_ai_requires_project_or_api_key() -> None:
             "GOOGLE_GENAI_USE_VERTEXAI is enabled"
         ),
     ):
-        Settings(**_base_settings(), google_genai_use_vertexai=True)
+        Settings(_env_file=None, **_base_settings(), google_genai_use_vertexai=True)
 
 
 def test_vertex_ai_accepts_project_without_api_key() -> None:
@@ -326,8 +352,9 @@ def test_max_citations_per_response_rejects_non_positive_value() -> None:
         Settings(**_base_settings(), max_citations_per_response=0)
 
 
-def test_security_settings_defaults() -> None:
-    settings = Settings(**_base_settings())
+def test_security_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ADMIN_API_KEY", raising=False)
+    settings = Settings(_env_file=None, **_base_settings())
 
     assert settings.admin_api_key is None
     assert settings.chat_rate_limit == 60

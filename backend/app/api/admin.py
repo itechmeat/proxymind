@@ -138,6 +138,11 @@ def _raise_snapshot_http_error(error: Exception) -> None:
     raise error
 
 
+@router.get("/auth/me")
+async def get_admin_auth_me() -> dict[str, bool]:
+    return {"ok": True}
+
+
 async def _read_upload_content(file: UploadFile, max_size_bytes: int) -> bytes:
     content = bytearray()
 

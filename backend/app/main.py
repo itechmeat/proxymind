@@ -6,11 +6,13 @@ import structlog
 from arq import create_pool
 from arq.connections import RedisSettings
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from qdrant_client import AsyncQdrantClient
 from redis.asyncio import Redis
 
 from app.api.admin import router as admin_router
 from app.api.admin_eval import router as admin_eval_router
+from app.api.auth_router import profile_router, router as auth_router, users_router
 from app.api.chat import router as chat_router
 from app.api.health import router as health_router
 from app.api.metrics import router as metrics_router
@@ -22,6 +24,7 @@ from app.db import create_database_engine, create_session_factory
 from app.middleware.observability import ObservabilityMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.persona import PersonaLoader
+from app.services.email import build_email_sender
 from app.services.sparse_providers import build_sparse_provider
 from app.services.telemetry import (
     init_telemetry,
@@ -29,6 +32,8 @@ from app.services.telemetry import (
     instrument_sqlalchemy,
     shutdown_telemetry,
 )
+
+LOCAL_CORS_ALLOW_ORIGIN_REGEX = r"https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?$"
 
 
 def _create_embedding_service(settings):
@@ -184,6 +189,7 @@ async def lifespan(app: FastAPI):
             app.state.storage_http_client,
         )
         await app.state.storage_service.ensure_storage_root()
+        app.state.email_sender = build_email_sender(settings)
         app.state.arq_pool = await create_pool(
             RedisSettings(host=settings.redis_host, port=settings.redis_port)
         )
@@ -212,8 +218,24 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="ProxyMind API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(ObservabilityMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=LOCAL_CORS_ALLOW_ORIGIN_REGEX,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=[
+        "X-Request-ID",
+        "X-RateLimit-Limit",
+        "X-RateLimit-Remaining",
+        "X-RateLimit-Reset",
+    ],
+)
 app.include_router(admin_router)
 app.include_router(admin_eval_router)
+app.include_router(auth_router)
+app.include_router(users_router)
+app.include_router(profile_router)
 app.include_router(profile_admin_router)
 app.include_router(chat_router)
 app.include_router(profile_chat_router)

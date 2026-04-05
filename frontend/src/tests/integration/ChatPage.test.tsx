@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "@/App";
 import { SESSION_STORAGE_KEY } from "@/hooks/useSession";
 import { buildApiUrl } from "@/lib/api";
+import { appConfig } from "@/lib/config";
 import { strings } from "@/lib/strings";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -78,6 +79,21 @@ function twinProfileResponse(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function authUserResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "user-1",
+    email: "user@example.com",
+    status: "active",
+    email_verified_at: "2026-03-25T11:59:00Z",
+    created_at: "2026-03-25T11:58:00Z",
+    profile: {
+      display_name: "Test User",
+      avatar_url: null,
+    },
+    ...overrides,
+  };
+}
+
 function stubLocalStorage() {
   const storage = new Map<string, string>();
 
@@ -111,6 +127,30 @@ function matchesRequestUrl(input: RequestInfo | URL, pathname: string) {
   return getRequestUrl(input) === buildApiUrl(pathname);
 }
 
+function handleAuthenticatedUserRequests(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) {
+  if (
+    matchesRequestUrl(input, "/api/auth/refresh") &&
+    (init?.method ?? "GET") === "POST"
+  ) {
+    return jsonResponse({
+      access_token: "access-token",
+      token_type: "bearer",
+    });
+  }
+
+  if (
+    matchesRequestUrl(input, "/api/users/me") &&
+    (init?.method ?? "GET") === "GET"
+  ) {
+    return jsonResponse(authUserResponse());
+  }
+
+  return null;
+}
+
 describe("ChatPage integration", () => {
   beforeEach(() => {
     stubLocalStorage();
@@ -130,6 +170,11 @@ describe("ChatPage integration", () => {
 
     fetchMock.mockImplementation(async (input, init) => {
       const url = getRequestUrl(input);
+      const authResponse = handleAuthenticatedUserRequests(input, init);
+
+      if (authResponse) {
+        return authResponse;
+      }
 
       if (url === buildApiUrl("/api/chat/twin") && init?.method === "GET") {
         return jsonResponse(
@@ -215,12 +260,69 @@ describe("ChatPage integration", () => {
     expect(messageRequest).toBeDefined();
     expect(messageRequest?.[1]?.method).toBe("POST");
     expect(messageRequest?.[1]?.headers).toEqual({
+      Authorization: "Bearer access-token",
       "Content-Type": "application/json",
     });
     expect(JSON.parse(String(messageRequest?.[1]?.body))).toEqual({
       session_id: "session-1",
       text: "Hi there",
       idempotency_key: expect.any(String),
+    });
+  });
+
+  it("lets an authenticated end user sign out and does not expose owner-only settings", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = getRequestUrl(input);
+      const authResponse = handleAuthenticatedUserRequests(input, init);
+
+      if (authResponse) {
+        return authResponse;
+      }
+
+      if (url === buildApiUrl("/api/chat/twin") && init?.method === "GET") {
+        return jsonResponse(twinProfileResponse({ name: "Marcus Aurelius" }));
+      }
+
+      if (
+        url === buildApiUrl("/api/chat/sessions") &&
+        init?.method === "POST"
+      ) {
+        return jsonResponse(activeSessionResponse(), 201);
+      }
+
+      if (
+        url === buildApiUrl("/api/auth/sign-out") &&
+        init?.method === "POST"
+      ) {
+        return jsonResponse({ detail: "Signed out successfully." });
+      }
+
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByLabelText(strings.inputPlaceholder),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: strings.signOutAction }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: strings.profileSettings }),
+    ).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: strings.signOutAction }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: strings.signInTitle }),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/auth/sign-in");
     });
   });
 
@@ -231,6 +333,11 @@ describe("ChatPage integration", () => {
 
     fetchMock.mockImplementation(async (input, init) => {
       const url = getRequestUrl(input);
+      const authResponse = handleAuthenticatedUserRequests(input, init);
+
+      if (authResponse) {
+        return authResponse;
+      }
 
       if (url === buildApiUrl("/api/chat/twin") && init?.method === "GET") {
         return jsonResponse(twinProfileResponse());
@@ -250,7 +357,9 @@ describe("ChatPage integration", () => {
 
     render(<App />);
 
-    expect(document.querySelector(".chat-page__loading")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(document.querySelector(".chat-page__loading")).not.toBeNull();
+    });
 
     resolveSession?.(jsonResponse(activeSessionResponse(), 201));
 
@@ -262,6 +371,11 @@ describe("ChatPage integration", () => {
   it("falls back to the default twin name when the profile API is unavailable", async () => {
     fetchMock.mockImplementation(async (input, init) => {
       const url = getRequestUrl(input);
+      const authResponse = handleAuthenticatedUserRequests(input, init);
+
+      if (authResponse) {
+        return authResponse;
+      }
 
       if (url === buildApiUrl("/api/chat/twin") && init?.method === "GET") {
         return jsonResponse({ detail: "Profile unavailable" }, 503);
@@ -280,7 +394,7 @@ describe("ChatPage integration", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "ProxyMind" }),
+      await screen.findByRole("heading", { name: appConfig.twinName }),
     ).toBeInTheDocument();
     expect(
       await screen.findByLabelText(strings.inputPlaceholder),
@@ -292,6 +406,11 @@ describe("ChatPage integration", () => {
 
     fetchMock.mockImplementation(async (input, init) => {
       const url = getRequestUrl(input);
+      const authResponse = handleAuthenticatedUserRequests(input, init);
+
+      if (authResponse) {
+        return authResponse;
+      }
 
       if (url === buildApiUrl("/api/chat/twin") && init?.method === "GET") {
         return jsonResponse(twinProfileResponse());
@@ -377,6 +496,11 @@ describe("ChatPage integration", () => {
 
     fetchMock.mockImplementation(async (input, init) => {
       const url = getRequestUrl(input);
+      const authResponse = handleAuthenticatedUserRequests(input, init);
+
+      if (authResponse) {
+        return authResponse;
+      }
 
       if (url === buildApiUrl("/api/chat/twin") && init?.method === "GET") {
         return jsonResponse(twinProfileResponse());
@@ -417,6 +541,11 @@ describe("ChatPage integration", () => {
 
     fetchMock.mockImplementation(async (input, init) => {
       const url = getRequestUrl(input);
+      const authResponse = handleAuthenticatedUserRequests(input, init);
+
+      if (authResponse) {
+        return authResponse;
+      }
 
       if (url === buildApiUrl("/api/chat/twin") && init?.method === "GET") {
         return jsonResponse(twinProfileResponse());
@@ -455,6 +584,11 @@ describe("ChatPage integration", () => {
 
     fetchMock.mockImplementation(async (input, init) => {
       const url = getRequestUrl(input);
+      const authResponse = handleAuthenticatedUserRequests(input, init);
+
+      if (authResponse) {
+        return authResponse;
+      }
 
       if (url === buildApiUrl("/api/chat/twin") && init?.method === "GET") {
         return jsonResponse(twinProfileResponse());
@@ -524,6 +658,11 @@ describe("ChatPage integration", () => {
 
     fetchMock.mockImplementation(async (input, init) => {
       const url = getRequestUrl(input);
+      const authResponse = handleAuthenticatedUserRequests(input, init);
+
+      if (authResponse) {
+        return authResponse;
+      }
 
       if (url === buildApiUrl("/api/chat/twin") && init?.method === "GET") {
         return jsonResponse(twinProfileResponse());

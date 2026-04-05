@@ -15,6 +15,14 @@ except ImportError:
 logger = structlog.get_logger(__name__)
 
 _CHAT_PREFIX = "/api/chat"
+_AUTH_SENSITIVE_PATHS = frozenset(
+    {
+        "/api/auth/sign-in",
+        "/api/auth/register",
+        "/api/auth/forgot-password",
+        "/api/auth/reset-password",
+    }
+)
 
 
 class RateLimitMiddleware:
@@ -22,14 +30,18 @@ class RateLimitMiddleware:
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or not scope["path"].startswith(_CHAT_PREFIX):
+        if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
         request = Request(scope)
         settings = request.app.state.settings
-        limit: int = settings.chat_rate_limit
-        window: int = settings.chat_rate_window_seconds
+        rate_limit_config = _resolve_rate_limit_config(scope["path"], settings)
+        if rate_limit_config is None:
+            await self.app(scope, receive, send)
+            return
+
+        rate_limit_key, limit, window = rate_limit_config
         proxy_depth: int = settings.trusted_proxy_depth
 
         client_ip = _extract_client_ip(scope, proxy_depth)
@@ -41,6 +53,7 @@ class RateLimitMiddleware:
                 client_ip,
                 now,
                 window,
+                rate_limit_key,
             )
         except Exception:
             logger.warning("rate_limit.redis_unavailable", client_ip=client_ip)
@@ -68,6 +81,7 @@ class RateLimitMiddleware:
                 "rate_limit.exceeded",
                 client_ip=client_ip,
                 path=scope["path"],
+                rate_limit_key=rate_limit_key,
                 weighted_count=round(weighted_count, 1),
                 limit=limit,
             )
@@ -123,13 +137,14 @@ async def _get_counters(
     client_ip: str,
     now: float,
     window: int,
+    rate_limit_key: str,
 ) -> tuple[int, int, float]:
     redis = request.app.state.redis_client
     window_start = (int(now) // window) * window
     previous_window_start = window_start - window
 
-    current_key = f"ratelimit:{client_ip}:{window_start}"
-    previous_key = f"ratelimit:{client_ip}:{previous_window_start}"
+    current_key = f"ratelimit:{rate_limit_key}:{client_ip}:{window_start}"
+    previous_key = f"ratelimit:{rate_limit_key}:{client_ip}:{previous_window_start}"
 
     pipe = redis.pipeline(transaction=False)
     pipe.get(previous_key)
@@ -140,3 +155,15 @@ async def _get_counters(
     previous_count = int(results[0] or 0)
     current_count = int(results[1])
     return current_count, previous_count, float(window_start)
+
+
+def _resolve_rate_limit_config(path: str, settings: object) -> tuple[str, int, int] | None:
+    if path.startswith(_CHAT_PREFIX):
+        return ("chat", settings.chat_rate_limit, settings.chat_rate_window_seconds)
+    if path in _AUTH_SENSITIVE_PATHS:
+        return (
+            path.removeprefix("/api/").replace("/", ":"),
+            settings.auth_sensitive_rate_limit,
+            settings.auth_sensitive_rate_window_seconds,
+        )
+    return None

@@ -443,7 +443,9 @@ describe("useSources", () => {
       expect(adminApi.getCatalogItems).toHaveBeenCalledTimes(2);
     });
 
-    expect(result.current.catalogItems[0]?.id).toBe("catalog-1");
+    await waitFor(() => {
+      expect(result.current.catalogItems[0]?.id).toBe("catalog-1");
+    });
   });
 
   it("keeps an updated source visible when refresh fails after linking", async () => {

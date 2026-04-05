@@ -87,6 +87,17 @@ class SessionStatus(StrEnum):
     CLOSED = "closed"
 
 
+class UserStatus(StrEnum):
+    PENDING = "pending"
+    ACTIVE = "active"
+    BLOCKED = "blocked"
+
+
+class TokenType(StrEnum):
+    EMAIL_VERIFICATION = "email_verification"
+    PASSWORD_RESET = "password_reset"
+
+
 class SessionChannel(StrEnum):
     WEB = "web"
     API = "api"

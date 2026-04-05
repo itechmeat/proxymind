@@ -16,6 +16,7 @@ from app.services.sparse_providers import build_sparse_provider
 from app.services.telemetry import init_telemetry, instrument_sqlalchemy, shutdown_telemetry
 from app.workers.observability import probe_queue_depth, update_queue_depth
 from app.workers.tasks import (
+    cleanup_auth_tokens,
     generate_session_summary,
     poll_active_batches,
     process_batch_embed,
@@ -208,6 +209,7 @@ class WorkerSettings:
         process_batch_embed,
         poll_active_batches,
         generate_session_summary,
+        cleanup_auth_tokens,
         probe_queue_depth,
     ]
     cron_jobs = [
@@ -218,7 +220,13 @@ class WorkerSettings:
         cron(
             poll_active_batches,
             second=set(range(0, 60, settings.batch_poll_interval_seconds)),
-        )
+        ),
+        cron(
+            cleanup_auth_tokens,
+            hour={0, 6, 12, 18},
+            minute={0},
+            second={0},
+        ),
     ]
     redis_settings = RedisSettings(host=settings.redis_host, port=settings.redis_port)
     max_jobs = 10

@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.constants import DEFAULT_AGENT_ID, DEFAULT_KNOWLEDGE_BASE_ID
-from app.db.models import CatalogItem, Message, Session, Source
+from app.db.models import Message, Session
 from app.db.models.enums import MessageRole, MessageStatus, SessionChannel, SessionStatus
 from app.persona.loader import PersonaContext
 from app.services.audit import AuditService
@@ -23,7 +23,7 @@ from app.services.content_type import compute_content_type_spans
 from app.services.context_assembler import ContextAssembler
 from app.services.conversation_memory import ConversationMemoryService, MemoryBlock
 from app.services.llm_types import LLMToken
-from app.services.metrics import CHAT_RESPONSES_TOTAL, CHAT_RESPONSE_LATENCY_SECONDS
+from app.services.metrics import CHAT_RESPONSE_LATENCY_SECONDS, CHAT_RESPONSES_TOTAL
 from app.services.product_recommendation import ProductRecommendation, ProductRecommendationService
 from app.services.prompt import NO_CONTEXT_REFUSAL
 from app.services.qdrant import RetrievedChunk
@@ -46,6 +46,10 @@ class SummaryEnqueuer(Protocol):
 
 
 class SessionNotFoundError(RuntimeError):
+    pass
+
+
+class SessionOwnershipError(RuntimeError):
     pass
 
 
@@ -155,6 +159,7 @@ class ChatService:
         self,
         *,
         channel: SessionChannel = SessionChannel.WEB,
+        user_id: uuid.UUID | None = None,
     ) -> Session:
         active_snapshot = await self._snapshot_service.get_active_snapshot(
             agent_id=DEFAULT_AGENT_ID,
@@ -167,6 +172,7 @@ class ChatService:
             status=SessionStatus.ACTIVE,
             message_count=0,
             channel=channel,
+            user_id=user_id,
         )
         self._session.add(chat_session)
         await self._session.commit()
@@ -184,9 +190,10 @@ class ChatService:
         *,
         session_id: uuid.UUID,
         text: str,
+        user_id: uuid.UUID | None = None,
     ) -> ChatAnswerResult:
         started_at = time.perf_counter()
-        chat_session = await self._load_session(session_id)
+        chat_session = await self._load_session(session_id, user_id=user_id)
         snapshot_id = await self._ensure_snapshot_binding(chat_session)
 
         user_message = await self._persist_message(
@@ -367,9 +374,10 @@ class ChatService:
         session_id: uuid.UUID,
         text: str,
         idempotency_key: str | None = None,
+        user_id: uuid.UUID | None = None,
     ) -> AsyncIterator[ChatStreamEvent]:
         started_at = time.perf_counter()
-        chat_session = await self._load_session(session_id)
+        chat_session = await self._load_session(session_id, user_id=user_id)
         snapshot_id = await self._ensure_snapshot_binding(chat_session)
         user_message: Message | None = None
 
@@ -589,8 +597,21 @@ class ChatService:
             )
             yield ChatStreamError(detail="LLM generation failed")
 
-    async def get_session(self, session_id: uuid.UUID) -> Session:
-        return await self._load_session(session_id, include_messages=True)
+    async def get_session(
+        self,
+        session_id: uuid.UUID,
+        *,
+        user_id: uuid.UUID | None = None,
+    ) -> Session:
+        return await self._load_session(session_id, include_messages=True, user_id=user_id)
+
+    async def list_sessions(self, *, user_id: uuid.UUID) -> list[Session]:
+        result = await self._session.execute(
+            select(Session)
+            .where(Session.user_id == user_id)
+            .order_by(Session.created_at.desc())
+        )
+        return list(result.scalars().all())
 
     async def save_partial_on_disconnect(
         self,
@@ -637,6 +658,7 @@ class ChatService:
         session_id: uuid.UUID,
         *,
         include_messages: bool = False,
+        user_id: uuid.UUID | None = None,
     ) -> Session:
         statement = select(Session).where(Session.id == session_id)
         if include_messages:
@@ -645,6 +667,8 @@ class ChatService:
         chat_session = await self._session.scalar(statement)
         if chat_session is None:
             raise SessionNotFoundError("Session not found")
+        if user_id is not None and chat_session.user_id != user_id:
+            raise SessionOwnershipError("Session belongs to a different user")
         return chat_session
 
     async def _ensure_snapshot_binding(self, chat_session: Session) -> uuid.UUID:
