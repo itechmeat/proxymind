@@ -2,6 +2,7 @@ const admin = {
   link: "Admin",
   controlSurface: "ProxyMind Control Surface",
   title: "ProxyMind Admin",
+  signOut: "Sign out",
   sections: "Admin sections",
   tabs: {
     sources: "Sources",

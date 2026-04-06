@@ -8,6 +8,10 @@ const { createSessionMock, getSessionMock } = vi.hoisted(() => ({
   getSessionMock: vi.fn(),
 }));
 
+const { useUserAuthMock } = vi.hoisted(() => ({
+  useUserAuthMock: vi.fn(),
+}));
+
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
 
@@ -17,6 +21,10 @@ vi.mock("@/lib/api", async () => {
     getSession: getSessionMock,
   };
 });
+
+vi.mock("@/hooks/useUserAuth", () => ({
+  useUserAuth: useUserAuthMock,
+}));
 
 describe("useSession", () => {
   beforeEach(() => {
@@ -37,6 +45,11 @@ describe("useSession", () => {
 
     createSessionMock.mockReset();
     getSessionMock.mockReset();
+    useUserAuthMock.mockReturnValue({
+      getAccessToken: vi.fn().mockResolvedValue("access-token"),
+      isAuthenticated: true,
+      isLoading: false,
+    });
     localStorage.clear();
   });
 
@@ -55,6 +68,7 @@ describe("useSession", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(createSessionMock).toHaveBeenCalledTimes(1);
+    expect(createSessionMock).toHaveBeenCalledWith("access-token");
     expect(result.current.sessionId).toBe("session-new");
     expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBe("session-new");
   });
@@ -85,7 +99,10 @@ describe("useSession", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(getSessionMock).toHaveBeenCalledWith("session-existing");
+    expect(getSessionMock).toHaveBeenCalledWith(
+      "session-existing",
+      "access-token",
+    );
     expect(result.current.initialMessages).toHaveLength(1);
     expect(result.current.initialMessages[0].parts[0]).toMatchObject({
       type: "text",
@@ -111,7 +128,10 @@ describe("useSession", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(getSessionMock).toHaveBeenCalledWith("session-missing");
+    expect(getSessionMock).toHaveBeenCalledWith(
+      "session-missing",
+      "access-token",
+    );
     expect(createSessionMock).toHaveBeenCalledTimes(1);
     expect(result.current.sessionId).toBe("session-recreated");
     expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBe("session-recreated");
@@ -194,5 +214,28 @@ describe("useSession", () => {
     expect(createSessionMock).toHaveBeenCalledTimes(1);
     expect(result.current.sessionId).toBe("session-storage-fallback");
     expect(result.current.error).toBeNull();
+  });
+
+  it("creates a new session when restore returns 403", async () => {
+    localStorage.setItem(SESSION_STORAGE_KEY, "session-forbidden");
+    getSessionMock.mockRejectedValueOnce(
+      new ApiError(403, "Session belongs to another user"),
+    );
+    createSessionMock.mockResolvedValueOnce({
+      id: "session-recreated",
+      snapshot_id: null,
+      status: "active",
+      channel: "web",
+      message_count: 0,
+      created_at: "2026-03-25T12:00:00Z",
+    });
+
+    const { result } = renderHook(() => useSession());
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(createSessionMock).toHaveBeenCalledWith("access-token");
+    expect(result.current.sessionId).toBe("session-recreated");
+    expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBe("session-recreated");
   });
 });

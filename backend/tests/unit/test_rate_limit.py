@@ -58,12 +58,16 @@ def _make_app(
     *,
     rate_limit: int = 5,
     window_seconds: int = 60,
+    auth_sensitive_rate_limit: int = 2,
+    auth_sensitive_window_seconds: int = 300,
     proxy_depth: int = 1,
 ) -> FastAPI:
     app = FastAPI()
     app.state.settings = SimpleNamespace(
         chat_rate_limit=rate_limit,
         chat_rate_window_seconds=window_seconds,
+        auth_sensitive_rate_limit=auth_sensitive_rate_limit,
+        auth_sensitive_rate_window_seconds=auth_sensitive_window_seconds,
         trusted_proxy_depth=proxy_depth,
     )
     app.state.redis_client = FakeRedis()
@@ -74,6 +78,16 @@ def _make_app(
     async def chat_messages() -> dict[str, str]:
         return {"reply": "hello"}
 
+    auth_router = APIRouter(prefix="/api/auth")
+
+    @auth_router.post("/sign-in")
+    async def auth_sign_in() -> dict[str, str]:
+        return {"access_token": "token"}
+
+    @auth_router.post("/refresh")
+    async def auth_refresh() -> dict[str, str]:
+        return {"access_token": "token"}
+
     admin_router = APIRouter(prefix="/api/admin")
 
     @admin_router.get("/sources")
@@ -81,6 +95,7 @@ def _make_app(
         return {"sources": []}
 
     app.include_router(chat_router)
+    app.include_router(auth_router)
     app.include_router(admin_router)
     app.add_middleware(RateLimitMiddleware)
     return app
@@ -160,6 +175,8 @@ async def test_redis_failure_allows_request() -> None:
     app.state.settings = SimpleNamespace(
         chat_rate_limit=1,
         chat_rate_window_seconds=60,
+        auth_sensitive_rate_limit=1,
+        auth_sensitive_rate_window_seconds=300,
         trusted_proxy_depth=1,
     )
 
@@ -189,7 +206,7 @@ async def test_sliding_window_uses_previous_window_weight(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     app = _make_app(rate_limit=2, window_seconds=60, proxy_depth=1)
-    app.state.redis_client._store["ratelimit:1.2.3.4:60"] = 4
+    app.state.redis_client._store["ratelimit:chat:1.2.3.4:60"] = 4
     monkeypatch.setattr(rate_limit_module.time, "time", lambda: 150.0)
 
     transport = httpx.ASGITransport(app=app)
@@ -247,3 +264,31 @@ async def test_no_xff_uses_direct_connection_ip() -> None:
 
     assert first_response.status_code == 200
     assert second_response.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_auth_sensitive_routes_use_separate_limit_headers() -> None:
+    transport = httpx.ASGITransport(
+        app=_make_app(
+            rate_limit=10,
+            auth_sensitive_rate_limit=1,
+            auth_sensitive_window_seconds=120,
+        )
+    )
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        first_response = await client.post("/api/auth/sign-in")
+        second_response = await client.post("/api/auth/sign-in")
+
+    assert first_response.status_code == 200
+    assert first_response.headers["x-ratelimit-limit"] == "1"
+    assert second_response.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_refresh_route_is_not_rate_limited() -> None:
+    transport = httpx.ASGITransport(app=_make_app(auth_sensitive_rate_limit=1))
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post("/api/auth/refresh")
+
+    assert response.status_code == 200
+    assert "x-ratelimit-limit" not in response.headers

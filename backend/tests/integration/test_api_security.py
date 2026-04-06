@@ -7,6 +7,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.persona.loader import PersonaContext
@@ -42,6 +43,8 @@ def secure_app(
         admin_api_key=TEST_KEY,
         chat_rate_limit=3,
         chat_rate_window_seconds=60,
+        jwt_access_token_expire_minutes=15,
+        jwt_secret_key=SecretStr("test-jwt-secret-key-with-32-plus-chars"),
         trusted_proxy_depth=1,
         upload_max_file_size_mb=100,
         seaweedfs_sources_path="/sources",
@@ -103,6 +106,22 @@ async def secure_client(secure_app: FastAPI) -> httpx.AsyncClient:
         yield client
 
 
+@pytest_asyncio.fixture
+async def secure_chat_client(
+    secure_app: FastAPI,
+    create_user,
+    make_user_auth_headers,
+) -> httpx.AsyncClient:
+    user = await create_user()
+    transport = httpx.ASGITransport(app=secure_app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+        headers=make_user_auth_headers(user),
+    ) as client:
+        yield client
+
+
 @pytest.mark.asyncio
 async def test_admin_auth_full_flow(secure_client: httpx.AsyncClient) -> None:
     no_key_response = await secure_client.get("/api/admin/sources")
@@ -121,12 +140,32 @@ async def test_admin_auth_full_flow(secure_client: httpx.AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_rate_limit_full_flow(secure_client: httpx.AsyncClient) -> None:
+async def test_admin_auth_me_endpoint_requires_a_valid_key(
+    secure_client: httpx.AsyncClient,
+) -> None:
+    no_key_response = await secure_client.get("/api/admin/auth/me")
+    wrong_key_response = await secure_client.get(
+        "/api/admin/auth/me",
+        headers={"Authorization": "Bearer wrong"},
+    )
+    ok_response = await secure_client.get(
+        "/api/admin/auth/me",
+        headers={"Authorization": f"Bearer {TEST_KEY}"},
+    )
+
+    assert no_key_response.status_code == 401
+    assert wrong_key_response.status_code == 401
+    assert ok_response.status_code == 200
+    assert ok_response.json() == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_chat_rate_limit_full_flow(secure_chat_client: httpx.AsyncClient) -> None:
     for _ in range(3):
-        response = await secure_client.post("/api/chat/sessions", json={})
+        response = await secure_chat_client.post("/api/chat/sessions", json={})
         assert response.status_code == 201
 
-    limited_response = await secure_client.post("/api/chat/sessions", json={})
+    limited_response = await secure_chat_client.post("/api/chat/sessions", json={})
 
     assert limited_response.status_code == 429
     assert "retry-after" in limited_response.headers

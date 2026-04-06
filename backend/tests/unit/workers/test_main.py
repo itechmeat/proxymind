@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import os
 import sys
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+
+os.environ["DOCUMENT_AI_PROJECT_ID"] = ""
+os.environ["DOCUMENT_AI_PROCESSOR_ID"] = ""
 
 from app.workers import main
 
@@ -211,3 +215,7 @@ async def test_on_shutdown_stops_telemetry_before_engine_dispose() -> None:
 
 def test_worker_settings_register_queue_probe() -> None:
     assert main.probe_queue_depth in main.WorkerSettings.functions
+
+
+def test_worker_settings_register_auth_cleanup() -> None:
+    assert main.cleanup_auth_tokens in main.WorkerSettings.functions

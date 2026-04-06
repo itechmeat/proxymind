@@ -119,17 +119,25 @@ When delegating work to subagents or spawning a team, use the `/team-lead` skill
 
 ### Skills
 
-Skills are ONLY for Claude Code. Install into the project (not globally):
+Skills MUST stay project-local. Never install skills globally.
 
-```bash
-npx skills add <owner/repo@skill> -y        # project-local, NO -g flag
-```
+- Before searching externally, first check whether a suitable skill is already available in the
+  current agent context or in the project skill directories.
 
 ### Skill discovery
 
-After planning a story (or any development task), the agent MUST use the `find-skills` skill to
-search for relevant skills matching the technologies and tools involved. Search priority sources
-first, then fall back to general search:
+After planning a story (or any development task), the agent MUST resolve skills in this order:
+
+1. Check the skills already exposed in the current agent/session context. If a suitable skill is
+   already visible to the agent, use it directly and do not perform redundant external discovery.
+2. Check the repo-local skill directories for a suitable existing skill (`.agents/skills`).
+3. If no suitable repo-local skill exists, check user-global skill directories already available on
+   the machine to the current agent runtime (for example user-level `.agents/skills`,
+   `.codex/skills`, or equivalent visible global skill paths).
+
+Only if no suitable in-context, repo-local, or user-global skill is found, the agent MAY use the
+`find-skills` skill to search for relevant skills matching the technologies and tools involved.
+Search priority sources first, then fall back to general search:
 
 **Priority sources (search in this order):**
 
@@ -142,9 +150,13 @@ first, then fall back to general search:
 
 Search queries should cover the key technologies of the current task (e.g., "FastAPI", "React",
 "LiveKit", "PostgreSQL", "pgvector", "Docker", "Vite", "Bun", "SQLAlchemy", "Alembic").
-Install any found skills **into the project** (not globally) before starting implementation:
+Install any found skills **into the project** before starting implementation, with `.agents/skills`
+as the canonical install location. Also make the same installed skill available under
+`.claude/skills`. Never use a global install:
 
 ```bash
-npx skills add <owner/repo@skill> -y        # project-local (default)
-# Do NOT use -g flag — keep skills scoped to this project
+npx skills add <owner/repo@skill> -y        # project-local only
+# Keep the installed skill in .agents/skills
+# For Claude Code, also mirror or link it into .claude/skills
+# Do NOT use -g flag
 ```

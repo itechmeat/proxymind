@@ -4,8 +4,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app import main as app_main
 
@@ -57,6 +59,8 @@ def _settings() -> SimpleNamespace:
         chat_rate_limit=60,
         chat_rate_window_seconds=60,
         trusted_proxy_depth=1,
+        email_backend="console",
+        email_from="noreply@example.com",
         otel_enabled=False,
         otel_service_name="proxymind-api",
         otel_environment="test",
@@ -269,13 +273,34 @@ async def test_lifespan_loads_persona_context(
 
 
 def test_rate_limit_middleware_is_mounted() -> None:
+    from fastapi.middleware.cors import CORSMiddleware
     from app.middleware.observability import ObservabilityMiddleware
     from app.middleware.rate_limit import RateLimitMiddleware
 
     middleware_classes = [middleware.cls for middleware in app_main.app.user_middleware]
 
+    assert CORSMiddleware in middleware_classes
     assert RateLimitMiddleware in middleware_classes
     assert ObservabilityMiddleware in middleware_classes
+
+
+@pytest.mark.asyncio
+async def test_cors_preflight_allows_local_frontend_origin() -> None:
+    transport = httpx.ASGITransport(app=app_main.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.options(
+            "/api/chat/messages",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,authorization",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert response.headers["access-control-allow-credentials"] == "true"
+    assert "POST" in response.headers["access-control-allow-methods"]
 
 
 @pytest.mark.asyncio

@@ -2,11 +2,18 @@ from __future__ import annotations
 
 import ipaddress
 import secrets
+from typing import Annotated
 
 import structlog
-from fastapi import HTTPException, Request, Security, status
+from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import SecretStr
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models import User
+from app.db.models.enums import UserStatus
+from app.db.session import get_session
+from app.services.jwt_tokens import InvalidAccessTokenError, decode_access_token
 
 logger = structlog.get_logger(__name__)
 
@@ -100,3 +107,42 @@ async def verify_metrics_access(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Metrics endpoint is restricted to private network clients",
     )
+
+
+async def get_current_user(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    credentials: HTTPAuthorizationCredentials | None = Security(_bearer_scheme),
+) -> User:
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing access token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        payload = decode_access_token(
+            credentials.credentials,
+            secret_key=request.app.state.settings.jwt_secret_key.get_secret_value(),
+        )
+    except InvalidAccessTokenError as error:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(error),
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from error
+
+    user = await session.get(User, payload.user_id)
+    if user is None or user.status is UserStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing access token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if user.status is UserStatus.BLOCKED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is blocked",
+        )
+    return user

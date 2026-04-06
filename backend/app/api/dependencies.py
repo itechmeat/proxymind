@@ -9,10 +9,12 @@ from app.core.constants import DEFAULT_AGENT_ID
 from app.db.session import get_session
 from app.persona.loader import PersonaContext
 from app.services.audit import AuditService
-from app.services.chat import ChatService
+from app.services.auth import AuthService
 from app.services.catalog import CatalogService
+from app.services.chat import ChatService
 from app.services.context_assembler import ContextAssembler
 from app.services.conversation_memory import ConversationMemoryService
+from app.services.email import EmailSender
 from app.services.embedding import EmbeddingService
 from app.services.llm import LLMService
 from app.services.promotions import PromotionsService
@@ -26,6 +28,10 @@ from app.services.storage import StorageService
 
 def get_storage_service(request: Request) -> StorageService:
     return request.app.state.storage_service
+
+
+def get_email_sender(request: Request) -> EmailSender:
+    return request.app.state.email_sender
 
 
 def get_qdrant_service(request: Request) -> QdrantService:
@@ -79,6 +85,18 @@ def get_catalog_service(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CatalogService:
     return CatalogService(session=session)
+
+
+def get_auth_service(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    email_sender: Annotated[EmailSender, Depends(get_email_sender)],
+) -> AuthService:
+    return AuthService(
+        session=session,
+        settings=request.app.state.settings,
+        email_sender=email_sender,
+    )
 
 
 def get_snapshot_service(

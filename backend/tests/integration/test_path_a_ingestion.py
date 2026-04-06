@@ -26,6 +26,7 @@ from app.services.document_processing import ChunkData
 from app.services.path_router import FileMetadata
 from app.services.qdrant import QdrantService
 from app.services.snapshot import SnapshotService
+from app.services.sparse_providers import Bm25SparseProvider
 from app.workers.tasks import ingestion
 
 MINIMAL_PNG_BYTES = base64.b64decode(
@@ -72,6 +73,7 @@ async def _qdrant_service(qdrant_url: str) -> QdrantService:
         client=AsyncQdrantClient(url=qdrant_url),
         collection_name=f"test_path_a_{uuid.uuid4().hex}",
         embedding_dimensions=3,
+        sparse_provider=Bm25SparseProvider(language="english"),
         bm25_language="english",
     )
     await service.ensure_collection()

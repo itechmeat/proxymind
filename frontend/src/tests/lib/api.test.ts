@@ -4,6 +4,7 @@ import {
   buildApiUrl,
   createSession,
   getSession,
+  getTwinAvatarUrl,
 } from "@/lib/api";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -24,6 +25,7 @@ describe("api client", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -42,11 +44,12 @@ describe("api client", () => {
       ),
     );
 
-    const session = await createSession();
+    const session = await createSession("access-token");
 
     expect(fetchMock).toHaveBeenCalledWith(buildApiUrl("/api/chat/sessions"), {
       method: "POST",
       headers: {
+        Authorization: "Bearer access-token",
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ channel: "web" }),
@@ -77,7 +80,7 @@ describe("api client", () => {
       }),
     );
 
-    const session = await getSession("session-1");
+    const session = await getSession("session-1", "access-token");
 
     expect(fetchMock).toHaveBeenCalledWith(
       buildApiUrl("/api/chat/sessions/session-1"),
@@ -85,6 +88,7 @@ describe("api client", () => {
         method: "GET",
         headers: {
           Accept: "application/json",
+          Authorization: "Bearer access-token",
         },
       },
     );
@@ -96,12 +100,39 @@ describe("api client", () => {
       jsonResponse({ detail: "Session not found" }, 404),
     );
 
-    await expect(getSession("missing")).rejects.toEqual(
+    await expect(getSession("missing", "access-token")).rejects.toEqual(
       expect.objectContaining<ApiError>({
         name: "ApiError",
         status: 404,
         message: "Session not found",
       }),
     );
+  });
+
+  it("returns a blob URL handle for the twin avatar and supports cleanup", async () => {
+    const createObjectURL = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:twin-avatar");
+    const revokeObjectURL = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {});
+
+    fetchMock.mockResolvedValueOnce(new Response(new Blob(["avatar-bytes"])));
+
+    const avatar = await getTwinAvatarUrl("access-token");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      buildApiUrl("/api/chat/twin/avatar"),
+      {
+        method: "GET",
+        headers: {
+          Authorization: "Bearer access-token",
+        },
+      },
+    );
+    expect(avatar.url).toBe("blob:twin-avatar");
+    avatar.revoke();
+    expect(createObjectURL).toHaveBeenCalled();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:twin-avatar");
   });
 });

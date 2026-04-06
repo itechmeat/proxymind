@@ -7,6 +7,12 @@ import type { ChatMessage } from "@/types/chat";
 
 const fetchMock = vi.fn<typeof fetch>();
 
+function createAccessTokenGetter(accessToken = "access-token") {
+  return vi
+    .fn<(options?: { forceRefresh?: boolean }) => Promise<string | null>>()
+    .mockResolvedValue(accessToken);
+}
+
 function createUserMessage(text: string, id = "user-1"): ChatMessage {
   return {
     id,
@@ -84,6 +90,7 @@ describe("ProxyMindTransport", () => {
     );
 
     const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
       sessionId: "session-1",
       fetch: fetchMock,
       generateId,
@@ -103,6 +110,10 @@ describe("ProxyMindTransport", () => {
     const body = JSON.parse(String(request[1]?.body));
 
     expect(request[0]).toBe(buildApiUrl("/api/chat/messages"));
+    expect(request[1]?.headers).toEqual({
+      Authorization: "Bearer access-token",
+      "Content-Type": "application/json",
+    });
     expect(body).toEqual({
       session_id: "session-1",
       text: "Hello",
@@ -190,6 +201,7 @@ describe("ProxyMindTransport", () => {
       );
 
     const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
       sessionId: "session-1",
       fetch: fetchMock,
       generateId,
@@ -233,6 +245,7 @@ describe("ProxyMindTransport", () => {
     );
 
     const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
       sessionId: "session-1",
       fetch: fetchMock,
       generateId,
@@ -277,6 +290,7 @@ describe("ProxyMindTransport", () => {
     );
 
     const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
       sessionId: "session-1",
       fetch: fetchMock,
       generateId,
@@ -309,6 +323,87 @@ describe("ProxyMindTransport", () => {
     ]);
   });
 
+  it("does not invalidate the session for non-ownership HTTP 403 errors", async () => {
+    const onSessionInvalidated = vi.fn();
+    const generateId = vi
+      .fn<() => string>()
+      .mockReturnValueOnce("assistant-local")
+      .mockReturnValueOnce("idempotency-key")
+      .mockReturnValueOnce("text-part-id");
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ detail: "User account is blocked" }, 403),
+    );
+
+    const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
+      sessionId: "session-1",
+      fetch: fetchMock,
+      generateId,
+      onSessionInvalidated,
+    });
+
+    const chunks = await readChunks(
+      await transport.sendMessages({
+        trigger: "submit-message",
+        chatId: "chat-1",
+        messageId: undefined,
+        messages: [createUserMessage("Hello")],
+        abortSignal: undefined,
+      }),
+    );
+
+    expect(onSessionInvalidated).not.toHaveBeenCalled();
+    expect(chunks).toEqual([
+      {
+        type: "start",
+        messageId: "assistant-local",
+        messageMetadata: {
+          state: "failed",
+          errorDetail: "User account is blocked",
+          httpStatus: 403,
+        },
+      },
+      {
+        type: "error",
+        errorText: "User account is blocked",
+      },
+    ]);
+  });
+
+  it("invalidates the session for ownership HTTP 403 errors", async () => {
+    const onSessionInvalidated = vi.fn();
+    const generateId = vi
+      .fn<() => string>()
+      .mockReturnValueOnce("assistant-local")
+      .mockReturnValueOnce("idempotency-key")
+      .mockReturnValueOnce("text-part-id");
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ detail: "Session belongs to a different user" }, 403),
+    );
+
+    const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
+      sessionId: "session-1",
+      fetch: fetchMock,
+      generateId,
+      onSessionInvalidated,
+    });
+
+    await readChunks(
+      await transport.sendMessages({
+        trigger: "submit-message",
+        chatId: "chat-1",
+        messageId: undefined,
+        messages: [createUserMessage("Hello")],
+        abortSignal: undefined,
+      }),
+    );
+
+    expect(onSessionInvalidated).toHaveBeenCalledTimes(1);
+  });
+
   it("surfaces network failures as a connection-lost error stream", async () => {
     const generateId = vi
       .fn<() => string>()
@@ -319,6 +414,7 @@ describe("ProxyMindTransport", () => {
     fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
 
     const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
       sessionId: "session-1",
       fetch: fetchMock,
       generateId,
@@ -367,6 +463,7 @@ describe("ProxyMindTransport", () => {
     );
 
     const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
       sessionId: "session-1",
       fetch: fetchMock,
       generateId,
@@ -433,6 +530,7 @@ describe("ProxyMindTransport", () => {
       );
 
     const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
       sessionId: "session-1",
       fetch: fetchMock,
       generateId,
@@ -512,6 +610,7 @@ describe("ProxyMindTransport", () => {
       );
 
     const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
       sessionId: "session-1",
       fetch: fetchMock,
       generateId,
@@ -582,6 +681,7 @@ describe("ProxyMindTransport", () => {
       );
 
     const transport = new ProxyMindTransport({
+      getAccessToken: createAccessTokenGetter(),
       sessionId: "session-1",
       fetch: fetchMock,
       generateId,

@@ -137,7 +137,7 @@ def test_otel_disabled():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `docker compose exec backend-test python -m pytest tests/unit/test_config_otel.py -v`
+Run: `make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_config_otel.py -v"`
 Expected: FAIL — `otel_enabled` attribute does not exist.
 
 - [ ] **Step 3: Add OTel fields to Settings**
@@ -152,7 +152,7 @@ Add to `backend/app/core/config.py` in the `Settings` class, after line 89 (`tru
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `docker compose exec backend-test python -m pytest tests/unit/test_config_otel.py -v`
+Run: `make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_config_otel.py -v"`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -230,7 +230,7 @@ def test_non_http_scope_passthrough(app_with_middleware):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `docker compose exec backend-test python -m pytest tests/unit/test_observability_middleware.py -v`
+Run: `make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_observability_middleware.py -v"`
 Expected: FAIL — module `app.middleware.observability` does not exist.
 
 - [ ] **Step 3: Add contextvars and structlog processor**
@@ -413,7 +413,7 @@ def _record_metrics(scope: Scope, status_code: int, duration: float) -> None:
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `docker compose exec backend-test python -m pytest tests/unit/test_observability_middleware.py -v`
+Run: `make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_observability_middleware.py -v"`
 Expected: PASS (metrics import will be skipped gracefully since metrics.py doesn't exist yet)
 
 - [ ] **Step 6: Commit**
@@ -476,7 +476,7 @@ def test_record_request_increments_counter():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `docker compose exec backend-test python -m pytest tests/unit/test_metrics_endpoint.py -v`
+Run: `make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_metrics_endpoint.py -v"`
 Expected: FAIL — modules don't exist.
 
 - [ ] **Step 3: Create metrics definitions**
@@ -579,7 +579,7 @@ async def metrics() -> Response:
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `docker compose exec backend-test python -m pytest tests/unit/test_metrics_endpoint.py -v`
+Run: `make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_metrics_endpoint.py -v"`
 Expected: PASS
 
 - [ ] **Step 6: Commit**
@@ -696,7 +696,7 @@ async def test_log_response_increments_prometheus_counter(mock_session):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `docker compose exec backend-test python -m pytest tests/unit/test_audit_service.py -v`
+Run: `make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_audit_service.py -v"`
 Expected: FAIL — `app.services.audit` does not exist.
 
 - [ ] **Step 3: Implement AuditService**
@@ -766,7 +766,7 @@ class AuditService:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `docker compose exec backend-test python -m pytest tests/unit/test_audit_service.py -v`
+Run: `make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_audit_service.py -v"`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -1005,12 +1005,12 @@ Same pattern for `save_failed_on_timeout`. One extra `SELECT session` per discon
 
 - [ ] **Step 3: Run existing tests to verify nothing broke**
 
-Run: `docker compose exec backend-test python -m pytest tests/unit/test_chat_service.py tests/unit/test_chat_streaming.py -v`
+Run: `make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_chat_service.py tests/unit/test_chat_streaming.py -v"`
 Expected: PASS (audit_service defaults to None so existing tests still work)
 
 - [ ] **Step 4: Run the new test**
 
-Run: `docker compose exec backend-test python -m pytest tests/unit/test_chat_audit_wiring.py -v`
+Run: `make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_chat_audit_wiring.py -v"`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -1048,7 +1048,7 @@ After the `logger.warning("rate_limit.exceeded", ...)` line (line ~68), add:
 
 - [ ] **Step 2: Run existing rate limit tests**
 
-Run: `docker compose exec backend-test python -m pytest tests/unit/test_rate_limit.py -v`
+Run: `make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_rate_limit.py -v"`
 Expected: PASS (test needs to mock or import metrics — if it fails due to import, add a try/except around the import in rate_limit.py to handle the case where metrics aren't available yet in tests)
 
 - [ ] **Step 3: Commit**
@@ -1124,7 +1124,7 @@ def test_shutdown_telemetry():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `docker compose exec backend-test python -m pytest tests/unit/test_telemetry.py -v`
+Run: `make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_telemetry.py -v"`
 Expected: FAIL — module does not exist.
 
 - [ ] **Step 3: Implement telemetry module**
@@ -1179,7 +1179,7 @@ def shutdown_telemetry() -> None:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `docker compose exec backend-test python -m pytest tests/unit/test_telemetry.py -v`
+Run: `make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_telemetry.py -v"`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -1243,7 +1243,7 @@ Note: In Starlette/FastAPI, `add_middleware` wraps in reverse order — the last
 
 - [ ] **Step 2: Run existing app tests**
 
-Run: `docker compose exec backend-test python -m pytest tests/unit/test_app_main.py tests/test_health.py -v`
+Run: `make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_app_main.py tests/test_health.py -v"`
 Expected: PASS
 
 - [ ] **Step 3: Commit**
@@ -1647,7 +1647,7 @@ At line ~160, where `ChatService(...)` is constructed, add the `audit_service` p
 
 - [ ] **Step 2: Run full test suite**
 
-Run: `docker compose exec backend-test python -m pytest tests/ -v --timeout=60`
+Run: `make backend-exec-isolated BACKEND_CMD="python -m pytest tests/ -v --timeout=60"`
 Expected: All tests PASS
 
 - [ ] **Step 3: Commit**
@@ -1717,7 +1717,7 @@ Call `_instrument_libraries()` at the end of `init_telemetry` (only when enabled
 
 - [ ] **Step 2: Run tests**
 
-Run: `docker compose exec backend-test python -m pytest tests/unit/test_telemetry.py -v`
+Run: `make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/test_telemetry.py -v"`
 Expected: PASS
 
 - [ ] **Step 3: Commit**
@@ -1816,7 +1816,7 @@ Apply the same pattern to `generate_session_summary`, `process_batch_embed`, and
 
 - [ ] **Step 4: Run existing worker tests**
 
-Run: `docker compose exec backend-test python -m pytest tests/unit/workers/ -v`
+Run: `make backend-exec-isolated BACKEND_CMD="python -m pytest tests/unit/workers/ -v"`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -1881,7 +1881,7 @@ Note: This test requires the same fixtures used by existing chat integration tes
 
 - [ ] **Step 2: Run integration test**
 
-Run: `docker compose exec backend-test python -m pytest tests/integration/test_audit_integration.py -v`
+Run: `make backend-exec-isolated BACKEND_CMD="python -m pytest tests/integration/test_audit_integration.py -v"`
 Expected: PASS
 
 - [ ] **Step 3: Commit**

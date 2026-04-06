@@ -230,7 +230,7 @@ Options:
   --snapshot-id    Override snapshot_id (default: from dataset)
 ```
 
-Run in Docker: `docker compose run --rm backend-test python -m evals.run_evals`
+Run in Docker: `make evals-isolated`
 
 ## Dependencies
 

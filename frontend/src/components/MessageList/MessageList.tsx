@@ -45,7 +45,29 @@ export function MessageList({
     setShowJumpButton(nextValue);
   }, []);
 
-  const scrollToBottom = () => {
+  const isSmoothScrollingRef = useRef(false);
+
+  const cancelSmoothScroll = useCallback(() => {
+    if (!isSmoothScrollingRef.current) {
+      return;
+    }
+    isSmoothScrollingRef.current = false;
+    const viewport = getViewport();
+    if (viewport) {
+      viewport.scrollTo({ top: viewport.scrollTop });
+    }
+  }, [getViewport]);
+
+  const smoothScrollToBottom = useCallback(() => {
+    const viewport = getViewport();
+    if (!viewport) {
+      return;
+    }
+    isSmoothScrollingRef.current = true;
+    viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
+  }, [getViewport]);
+
+  const scrollToBottom = useCallback(() => {
     const viewport = getViewport();
     if (!viewport) {
       return;
@@ -54,7 +76,7 @@ export function MessageList({
     viewport.scrollTop = viewport.scrollHeight;
     wasAtBottomRef.current = true;
     setJumpButtonVisible(false);
-  };
+  }, [getViewport, setJumpButtonVisible]);
 
   useEffect(() => {
     const viewport = getViewport();
@@ -68,16 +90,27 @@ export function MessageList({
         viewport.scrollHeight - BOTTOM_OFFSET;
 
       wasAtBottomRef.current = atBottom;
+      if (atBottom) {
+        isSmoothScrollingRef.current = false;
+      }
       setJumpButtonVisible(!atBottom);
+    };
+
+    const onUserScroll = () => {
+      cancelSmoothScroll();
     };
 
     syncScrollState();
     viewport.addEventListener("scroll", syncScrollState);
+    viewport.addEventListener("wheel", onUserScroll, { passive: true });
+    viewport.addEventListener("touchstart", onUserScroll, { passive: true });
 
     return () => {
       viewport.removeEventListener("scroll", syncScrollState);
+      viewport.removeEventListener("wheel", onUserScroll);
+      viewport.removeEventListener("touchstart", onUserScroll);
     };
-  }, [getViewport, setJumpButtonVisible]);
+  }, [getViewport, setJumpButtonVisible, cancelSmoothScroll]);
 
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
@@ -86,17 +119,12 @@ export function MessageList({
       return;
     }
 
-    if (lastMessage.role === "user" || wasAtBottomRef.current) {
-      const viewport = getViewport();
-      if (!viewport) {
-        return;
-      }
-
-      viewport.scrollTop = viewport.scrollHeight;
-      wasAtBottomRef.current = true;
-      setJumpButtonVisible(false);
+    if (lastMessage.role === "user") {
+      scrollToBottom();
+    } else if (wasAtBottomRef.current) {
+      smoothScrollToBottom();
     }
-  }, [getViewport, messages, setJumpButtonVisible]);
+  }, [messages, smoothScrollToBottom, scrollToBottom]);
 
   return (
     <div className="message-list" ref={rootRef}>

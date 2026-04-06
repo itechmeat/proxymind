@@ -1,11 +1,17 @@
 import { startTransition, useCallback, useEffect, useState } from "react";
-
+import { useUserAuth } from "@/hooks/useUserAuth";
 import { ApiError, createSession, getSession } from "@/lib/api";
 import { toUIMessages } from "@/lib/message-adapter";
+import {
+  clearStoredSessionId,
+  readStoredSessionId,
+  SESSION_STORAGE_KEY,
+  writeStoredSessionId,
+} from "@/lib/session-storage";
 import { strings } from "@/lib/strings";
 import type { ChatMessage } from "@/types/chat";
 
-export const SESSION_STORAGE_KEY = "proxymind_session_id";
+export { SESSION_STORAGE_KEY };
 
 interface SessionState {
   error: string | null;
@@ -31,23 +37,12 @@ function getErrorDetail(error: unknown) {
   return strings.sessionUnavailable;
 }
 
-function readStoredSessionId() {
-  try {
-    return localStorage.getItem(SESSION_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredSessionId(sessionId: string) {
-  try {
-    localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
-  } catch {
-    // Ignore storage failures and keep the active in-memory session.
-  }
-}
-
 export function useSession() {
+  const {
+    getAccessToken,
+    isAuthenticated,
+    isLoading: authIsLoading,
+  } = useUserAuth();
   const [state, setState] = useState<SessionState>(initialState);
 
   const applyState = useCallback((nextState: SessionState) => {
@@ -57,7 +52,12 @@ export function useSession() {
   }, []);
 
   const createAndStoreSession = useCallback(async () => {
-    const session = await createSession();
+    const accessToken = await getAccessToken();
+    if (!accessToken) {
+      throw new Error(strings.authenticationRequired);
+    }
+
+    const session = await createSession(accessToken);
     writeStoredSessionId(session.id);
 
     applyState({
@@ -69,7 +69,7 @@ export function useSession() {
     });
 
     return session;
-  }, [applyState]);
+  }, [applyState, getAccessToken]);
 
   const restoreOrCreateSession = useCallback(async () => {
     const storedSessionId = readStoredSessionId();
@@ -80,7 +80,12 @@ export function useSession() {
     }
 
     try {
-      const session = await getSession(storedSessionId);
+      const accessToken = await getAccessToken();
+      if (!accessToken) {
+        throw new Error(strings.authenticationRequired);
+      }
+
+      const session = await getSession(storedSessionId, accessToken);
       writeStoredSessionId(session.id);
 
       applyState({
@@ -91,17 +96,38 @@ export function useSession() {
         snapshotId: session.snapshot_id,
       });
     } catch (error) {
-      if (error instanceof ApiError && error.status === 404) {
+      if (
+        error instanceof ApiError &&
+        (error.status === 403 || error.status === 404)
+      ) {
         await createAndStoreSession();
         return;
       }
 
       throw error;
     }
-  }, [applyState, createAndStoreSession]);
+  }, [applyState, createAndStoreSession, getAccessToken]);
 
   useEffect(() => {
     let cancelled = false;
+
+    if (authIsLoading) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (!isAuthenticated) {
+      clearStoredSessionId();
+      applyState({
+        ...initialState,
+        isLoading: false,
+      });
+
+      return () => {
+        cancelled = true;
+      };
+    }
 
     void (async () => {
       try {
@@ -124,7 +150,7 @@ export function useSession() {
     return () => {
       cancelled = true;
     };
-  }, [applyState, restoreOrCreateSession]);
+  }, [applyState, authIsLoading, isAuthenticated, restoreOrCreateSession]);
 
   const createNewSession = useCallback(async () => {
     startTransition(() => {

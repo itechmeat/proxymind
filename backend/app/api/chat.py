@@ -10,6 +10,7 @@ from typing import Annotated, NoReturn
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
+from app.api.auth import get_current_user
 from app.api.chat_schemas import (
     CreateSessionRequest,
     SendMessageRequest,
@@ -17,6 +18,7 @@ from app.api.chat_schemas import (
     SessionWithMessagesResponse,
 )
 from app.api.dependencies import get_chat_service, get_sse_settings
+from app.db.models import User
 from app.services.chat import (
     ChatService,
     ChatStreamCitations,
@@ -29,6 +31,7 @@ from app.services.chat import (
     IdempotencyConflictError,
     NoActiveSnapshotError,
     SessionNotFoundError,
+    SessionOwnershipError,
 )
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -37,6 +40,8 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 def _raise_chat_http_error(error: Exception) -> NoReturn:
     if isinstance(error, SessionNotFoundError):
         raise HTTPException(status_code=404, detail=str(error)) from error
+    if isinstance(error, SessionOwnershipError):
+        raise HTTPException(status_code=403, detail=str(error)) from error
     if isinstance(error, NoActiveSnapshotError):
         raise HTTPException(status_code=422, detail=str(error)) from error
     if isinstance(error, (ConcurrentStreamError, IdempotencyConflictError)):
@@ -55,9 +60,13 @@ def _format_sse(event_type: str, data: dict[str, object]) -> str:
 )
 async def create_session(
     chat_service: Annotated[ChatService, Depends(get_chat_service)],
+    current_user: Annotated[User, Depends(get_current_user)],
     payload: CreateSessionRequest | None = Body(default=None),
 ) -> SessionResponse:
-    session = await chat_service.create_session(channel=(payload or CreateSessionRequest()).channel)
+    session = await chat_service.create_session(
+        channel=(payload or CreateSessionRequest()).channel,
+        user_id=current_user.id,
+    )
     return SessionResponse.from_session(session)
 
 
@@ -66,6 +75,7 @@ async def send_message(
     request: Request,
     payload: SendMessageRequest,
     chat_service: Annotated[ChatService, Depends(get_chat_service)],
+    current_user: Annotated[User, Depends(get_current_user)],
     sse_settings: Annotated[dict[str, int], Depends(get_sse_settings)],
 ) -> StreamingResponse:
     heartbeat_interval = sse_settings["heartbeat_interval"]
@@ -76,6 +86,7 @@ async def send_message(
             session_id=payload.session_id,
             text=payload.text,
             idempotency_key=payload.idempotency_key,
+            user_id=current_user.id,
         )
         first_event = await anext(event_stream)
     except StopAsyncIteration:
@@ -188,10 +199,20 @@ async def send_message(
 async def get_session(
     session_id: uuid.UUID,
     chat_service: Annotated[ChatService, Depends(get_chat_service)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> SessionWithMessagesResponse:
     try:
-        session = await chat_service.get_session(session_id)
+        session = await chat_service.get_session(session_id, user_id=current_user.id)
     except Exception as error:
         _raise_chat_http_error(error)
 
     return SessionWithMessagesResponse.from_session(session)
+
+
+@router.get("/sessions", response_model=list[SessionResponse])
+async def list_sessions(
+    chat_service: Annotated[ChatService, Depends(get_chat_service)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> list[SessionResponse]:
+    sessions = await chat_service.list_sessions(user_id=current_user.id)
+    return [SessionResponse.from_session(session) for session in sessions]

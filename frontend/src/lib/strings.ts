@@ -9,6 +9,58 @@ const relativeTimeStrings = {
 
 export const strings = {
   appTitle: "ProxyMind",
+  authEyebrow: "Private access",
+  authLoading: "Restoring your session",
+  authLoadingDescription:
+    "Checking your refresh cookie and preparing a secure chat session.",
+  authRequestFailed: "Authentication request failed.",
+  authenticationRequired: "Your session has expired. Please sign in again.",
+  signInTitle: "Return to your private twin workspace.",
+  signInDescription:
+    "ProxyMind keeps chat, profile, and session history scoped to your account.",
+  signInAction: "Sign in",
+  signingIn: "Signing in...",
+  registerTitle: "Create an account for your twin.",
+  registerDescription:
+    "Register once, verify your email, and every chat session becomes user-scoped.",
+  registerAction: "Create account",
+  registering: "Creating account...",
+  forgotPasswordTitle: "Recover access without losing history.",
+  forgotPasswordDescription:
+    "Request a password reset link and continue from a fresh authenticated session.",
+  forgotPasswordAction: "Forgot your password?",
+  resetPasswordTitle: "Set a new password.",
+  resetPasswordDescription:
+    "Use the secure reset token from your email to finish account recovery.",
+  resetPasswordAction: "Reset password",
+  resettingPassword: "Resetting password...",
+  verifyEmailTitle: "Verify your email.",
+  verifyEmailDescription:
+    "Email verification activates the account and unlocks the protected chat surface.",
+  verifyingEmail: "Verifying your email...",
+  invalidVerificationLink: "This verification link is missing or invalid.",
+  emailLabel: "Email",
+  passwordLabel: "Password",
+  passwordPlaceholder: "At least 8 characters",
+  confirmPasswordLabel: "Confirm password",
+  passwordConfirmationMismatch: "Passwords do not match.",
+  newPasswordLabel: "New password",
+  displayNameLabel: "Display name",
+  displayNamePlaceholder: "How should ProxyMind address you?",
+  sendResetLink: "Send reset link",
+  sendingResetLink: "Sending link...",
+  resetTokenLabel: "Reset token",
+  backToSignIn: "Back to sign in",
+  noAccountYet: "Need access?",
+  alreadyHaveAccount: "Already verified?",
+  adminSignInTitle: "Unlock the control surface.",
+  adminSignInDescription:
+    "Admin mode stays separate from end-user auth and still uses the configured API key.",
+  adminEyebrow: "ProxyMind Admin",
+  adminKeyLabel: "Admin API key",
+  adminKeyPlaceholder: "Enter admin API key...",
+  adminKeyRequired: "API key is required.",
+  signOutAction: "Sign out",
   sessionUnavailable: "Chat is temporarily unavailable.",
   emptyStateTitle: "Start the first exchange.",
   emptyStateBody:

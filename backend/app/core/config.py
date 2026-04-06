@@ -3,10 +3,20 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import quote_plus
 
-from pydantic import Field, SecretStr, computed_field, model_validator
+from pydantic import (
+    Field,
+    SecretStr,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+JWT_SECRET_PLACEHOLDERS = {
+    "development-jwt-secret-change-me-123456",
+    "replace-with-64-hex-characters-minimum",
+}
 
 
 class Settings(BaseSettings):
@@ -100,6 +110,17 @@ class Settings(BaseSettings):
     admin_api_key: SecretStr | None = Field(default=None)
     chat_rate_limit: int = Field(default=60, ge=1)
     chat_rate_window_seconds: int = Field(default=60, ge=1)
+    auth_sensitive_rate_limit: int = Field(default=10, ge=1)
+    auth_sensitive_rate_window_seconds: int = Field(default=60, ge=1)
+    jwt_secret_key: SecretStr = Field(...)
+    jwt_access_token_expire_minutes: int = Field(default=15, ge=1)
+    jwt_refresh_token_expire_days: int = Field(default=7, ge=1)
+    auth_cookie_secure: bool = Field(default=False)
+    email_backend: Literal["console", "resend"] = Field(default="console")
+    resend_api_key: SecretStr | None = Field(default=None)
+    email_outbox_dir: str | None = Field(default=None)
+    email_from: str = Field(default="ProxyMind <noreply@example.com>", min_length=1)
+    frontend_url: str = Field(default="http://localhost:5173", min_length=1)
     trusted_proxy_depth: int = Field(default=1, ge=1)
     upload_max_file_size_mb: int = Field(default=100, ge=1)
     otel_enabled: bool = Field(default=False)
@@ -140,10 +161,34 @@ class Settings(BaseSettings):
             "conversation_summary_model",
             "admin_api_key",
             "bge_m3_provider_url",
+            "resend_api_key",
+            "email_outbox_dir",
         ):
             if normalized.get(field_name) == "":
                 normalized[field_name] = None
         return normalized
+
+    @field_validator("jwt_secret_key", mode="before")
+    @classmethod
+    def normalize_jwt_secret_key(cls, value: Any) -> Any:
+        if value is None:
+            return value
+
+        return (
+            value.get_secret_value() if isinstance(value, SecretStr) else str(value)
+        ).strip()
+
+    @field_validator("jwt_secret_key")
+    @classmethod
+    def validate_jwt_secret_key(cls, value: SecretStr) -> SecretStr:
+        raw_value = value.get_secret_value()
+        if raw_value in JWT_SECRET_PLACEHOLDERS:
+            raise ValueError(
+                "JWT_SECRET_KEY must be set to a non-placeholder secret before startup"
+            )
+        if len(raw_value) < 32:
+            raise ValueError("JWT_SECRET_KEY must be at least 32 characters long")
+        return value
 
     @model_validator(mode="after")
     def validate_retrieval_settings(self) -> Settings:
@@ -177,6 +222,8 @@ class Settings(BaseSettings):
             )
         if self.sparse_backend == "bge_m3" and self.bge_m3_provider_url is None:
             raise ValueError("BGE_M3_PROVIDER_URL is required when SPARSE_BACKEND=bge_m3")
+        if self.email_backend == "resend" and self.resend_api_key is None:
+            raise ValueError("RESEND_API_KEY is required when EMAIL_BACKEND=resend")
         return self
 
     @computed_field
@@ -208,6 +255,11 @@ class Settings(BaseSettings):
     @property
     def document_ai_enabled(self) -> bool:
         return bool(self.document_ai_project_id and self.document_ai_processor_id)
+
+    @computed_field
+    @property
+    def cookie_secure(self) -> bool:
+        return self.auth_cookie_secure
 
 
 @lru_cache

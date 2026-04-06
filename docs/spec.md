@@ -281,9 +281,23 @@ An architectural precaution, not a product feature. Even with a single agent per
 
 Does not introduce tenants as an entity but does not close the path to scaling.
 
-## Visitor identity and channel connectors
+## User authentication, visitor identity, and channel connectors
 
-V1 does not require standalone end-user registration for chat. The website chat may remain public, while admin access is protected separately.
+V1 web/app chat MUST require authenticated end-user access. The standard user flow is email-based authentication: registration, sign-in, and password recovery/reset via email. Website/app guests MUST NOT be allowed to create chat sessions, send chat messages, read chat history, or access twin-interaction endpoints that expose dialogue state.
+
+Guest access should be limited to:
+
+- end-user authentication endpoints (for example `/api/auth/*`)
+- narrow operational endpoints such as `/health` and `/ready`
+- any future explicitly public surface that is separated from chat/session endpoints
+
+Admin access remains a separate authentication surface. In v1 it uses an admin token/API key flow and MUST NOT be merged with the end-user email flow.
+
+Frontend requirements for authentication surfaces:
+
+- the frontend MUST provide user-facing pages for sign-in, registration, and password recovery/reset
+- the frontend MUST provide a separate admin authentication page for token-based admin access
+- user and admin frontend components MAY reuse the same low-level UI primitives, forms, and validation helpers, or MAY be implemented as separate components, but the route boundaries, state, and security semantics MUST remain distinct
 
 In later stages, ProxyMind may add **channel connectors** for social and messaging platforms such as Telegram, Facebook, VK, Instagram, TikTok, and similar channels. The preferred term is **channel connector**, not plain "connector", to avoid confusion with MCP data connectors and other integration types.
 

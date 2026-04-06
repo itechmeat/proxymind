@@ -96,7 +96,7 @@ export function CitationsBlock({
 
             return (
               <li
-                key={citation.source_id}
+                key={`${citation.source_id}-${citation.index}`}
                 className="citations-block__item"
                 data-citation-index={citation.index}
                 data-highlighted={

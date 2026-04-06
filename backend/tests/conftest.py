@@ -4,6 +4,7 @@ import asyncio
 import os
 import time
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -15,6 +16,7 @@ import pytest_asyncio
 from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI
+from pydantic import SecretStr
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -28,7 +30,9 @@ from testcontainers.postgres import PostgresContainer
 from app.core.config import get_settings
 from app.core.constants import DEFAULT_AGENT_ID
 from app.db.engine import create_database_engine, create_session_factory
-from app.db.models import Agent
+from app.db.models import Agent, User, UserProfile
+from app.db.models.enums import UserStatus
+from app.services.jwt_tokens import create_access_token
 from app.services.conversation_memory import ConversationMemoryService
 from app.services.promotions import PromotionsService
 from app.services.storage import StorageService
@@ -41,6 +45,10 @@ TRUNCATE_TEST_DATA_SQL = text(
     """
     TRUNCATE TABLE
       background_tasks,
+      user_refresh_tokens,
+      user_tokens,
+      user_profiles,
+      users,
             chunk_parents,
       chunks,
       document_versions,
@@ -57,6 +65,7 @@ TRUNCATE_TEST_DATA_SQL = text(
 )
 DELETE_KNOWLEDGE_SNAPSHOTS_SQL = text("DELETE FROM knowledge_snapshots")
 TEST_ADMIN_API_KEY = "conftest-test-key-for-admin"
+TEST_JWT_SECRET = SecretStr("test-jwt-secret-key-with-32-plus-chars")
 
 
 def _connection_url_to_env(url: str) -> dict[str, str]:
@@ -67,6 +76,8 @@ def _connection_url_to_env(url: str) -> dict[str, str]:
         "POSTGRES_USER": parsed.username or "postgres",
         "POSTGRES_PASSWORD": parsed.password or "postgres",
         "POSTGRES_DB": parsed.path.lstrip("/") or "postgres",
+        "DOCUMENT_AI_PROJECT_ID": "",
+        "DOCUMENT_AI_PROCESSOR_ID": "",
     }
 
 
@@ -77,6 +88,8 @@ def _existing_postgres_env() -> dict[str, str]:
         "POSTGRES_USER": os.environ["POSTGRES_USER"],
         "POSTGRES_PASSWORD": os.environ["POSTGRES_PASSWORD"],
         "POSTGRES_DB": os.environ["POSTGRES_DB"],
+        "DOCUMENT_AI_PROJECT_ID": "",
+        "DOCUMENT_AI_PROCESSOR_ID": "",
     }
 
 
@@ -362,6 +375,8 @@ def chat_app(
         sse_inter_token_timeout_seconds=30,
         conversation_memory_budget=4096,
         conversation_summary_ratio=0.3,
+        jwt_secret_key=TEST_JWT_SECRET,
+        jwt_access_token_expire_minutes=15,
     )
     app.state.session_factory = session_factory
     app.state.retrieval_service = mock_retrieval_service
@@ -384,7 +399,67 @@ def chat_app(
 
 
 @pytest_asyncio.fixture
-async def chat_client(chat_app: FastAPI) -> httpx.AsyncClient:
+async def create_user(
+    session_factory: async_sessionmaker[AsyncSession],
+):
+    async def _create(
+        *,
+        email: str | None = None,
+        status: UserStatus = UserStatus.ACTIVE,
+        display_name: str | None = "Test User",
+    ) -> User:
+        async with session_factory() as session:
+            user = User(
+                id=uuid.uuid7(),
+                email=email or f"user-{uuid.uuid4()}@example.com",
+                password_hash="hashed-password",
+                status=status,
+                email_verified_at=datetime.now(UTC) if status is UserStatus.ACTIVE else None,
+            )
+            profile = UserProfile(
+                id=uuid.uuid7(),
+                user=user,
+                display_name=display_name,
+            )
+            session.add_all([user, profile])
+            await session.commit()
+            await session.refresh(user)
+            return user
+
+    return _create
+
+
+@pytest.fixture
+def make_user_auth_headers():
+    def _make(user: User) -> dict[str, str]:
+        token = create_access_token(
+            user_id=user.id,
+            secret_key=TEST_JWT_SECRET.get_secret_value(),
+            expires_minutes=15,
+        )
+        return {"Authorization": f"Bearer {token}"}
+
+    return _make
+
+
+@pytest_asyncio.fixture
+async def chat_client(
+    chat_app: FastAPI,
+    create_user,
+    make_user_auth_headers,
+) -> httpx.AsyncClient:
+    user = await create_user()
+    transport = httpx.ASGITransport(app=chat_app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+        headers=make_user_auth_headers(user),
+    ) as client:
+        yield client
+
+
+@pytest_asyncio.fixture
+async def guest_chat_client(chat_app: FastAPI) -> httpx.AsyncClient:
     transport = httpx.ASGITransport(app=chat_app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         yield client
@@ -412,7 +487,10 @@ def profile_app(
     app = FastAPI()
     app.include_router(profile_chat_router)
     app.include_router(profile_admin_router)
-    app.state.settings = SimpleNamespace(admin_api_key=TEST_ADMIN_API_KEY)
+    app.state.settings = SimpleNamespace(
+        admin_api_key=TEST_ADMIN_API_KEY,
+        jwt_secret_key=TEST_JWT_SECRET,
+    )
     app.state.session_factory = session_factory
     app.state.storage_service = mock_storage_service
     return app
@@ -425,6 +503,22 @@ async def profile_client(profile_app: FastAPI) -> httpx.AsyncClient:
         transport=transport,
         base_url="http://testserver",
         headers={"Authorization": f"Bearer {TEST_ADMIN_API_KEY}"},
+    ) as client:
+        yield client
+
+
+@pytest_asyncio.fixture
+async def user_profile_client(
+    profile_app: FastAPI,
+    create_user,
+    make_user_auth_headers,
+) -> httpx.AsyncClient:
+    user = await create_user()
+    transport = httpx.ASGITransport(app=profile_app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+        headers=make_user_auth_headers(user),
     ) as client:
         yield client
 

@@ -2,7 +2,7 @@
 
 ### Requirement: Docker Compose services
 
-**[Modified by S7-02]** Docker Compose SHALL define nine runtime services: `postgres`, `qdrant`, `seaweedfs`, `redis`, `api`, `worker`, `prometheus`, `grafana`, and `tempo` (excluding `backend-test` which is a test-only container). Each service SHALL use image versions at or above the minimums specified in `docs/spec.md`. The `api` service SHALL build from `./backend` and expose port 8000. The `worker` service SHALL build from `./backend` with the command `python -m app.workers.run`. The `worker` service SHALL use the same Docker image as `api` but with a different startup command. The `worker` service SHALL set `SKIP_MIGRATIONS=1` so the worker does not race the API container during Alembic startup. The `worker` service SHALL NOT expose any ports and SHALL NOT require a healthcheck.
+**[Modified by S7-02]** Docker Compose SHALL define nine runtime services in the main development stack: `postgres`, `qdrant`, `seaweedfs`, `redis`, `api`, `worker`, `prometheus`, `grafana`, and `tempo`. Test-only runners SHALL NOT live in the main `docker-compose.yml`; they belong to isolated test infrastructure only. Each runtime service SHALL use image versions at or above the minimums specified in `docs/spec.md`. The `api` service SHALL build from `./backend` and expose port 8000. The `worker` service SHALL build from `./backend` with the command `python -m app.workers.run`. The `worker` service SHALL use the same Docker image as `api` but with a different startup command. The `worker` service SHALL set `SKIP_MIGRATIONS=1` so the worker does not race the API container during Alembic startup. The `worker` service SHALL NOT expose any ports and SHALL NOT require a healthcheck.
 
 The `prometheus` service SHALL define a healthcheck using `wget --spider -q http://127.0.0.1:9090/-/healthy`. The `grafana` service SHALL define a healthcheck using `wget --spider -q http://127.0.0.1:3000/api/health`. The `tempo` service SHALL define a healthcheck using `test: ["CMD", "/tempo", "-health"]` so the distroless Tempo image is checked via its native readiness command.
 
@@ -24,6 +24,11 @@ The `prometheus` service SHALL use image `prom/prometheus:v3.10.0`, expose port 
 
 - **WHEN** `docker compose config --services` is executed
 - **THEN** the output SHALL include `worker`
+
+#### Scenario: Main Compose excludes test-only runners
+
+- **WHEN** `docker compose config --services` is executed against the main `docker-compose.yml`
+- **THEN** the output SHALL NOT include `backend-test`
 
 #### Scenario: Worker uses same image as API
 

@@ -1,5 +1,5 @@
 import type { ChatStatus } from "ai";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -28,6 +28,16 @@ export function ChatInput({
     status === "submitted" ||
     status === "streaming";
   const canSend = value.trim().length > 0 && !isDisabled;
+  const wasDisabledRef = useRef(false);
+
+  useEffect(() => {
+    const wasDisabled = wasDisabledRef.current;
+    wasDisabledRef.current = isDisabled;
+
+    if (wasDisabled && !isDisabled) {
+      textareaRef.current?.focus();
+    }
+  }, [isDisabled]);
 
   const resizeTextarea = () => {
     const textarea = textareaRef.current;

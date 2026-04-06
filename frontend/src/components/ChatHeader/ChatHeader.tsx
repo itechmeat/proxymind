@@ -1,4 +1,4 @@
-import { Settings } from "lucide-react";
+import { LogOut, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 
@@ -6,26 +6,31 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { useAppTranslation } from "@/lib/i18n";
 import { getInitials } from "@/lib/identity";
-import { strings } from "@/lib/strings";
 
 import "./ChatHeader.css";
 
 interface ChatHeaderProps {
   adminMode?: boolean;
   avatarUrl?: string;
+  canOpenSettings?: boolean;
   name: string;
   onOpenSettings?: () => void;
+  onSignOut?: () => void;
 }
 
 export function ChatHeader({
   adminMode = false,
   avatarUrl,
+  canOpenSettings = adminMode,
   name,
   onOpenSettings,
+  onSignOut,
 }: ChatHeaderProps) {
   const { t } = useAppTranslation();
   const initials = getInitials(name);
   const [showAvatarImage, setShowAvatarImage] = useState(Boolean(avatarUrl));
+  const showSettingsButton = Boolean(canOpenSettings && onOpenSettings);
+  const showActions = adminMode || showSettingsButton || Boolean(onSignOut);
 
   useEffect(() => {
     setShowAvatarImage(Boolean(avatarUrl));
@@ -51,25 +56,35 @@ export function ChatHeader({
             ) : null}
           </Avatar>
           <div>
-            <p className="chat-header__status">{strings.headerStatus}</p>
+            <p className="chat-header__status">{t("common.chatStatus")}</p>
             <h1 className="chat-header__name">{name}</h1>
           </div>
         </div>
 
-        {adminMode ? (
+        {showActions ? (
           <div className="chat-header__actions">
-            <Button asChild type="button" variant="outline">
-              <Link to="/admin">{t("admin.link")}</Link>
-            </Button>
-            <Button
-              aria-label={strings.profileSettings}
-              onClick={onOpenSettings}
-              size="icon-sm"
-              type="button"
-              variant="outline"
-            >
-              <Settings size={18} />
-            </Button>
+            {adminMode ? (
+              <Button asChild type="button" variant="outline">
+                <Link to="/admin">{t("admin.link")}</Link>
+              </Button>
+            ) : null}
+            {onSignOut ? (
+              <Button onClick={onSignOut} type="button" variant="outline">
+                <LogOut size={16} />
+                {t("common.signOut")}
+              </Button>
+            ) : null}
+            {showSettingsButton ? (
+              <Button
+                aria-label={t("common.profileSettings")}
+                onClick={onOpenSettings}
+                size="icon-sm"
+                type="button"
+                variant="outline"
+              >
+                <Settings size={18} />
+              </Button>
+            ) : null}
           </div>
         ) : null}
       </div>
